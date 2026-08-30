@@ -1,8 +1,18 @@
+---
+title: Sillok 명세
+doc_type: other
+status: current
+module: null
+---
+
 # Sillok 명세
 
-버전: 0.1  
-날짜: 2026-08-30  
-상태: 설계 확정 / D1–D15 확정 / 구현 전
+상위: [plan.md](plan.md) · [README](../README.md)
+
+버전: 0.1 · 날짜: 2026-08-30 · 상태: 설계 확정 / 구현 전
+
+> 이 문서는 배경이다. 값이 [plan.md](plan.md)나
+> [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)와 다르면 그 둘이 이긴다.
 
 ## 문제
 
@@ -21,7 +31,7 @@
 - Git에는 *지금 무엇이 맞는가*만 남긴다.
 - Postgres에는 *언제 무엇이 일어났는가*와, Git 문서의 검색용 인덱스를 남긴다.
 - AI는 DB를 통째로 보지 않는다. 도구가 반환한 조각만 본다.
-- 사람은 프로젝트별 위키 보기와 통계를 본다.
+- 사람은 프로젝트별 문서 목록과 통계를 JSON 현황 API로 본다. 웹 UI는 v1 이후다 (D12).
 - 적재량이 늘어도 질의당 토큰은 거의 고정된다.
 
 ## 비목표 (v1)
@@ -50,21 +60,21 @@ Sillok의 이벤트 테이블이 기사 원장이고, Git 문서가 편찬된 �
 
 [3] 출구
       MCP  — AI의 손
-      Skill — 02-STORAGE-RULES.md (판단 기준)
+      Skill — skills/sillok-storage/SKILL.md (판단 기준)
       UI    — v1은 JSON 현황 API (같은 Service)
 ```
 
-Plugin은 특정 IDE 포장이다. v1에서 필수가 아니다.
+Plugin은 특정 IDE 포장이다. v1에서 만들지 않는다.
 
-n8n은 색인·배치 보조로 쓸 수 있다. AI 질의의 본체가 아니다.
+n8n은 색인·배치 보조로 쓸 수 있으나 v1에서는 만들지 않는다. AI 질의의 본체가 아니다.
 
 ## 저장 원칙 (요약)
 
-상세는 `02-STORAGE-RULES.md`.
+상세는 [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md).
 
 - 시간축이 있으면 이벤트, 현재형 규범이면 Git 문서.
 - 과정과 횟수는 DB, 결론만 Git.
-- 같은 원인이 반복되면 v1은 `repeat_causes` 통계만 낸다. Git 자동 승격 없음.
+- 같은 원인이 반복되면 v1은 `repeat_causes` 통계와 승격 *제안*까지만 한다. Git 자동 승격 없음.
 
 ## 토큰 전제
 
@@ -79,7 +89,8 @@ n8n은 색인·배치 보조로 쓸 수 있다. AI 질의의 본체가 아니다
 1. 필드 없는 이벤트가 저장되지 않는다.
 2. 이력 본문을 Git 문서에 이어 붙이는 경로가 없다.
 3. `search_docs` / `search_events` / `event_stats`가 같은 프로젝트에서 동작한다.
-4. 사람용 목록·타임라인·건수가 Service와 같은 데이터를 보여 준다.
+4. 사람용 건수를 `GET /v1/status`가 Service와 같은 데이터로 돌려준다.
+   목록·타임라인 엔드포인트는 아직 없다 → [open-questions.md](open-questions.md) Q13.
 5. 질의 로그에 hit_count=0 이 남는다.
 
 ## 1차 산출물
@@ -87,8 +98,8 @@ n8n은 색인·배치 보조로 쓸 수 있다. AI 질의의 본체가 아니다
 1. 스키마 마이그레이션
 2. Knowledge Service
 3. MCP 서버
-4. Skill 파일 (`02-STORAGE-RULES.md`를 프로젝트에 복사)
-5. 최소 현황 페이지 또는 JSON 현황 API
+4. Skill 파일 ([skills/sillok-storage/](skills/sillok-storage/)를 대상 프로젝트에 복사)
+5. JSON 현황 API (`GET /v1/status`). 웹 페이지는 v1 이후
 
 ## 명시적으로 미룸
 
