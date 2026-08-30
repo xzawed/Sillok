@@ -1,4 +1,16 @@
+---
+title: Sillok 데이터 모델
+doc_type: schema
+status: current
+module: null
+---
+
 # Sillok 데이터 모델
+
+상위: [plan.md](plan.md) · [README](../README.md)
+
+> 이 파일은 DDL과 컬럼 enum의 정본이다.
+> `vector(1536)`·모델 ID·확장 목록의 정본은 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)다.
 
 PostgreSQL 16+ , 확장: `vector`, `pg_trgm`.  
 임베딩: OpenAI `text-embedding-3-small`, **`vector(1536)` 확정**. 키 없으면 해당 행의 `embedding`은 NULL이고 키워드(`tsv`)만 검색한다.

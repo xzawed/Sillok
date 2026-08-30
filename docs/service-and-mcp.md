@@ -1,4 +1,17 @@
+---
+title: Sillok Service와 MCP 계약
+doc_type: api
+status: current
+module: null
+---
+
 # Sillok Service와 MCP 계약
+
+상위: [plan.md](plan.md) · [README](../README.md)
+
+> 이 파일은 엔드포인트·도구·요청/응답 JSON의 정본이다.
+> 주소·인증·`top_k`·색인 경로의 정본은 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)다.
+> 미해결 계약 구멍은 [open-questions.md](open-questions.md) C절.
 
 Knowledge Service가 DB의 유일한 문이다.  
 MCP와 사람용 UI는 이 HTTP API만 호출한다.
@@ -65,7 +78,7 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 
 `POST /v1/events`
 
-`02-STORAGE-RULES.md` 필수 필드. 실패 시 `VALIDATION`.
+[skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md)의 필수 6개 필드. 하나라도 없으면 `VALIDATION`.
 
 `POST /v1/docs/proposals`
 
@@ -125,10 +138,13 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 ## 프롬프트에 넣을 한 줄 (클라이언트)
 
 근거가 빈 배열이면 “Sillok에 없음”이라고 하고 추측하지 말 것.  
-Accepted/current 문서만 현재 규칙으로 쓴다.  
+`status: current` 문서만 현재 규칙으로 쓴다.  
 통계 숫자는 `event_stats`만 믿는다.
 
-## UI
+## UI — v1 비범위
+
+D12에 따라 v1에서 웹 페이지를 만들지 않는다. 아래는 v1 이후 UI가 생길 때의 최소 요건이며,
+v1에서는 같은 데이터를 `GET /v1/status`와 검색 API가 JSON으로 돌려주는 것으로 갈음한다.
 
 최소:
 
