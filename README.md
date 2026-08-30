@@ -46,6 +46,14 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
 
 계약을 바꾸려면 `docs/plan.md`와 `adr/0001-v1-stack-decisions.md`를 **먼저** 고치고 나서 하위 문서와 구현을 맞춘다.
 
+### 충돌 판정
+
+**파일 서열보다 사실 소유권이 먼저다.**
+두 문서가 같은 사실을 다르게 말하면, 위 문서 지도에서 **그 사실을 정본으로 소유한 파일이 이긴다.**
+
+소유자가 표에 없는 새 사실이면 위 서열로 판정하고, **그 사실의 소유자를 표에 추가한다.**
+서열만으로 판정하면 새 문서가 늘어날 때마다 서열을 다시 협상해야 한다.
+
 ## 정본 표기 규칙
 
 같은 값이 여러 문서에 나오면, 사본에는 반드시 정본 위치를 적는다.
@@ -59,6 +67,23 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
 
 Sillok의 색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
 이 저장소의 배치는 그 규칙을 그대로 따른다 — 즉 **Sillok의 첫 ingest 스모크 테스트는 이 저장소 자신을 대상으로 돌릴 수 있다.**
+
+## 검증
+
+```bash
+node scripts/check-layout.mjs
+```
+
+이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드가 없는 지금 유일하게 실행 가능한 검증이다.
+
+- D9 색인 대상(`docs/**`, 루트 `README*`, `adr/**`)에 걸리는 문서 목록과 `doc_type` 분포
+- `AGENTS.md`·`CLAUDE.md`가 **색인되지 않는지** — 색인 0건이 정상인지 버그인지 구분하려면 양방향을 다 봐야 한다
+- front matter 존재와 `doc_type`·`status` 값이 taxonomy 안에 있는지
+- 상대 링크 전부 해석되는지, 진입점에서 모든 문서에 도달하는지
+- 구 파일명 잔존 참조
+
+`sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
+[docs/plan.md](docs/plan.md) §9, [docs/open-questions.md](docs/open-questions.md) Q3.
 
 ## 상태
 
