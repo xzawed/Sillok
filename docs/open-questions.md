@@ -98,6 +98,11 @@ D4(설정된 workspace)와 D5(멀티 프로젝트)가 만나는 지점인데 설
 
 ## 문서 자체의 공백
 
+**Q25. 배포된 Skill 사본이 낡았는지 탐지할 방법이 없다.**
+[skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md)는 다른 레포로 물리 복제된다. 이 PR에서 원본 위치와 기준일을 헤더에 넣었으나, **사본이 자기가 낡았음을 스스로 확인할 경로는 없다.**
+대상 레포는 이 저장소의 검증 밖이므로 `check-layout.mjs`도 닿지 않는다.
+제안(미결정): Service가 Skill 본문을 서빙하고(`GET /v1/skill`) `kb_status` 응답에 `skill_version`을 포함시켜 사본이 대조하게 한다. 새 엔드포인트라 결정이 필요하다.
+
 **Q24. D1–D15의 선택지 정의가 유실됐다.**
 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)는 `A`/`B`/`C` 라벨을 15회 쓰는데, **그 선택지가 무엇이었는지는 어느 문서에도 없다.**
 `D6=C`, `D9=B`, `D14=C`처럼 비-A 선택이 있으므로 최소 3개 안이 있었으나 복원 불가다.
