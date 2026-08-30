@@ -15,11 +15,12 @@ const STATUSES = ['current', 'draft', 'superseded', 'stale']
 // D9 색인 대상. 값을 바꾸려면 adr/0001-v1-stack-decisions.md 를 먼저 고친다.
 const INCLUDE = [
   (p) => p.startsWith('docs/'),
-  (p) => /^README[^/]*\.md$/.test(p),
+  (p) => /^README[^/]*$/i.test(p),   // D9 는 확장자·대소문자를 가리지 않는다
   (p) => p.startsWith('adr/'),
 ]
 // 색인되면 안 되는 것. 에이전트 도구 설정이지 프로젝트 지식이 아니다.
 const MUST_EXCLUDE = ['AGENTS.md', 'CLAUDE.md']
+const basename = (p) => p.slice(p.lastIndexOf('/') + 1)
 
 const problems = []
 const fail = (m) => problems.push(m)
@@ -43,8 +44,11 @@ if (indexed.length === 0) fail('색인 대상이 0개다. D9 패턴에 걸리는
 
 // 2. 색인되면 안 되는 파일이 걸리지 않는가
 for (const x of MUST_EXCLUDE) {
-  if (indexed.includes(x)) fail(`${x} 는 색인 대상이 아니어야 하는데 D9 패턴에 걸렸다.`)
   if (!existsSync(join(ROOT, x))) fail(`${x} 가 없다.`)
+  // 경로가 어디든, 이름이 같으면 색인되면 안 된다 (docs/CLAUDE.md 같은 사본 포함)
+  for (const p of indexed) {
+    if (basename(p) === x) fail(`${p} 는 색인 대상이 아니어야 하는데 D9 패턴에 걸렸다.`)
+  }
 }
 
 // 3. 색인 대상 전부 front matter 를 갖고 값이 taxonomy 안에 있는가
@@ -55,9 +59,10 @@ for (const p of indexed) {
   if (!m) { fail(`${p} : front matter 없음`); continue }
   const fm = Object.fromEntries(
     m[1].split(/\r?\n/).filter((l) => l.includes(':'))
-      .map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).trim()])
+      .map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).replace(/s+#.*$/, '').trim()])
   )
   for (const k of ['title', 'doc_type', 'status']) if (!fm[k]) fail(`${p} : front matter 에 ${k} 없음`)
+  if (!('module' in fm)) fail(`${p} : front matter 에 module 키 없음 (값은 null 가능)`)
   if (fm.doc_type && !DOC_TYPES.includes(fm.doc_type)) fail(`${p} : doc_type "${fm.doc_type}" 이 taxonomy 밖 (${DOC_TYPES.join('|')})`)
   if (fm.status && !STATUSES.includes(fm.status)) fail(`${p} : status "${fm.status}" 가 enum 밖 (${STATUSES.join('|')})`)
   if (fm.doc_type) seen.doc_type[fm.doc_type] = (seen.doc_type[fm.doc_type] || 0) + 1
@@ -78,9 +83,10 @@ for (const p of md) {
   }
 }
 
-// 5. 진입점에서 모든 색인 문서에 도달하는가 (1홉 이상)
+// 5. 진입점에서 모든 색인 문서에 도달하는가 (고정점까지 확장)
 const reach = new Set(['README.md'])
-for (let i = 0; i < 5; i++) {
+for (let n = -1; n !== reach.size;) {
+  n = reach.size
   for (const p of [...reach]) {
     if (!p.endsWith('.md') || !existsSync(join(ROOT, p))) continue
     const s = readFileSync(join(ROOT, p), 'utf8')
@@ -101,6 +107,28 @@ for (const p of md) {
   const s = readFileSync(join(ROOT, p), 'utf8')
   for (const k of ['00-README', '01-SPEC', '02-STORAGE-RULES', '03-DATA-MODEL', '04-SERVICE-AND-MCP', '05-OPEN-DECISIONS']) {
     if (s.includes(k)) fail(`${p} : 구 파일명 "${k}" 잔존 참조`)
+  }
+}
+
+// 7. 존재하지 않는 Q 번호를 가리키는 참조가 없는가.
+//    전체 집합을 "Q1-QN" 으로 인용하면 Q 를 추가할 때마다 조용히 낡으므로,
+//    전체 인용은 문서에서 없앴다. 남은 것은 Q1-Q5 같은 안정적인 부분집합 참조뿐이며
+//    여기서는 그것들이 실재하는 Q 를 가리키는지만 본다.
+const oqPath = 'docs/open-questions.md'
+if (existsSync(join(ROOT, oqPath))) {
+  const oq = readFileSync(join(ROOT, oqPath), 'utf8')
+  const defined = new Set([...oq.matchAll(/\*\*Q(\d+)\./g)].map((m) => Number(m[1])))
+  if (defined.size === 0) fail(`${oqPath} : Q 항목을 하나도 찾지 못했다.`)
+  else {
+    const maxQ = Math.max(...defined)
+    for (let i = 1; i <= maxQ; i++) if (!defined.has(i)) fail(`${oqPath} : Q${i} 이 빠져 번호가 연속되지 않는다.`)
+    for (const p of md) {
+      const body = readFileSync(join(ROOT, p), 'utf8')
+      for (const m of body.matchAll(/\bQ(\d+)\b/g)) {
+        const n = Number(m[1])
+        if (!defined.has(n)) fail(`${p} : 존재하지 않는 ${m[0]} 을 참조한다 (${oqPath} 는 Q1..Q${maxQ}).`)
+      }
+    }
   }
 }
 
