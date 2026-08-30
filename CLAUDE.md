@@ -22,6 +22,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
 - ADR의 D1–D15는 2026-08-30 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
+- **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [README.md](README.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
 
 ### 아직 답이 없는 것
 
@@ -132,6 +133,15 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 - 이벤트 임베딩은 `summary`만
 - 재색인은 `(project, repo, path)` 단위로 청크 삭제 후 insert
 - 검색 0건도 `kb_query_logs`에 `hit_count=0`으로 남긴다 (v1 성공 조건)
+
+## 검증 명령
+
+```bash
+node scripts/check-layout.mjs
+```
+
+코드가 없으므로 빌드·테스트는 없지만 **이 검사는 있다.** 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
+D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 링크 해석, 진입점 도달성, 구 파일명 잔존을 검사하고 실패 시 종료 코드 1.
 
 ## 이 저장소의 규약
 
