@@ -30,7 +30,7 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 | [docs/data-model.md](docs/data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
 | [docs/service-and-mcp.md](docs/service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
-| [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 Q1–Q23 |
+| [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 Q1–Q24 |
 | [AGENTS.md](AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위 |
 | [CLAUDE.md](CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
 
