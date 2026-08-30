@@ -59,7 +59,7 @@ for (const p of indexed) {
   if (!m) { fail(`${p} : front matter 없음`); continue }
   const fm = Object.fromEntries(
     m[1].split(/\r?\n/).filter((l) => l.includes(':'))
-      .map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).replace(/s+#.*$/, '').trim()])
+      .map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).replace(/\s+#.*$/, '').trim()])
   )
   for (const k of ['title', 'doc_type', 'status']) if (!fm[k]) fail(`${p} : front matter 에 ${k} 없음`)
   if (!('module' in fm)) fail(`${p} : front matter 에 module 키 없음 (값은 null 가능)`)
