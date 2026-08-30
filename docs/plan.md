@@ -18,8 +18,13 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
         >  spec.md, data-model.md, service-and-mcp.md, skills/**
 ```
 
-**하위 문서가 이 파일과 충돌하면, 이 파일과 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)가 이긴다.**
-계약을 바꾸려면 그 둘을 먼저 고치고 나서 하위 문서와 구현을 맞춘다.
+**충돌 판정은 두 단계다.**
+
+1. **사실 소유권이 먼저다.** [README](../README.md)의 문서 지도에서 그 사실을 정본으로 소유한 파일이 이긴다.
+2. **소유자가 지도에 없으면** 위 서열로 판정하고 — 이 파일과 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)가 이긴다 — 판정 후 **그 사실의 소유자를 문서 지도에 추가한다.**
+
+서열만으로 판정하면 문서가 늘 때마다 서열을 다시 협상해야 한다.
+계약을 바꾸려면 이 파일과 ADR을 먼저 고치고 나서 하위 문서와 구현을 맞춘다.
 
 | 하위 문서 | 소유 |
 |---|---|

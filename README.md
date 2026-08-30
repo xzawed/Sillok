@@ -30,7 +30,7 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 | [docs/data-model.md](docs/data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
 | [docs/service-and-mcp.md](docs/service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
-| [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 Q1–Q24 |
+| [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 전체 |
 | [AGENTS.md](AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위 |
 | [CLAUDE.md](CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
 
@@ -46,6 +46,14 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
 
 계약을 바꾸려면 `docs/plan.md`와 `adr/0001-v1-stack-decisions.md`를 **먼저** 고치고 나서 하위 문서와 구현을 맞춘다.
 
+### 충돌 판정
+
+**파일 서열보다 사실 소유권이 먼저다.**
+두 문서가 같은 사실을 다르게 말하면, 위 문서 지도에서 **그 사실을 정본으로 소유한 파일이 이긴다.**
+
+소유자가 표에 없는 새 사실이면 위 서열로 판정하고, **그 사실의 소유자를 표에 추가한다.**
+서열만으로 판정하면 새 문서가 늘어날 때마다 서열을 다시 협상해야 한다.
+
 ## 정본 표기 규칙
 
 같은 값이 여러 문서에 나오면, 사본에는 반드시 정본 위치를 적는다.
@@ -59,6 +67,23 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
 
 Sillok의 색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
 이 저장소의 배치는 그 규칙을 그대로 따른다 — 즉 **Sillok의 첫 ingest 스모크 테스트는 이 저장소 자신을 대상으로 돌릴 수 있다.**
+
+## 검증
+
+```bash
+node scripts/check-layout.mjs
+```
+
+이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드가 없는 지금 유일하게 실행 가능한 검증이다.
+
+- D9 색인 대상(`docs/**`, 루트 `README*`, `adr/**`)에 걸리는 문서 목록과 `doc_type` 분포
+- `AGENTS.md`·`CLAUDE.md`가 **색인되지 않는지** — 색인 0건이 정상인지 버그인지 구분하려면 양방향을 다 봐야 한다
+- front matter 존재와 `doc_type`·`status` 값이 taxonomy 안에 있는지
+- 상대 링크 전부 해석되는지, 진입점에서 모든 문서에 도달하는지
+- 구 파일명 잔존 참조
+
+`sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
+[docs/plan.md](docs/plan.md) §9, [docs/open-questions.md](docs/open-questions.md) Q3.
 
 ## 상태
 

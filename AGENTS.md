@@ -25,6 +25,10 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 그 다음 하위 문서([spec](docs/spec.md), [data-model](docs/data-model.md), [service-and-mcp](docs/service-and-mcp.md), [SKILL](docs/skills/sillok-storage/SKILL.md))와 구현을 맞춘다.
 
 같은 값이 여러 문서에 있으면 사본에 정본 위치를 적는다. 어긋나면 정본이 이긴다.
+**충돌 판정은 파일 서열보다 사실 소유권이 먼저다** — [README.md](README.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
+소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 그 사실의 소유자를 지도에 추가한다.
+
+문서를 옮기거나 링크를 고쳤으면 `node scripts/check-layout.mjs` 를 돌린다. 실패하면 머지하지 않는다.
 
 ## 하지 말 것
 
