@@ -1,4 +1,17 @@
+---
+name: sillok-storage
+title: Sillok Skill — 저장 위치 규칙
+doc_type: other
+status: current
+module: null
+---
+
 # Sillok Skill — 저장 위치 규칙
+
+> **배포용 산출물.** 이 폴더를 대상 프로젝트로 복사해서 쓴다.
+> 원본: `Sillok:docs/skills/sillok-storage/SKILL.md` · 기준일 2026-08-30
+> 사본을 고치지 말고 원본을 고친 뒤 다시 복사한다.
+> 상위 계약: `Sillok:docs/plan.md` §4
 
 AI가 프로젝트 운영 중 생성·정리한 글을 어디에 둘지 이 파일만 따른다.  
 감으로 분류하지 않는다.
@@ -95,7 +108,7 @@ AI가 프로젝트 운영 중 생성·정리한 글을 어디에 둘지 이 파�
 
 Service가 거절해야 하는 입력:
 
-- 이벤트인데 `result` 또는 `occurred_at` 없음
+- 이벤트인데 필수 6개 (`project`, `kind`, `title`, `summary`, `occurred_at`, `result`) 중 하나라도 없음
 - Git 후보인데 본문에 날짜별 시도가 3건 이상
 - `kind`가 허용 값이 아님
 - `summary`가 비었거나 2000자를 넘음
