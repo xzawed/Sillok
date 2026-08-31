@@ -189,7 +189,7 @@ A절(Q1–Q5)은 **D16–D20으로**, Q11은 **D21로** 마감됐다 (2026-08-31
 
 이 저장소 자신이 색인 경로 규칙을 따르므로, **첫 ingest 스모크는 이 레포를 대상으로 돌린다.**
 
-판정에 쓰는 명령 (D18):
+**v1이 끝났을 때** 판정에 쓰는 명령 (D18):
 
 ```bash
 node scripts/check-layout.mjs
@@ -198,6 +198,10 @@ docker compose exec api sillok ingest --project sillok
 curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
 uv run pytest -q
 ```
+
+> **지금은 가운데 두 줄이 돌지 않는다.** `sillok ingest`는 5단계, `/v1/status`는 4단계에서 생긴다.
+> 오늘 돌릴 수 있는 것은 1·2·5번째 줄뿐이고, 5번째는 커밋된 구성에서 `71 passed, 19 skipped`가 정상이다 (Q26).
+> 이 블록은 **목표**이지 현재 상태가 아니다.
 
 `sillok ingest`는 `serve`가 떠 있지 않아도 도는 것이 D19의 요점이다.
 위 명령이 `exec api`를 쓰는 것은 Compose 안에서 워크스페이스와 DSN이 이미 맞춰져 있기 때문이지, HTTP를 타서가 아니다.
