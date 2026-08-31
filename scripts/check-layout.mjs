@@ -323,8 +323,9 @@ const NUMBER_CLAIMS = [
   [/\d+\s*(tests?\s*)?passed/, 'N passed'],
   [/\d+\s*(tests?\s*)?skipped/, 'N skipped'],
   [/skip\s*0\b/, 'skip 0'],
-  // "3종 통과" 같은 표현도 잡는다. 다만 "배치 검증 통과" 처럼 숫자 없는 통과는 건드리지 않는다.
-  [/\d+\s*(개|건|종|tests?)?\s*통과/, 'N 통과'],
+  // 단위를 **필수**로 둔다. 선택으로 두면 "단계 2 통과", "2026-08-31 통과", "Q26 통과" 까지 잡는다.
+  // 대신 단위 없는 "114 통과" 는 빠져나간다 — 이건 부분 문자열 목록이지 증명이 아니다 (AGENTS).
+  [/\d+\s*(개|건|종|tests?)\s*통과/, 'N종 통과'],
   [/주입\s*\d+\s*종/, '주입 N종'],
 ]
 for (const p of md) {
@@ -359,7 +360,9 @@ const textish = all.filter(
 )
 for (const p of textish) {
   // 문서에서는 폐기된 문구를 **인용**할 수 있어야 한다 — 왜 폐기했는지 적으려면 그 말을 써야 한다.
-  // 검사 8·10 과 같은 규칙으로 코드 스팬을 제외한다. 코드 파일은 그대로 본다(마크다운이 아니다).
+  // 검사 8·10 과 같은 규칙으로 코드 스팬 **과 코드 블록**을 제외한다.
+  // 즉 펜스 안에 넣으면 잡히지 않는다. 옛 설정을 예시로 보여 주려면 그렇게 한다.
+  // 코드 파일(.py 등)은 마크다운이 아니므로 그대로 본다.
   const raw = readFileSync(join(ROOT, p), 'utf8')
   const s = p.endsWith('.md') ? stripCode(raw).prose : raw
   for (const [phrase, why] of RETIRED) {
