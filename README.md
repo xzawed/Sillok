@@ -110,7 +110,9 @@ uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
   그 문장을 고치면 검사가 따라온다 — 같은 사실을 두 곳에 적지 않는다.
   §7에서 절이 사라지거나 파싱되지 않으면 그 자체를 실패로 본다(게이트가 조용히 비는 것을 막는다).
   **한계:** 경로가 **문자열 리터럴**일 때만 본다. 데코레이터·`add_api_route`·`mount`·`include_router`와
-  라우터 `prefix` 조합까지는 잡지만, 변수나 f-string으로 만든 경로는 못 잡는다
+  라우터 `prefix` 조합까지는 잡지만, 변수나 f-string으로 만든 경로는 못 잡는다.
+  `prefix`는 **같은 파일 안에서만** 합쳐 보므로, 라우터를 여러 모듈로 쪼개면 놓친다 —
+  지금은 `api.py` 하나라 성립하고, 쪼갤 때 이 검사를 함께 넓힌다
 
 `sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
 [docs/plan.md](docs/plan.md) §7 5단계·§9. 그 전에 [docs/open-questions.md](docs/open-questions.md) Q6(ingest 결정성)이 답해져야 한다.
