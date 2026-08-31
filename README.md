@@ -10,7 +10,7 @@ module: null
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-5A45FF)](https://modelcontextprotocol.io/)
+[![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
 [![docs-first](https://img.shields.io/badge/docs--first-계약이_코드를_이긴다-2E7D32)](docs/plan.md)
 
@@ -40,6 +40,8 @@ Sillok은 RAG 플랫폼이 아니다. **위키가 로그가 되지 않게 저장
 [3] 출구                    MCP 도구 8개 · Skill · JSON 현황 API
 ```
 
+**이건 설계다.** [1]과 [2]는 서 있고 [3]은 JSON API만 있다 — 무엇이 실제로 도는지는 [아래 표](#지금-되는-것--아직-아닌-것)에.
+
 ## 빠른 시작
 
 ```bash
@@ -64,7 +66,21 @@ curl -s -X POST http://127.0.0.1:8080/v1/events \
   "message": "missing required field: kind, title, summary, occurred_at, result" } }
 ```
 
-여섯 개를 다 채우면 저장된다.
+여섯 개를 다 채우면 저장된다. 같은 원인을 `auth`에 두 번, `billing`에 두 번 남겨 본다.
+
+```bash
+for m in auth auth billing billing; do
+  curl -s -X POST http://127.0.0.1:8080/v1/events \
+    -H 'Content-Type: application/json' \
+    -d "{\"project\":\"demo\",\"kind\":\"failure\",
+         \"title\":\"pool exhausted after deploy\",
+         \"summary\":\"connection pool ran out\",
+         \"occurred_at\":\"2026-08-31T09:00:00Z\",
+         \"resolved_at\":\"2026-08-31T10:00:00Z\",
+         \"result\":\"failure\",\"module\":\"$m\",
+         \"root_cause\":\"pool exhausted\"}"
+done
+```
 
 ```json
 { "ok": true, "data": { "id": 1 } }
@@ -74,8 +90,8 @@ curl -s -X POST http://127.0.0.1:8080/v1/events \
 
 ### 반복 원인은 모듈까지 갈라서 센다
 
-같은 `root_cause`라도 모듈이 다르면 다른 반복이다. `auth`와 `billing`에서 각각 두 번씩 난 일을
-한 줄로 합치면 **있지도 않은 네 번의 반복**을 보고하게 된다.
+같은 `root_cause`라도 모듈이 다르면 다른 반복이다. 한 줄로 합치면
+`auth` 두 번과 `billing` 두 번이 **있지도 않은 네 번의 반복**으로 보고된다.
 
 ```bash
 curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
@@ -84,8 +100,9 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 ```json
 { "ok": true, "data": {
   "total": 4,
-  "by_kind": { "failure": 4 },
-  "by_module": { "auth": 2, "billing": 2 },
+  "by_kind":   { "failure": 4 },
+  "by_result": { "failure": 4 },
+  "by_module": { "billing": 2, "auth": 2 },
   "repeat_causes": [
     { "module": "auth",    "root_cause": "pool exhausted", "count": 2 },
     { "module": "billing", "root_cause": "pool exhausted", "count": 2 }
@@ -208,15 +225,16 @@ node scripts/evidence.mjs   # PR 증거 4종을 한 번에. 하나라도 못 돌
 <details>
 <summary><b>Docker 빌드가 DNS로 실패한다면</b></summary>
 
-런타임 컨테이너는 프록시가 자동으로 붙지만 빌드 샌드박스는 아닌 환경이 있다. 그럴 때만:
+런타임 컨테이너에는 프록시가 자동으로 붙지만 **빌드 샌드박스에는 붙지 않는** 환경이 있다.
+그럴 때만 쓰는 환경의 프록시 주소를 빌드에 넘긴다.
 
 ```bash
 docker compose build \
-  --build-arg HTTP_PROXY=http://http.docker.internal:3128 \
-  --build-arg HTTPS_PROXY=http://http.docker.internal:3128 api
+  --build-arg HTTP_PROXY="$HTTP_PROXY" \
+  --build-arg HTTPS_PROXY="$HTTPS_PROXY" api
 ```
 
-환경 문제이므로 이미지에 굽지 않는다.
+환경 문제이므로 **이미지에 굽지 않는다.**
 
 </details>
 
@@ -241,8 +259,8 @@ docker compose build \
 
 - 이름: **Sillok**(실록) — 확정
 - 확정 결정 **D1–D26** → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
-- 스택: Python 3.12 · uv · pytest · FastAPI · PostgreSQL 16 + pgvector ·
-  OpenAI `text-embedding-3-small`(1536) · Docker Compose · MCP stdio + HTTP
+- 스택: Python 3.12 · uv · pytest · FastAPI · PostgreSQL 16 + pgvector · Docker Compose
+- **결정만 되어 있고 아직 안 붙은 것**: OpenAI `text-embedding-3-small`(1536) · MCP stdio + HTTP
 - **키가 없어도 돈다** — `embedding`은 NULL이고 `tsv` 키워드 검색만 동작한다 (D2)
 - 다음: 색인(§7 5단계). 그 전에 [docs/open-questions.md](docs/open-questions.md)의 Q6·Q7·Q10을 답해야 한다
 - SCAManager 연동 · 전사 검색 · 웹 UI: **비범위**
