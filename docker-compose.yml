@@ -1,8 +1,7 @@
 # Sillok 로컬 스택 (D13: Postgres + Service 두 개)
 #
 # 정본: adr/0001-v1-stack-decisions.md — 값이 다르면 정본이 이긴다.
-# 작업 순서: docs/plan.md §7. 지금은 1단계이므로 db 만 있다.
-#   api 서비스는 3단계(FastAPI 골격)에서 이 파일에 추가한다.
+# 작업 순서: docs/plan.md §7. db 는 1단계, api 는 3단계에서 붙었다.
 #
 # 5432 를 호스트에 게시하지 않는다 (D16). 디버깅으로 호스트에서 붙어야 하면
 # compose.override.example.yml 를 compose.override.yml 로 복사해서 쓴다.
@@ -32,6 +31,51 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # D16. 컨테이너 안에서는 호스트가 db 이고 bind 는 0.0.0.0 이어야
+      # 호스트의 127.0.0.1:8080 에 닿는다.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sillok}:${POSTGRES_PASSWORD:-sillok}@db:5432/${POSTGRES_DB:-sillok}
+      SILLOK_HOST: 0.0.0.0
+      SILLOK_PORT: 8080
+      SILLOK_WORKSPACE: /workspace
+      SILLOK_BEARER_TOKEN: ${SILLOK_BEARER_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      # 8080 은 게시한다. 이것이 Service 의 문이다 (D16 이 막는 것은 5432 다).
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # get_file 은 7단계지만 workspace 계약은 D16 이 이미 정했다. 읽기 전용.
+      - .:/workspace:ro
+    healthcheck:
+      # 포트가 열렸는지가 아니라 **공통 봉투로 답하는지**를 본다.
+      # 업무 라우트가 없으므로 없는 경로의 404 봉투가 지금의 유일한 증거다.
+      # 4단계에서 GET /v1/status 가 생기면 그쪽으로 옮긴다.
+      #
+      # SILLOK_BEARER_TOKEN 이 설정되면 D7 게이트가 켜진다. 검사도 토큰을 보내야 한다 —
+      # 안 보내면 자기 게이트에 401 로 막혀 컨테이너가 영원히 unhealthy 가 되고
+      # up --wait 이 실패한다 (실측으로 확인).
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import http.client as h,os,sys;
+          t=os.environ.get('SILLOK_BEARER_TOKEN','');
+          c=h.HTTPConnection('127.0.0.1',8080,timeout=3);
+          c.request('GET','/',headers={'Authorization':'Bearer '+t} if t else {});
+          r=c.getresponse();
+          sys.exit(0 if r.status==404 and b'NOT_FOUND' in r.read() else 1)
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

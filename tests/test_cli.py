@@ -36,5 +36,16 @@ def test_command_is_required():
 
 def test_unknown_command_is_rejected():
     with pytest.raises(SystemExit) as exc:
-        cli.main(["serve"])  # D8 의 명령이지만 3단계 전까지는 없다
+        cli.main(["ingest"])  # D8 의 명령이지만 5단계 전까지는 없다
     assert exc.value.code != 0
+
+
+def test_registered_commands_are_exactly_the_implemented_ones():
+    """구현되지 않은 명령을 파서에 미리 만들어 두지 않는다.
+
+    이 검사가 없으면 serve 처럼 새 명령이 생겼을 때 옛 테스트가 실제로
+    그 명령을 실행해 버린다 — 실제로 그렇게 매달렸다.
+    """
+    parser = cli._build_parser()
+    actions = [a for a in parser._actions if a.dest == "command"]
+    assert sorted(actions[0].choices) == ["migrate", "serve"]
