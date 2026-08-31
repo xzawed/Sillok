@@ -132,6 +132,21 @@ if (existsSync(join(ROOT, oqPath))) {
   }
 }
 
+// 8. 머지되면 의미를 잃는 지시어.
+//    diff 안에서만 해석되는 말은 머지된 뒤 어느 변경인지 가리키지 못한다.
+//    실제 사고: Q25 는 #2 에서 작성되며 "이 PR" 이라 썼는데 그 작업은 #1(bfc047c) 의 것이었다.
+//    머지 후에도 유효한 참조(커밋 해시, 날짜, PR 번호)로 고정한다.
+//    코드 스팬·코드 블록은 제외한다. 규칙 자체를 인용하려면 그 표현을 적어야 하고,
+//    백틱으로 감싼 인용까지 잡으면 이 검사를 문서화하는 순간 자기 자신을 잡는다.
+const DEICTIC = ['이 PR', '이번 PR', '본 PR', '해당 PR', '이 커밋', '이번 커밋', '이 변경에서', '이 브랜치에서']
+const stripCode = (s) => s.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+for (const p of md) {
+  const prose = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  for (const d of DEICTIC) {
+    if (prose.includes(d)) fail(`${p} : 머지 후 의미를 잃는 지시어 "${d}" — 커밋 해시·날짜·PR 번호로 고정한다.`)
+  }
+}
+
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
