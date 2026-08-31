@@ -112,10 +112,13 @@ const CASES = [
 
   // --- 검사 9: Q 게이트 ---
   {
-    id: '09 4단계 라우트',
+    // 케이스는 **아직 막혀 있는** 단계의 표면을 써야 한다.
+    // 4단계(Q16·Q18·Q21)가 D23–D25로 닫히면서 /v1/status 는 더 이상 막히지 않는다.
+    // 게이트가 문서를 따라간다는 증거이기도 하다.
+    id: '09 7단계 라우트',
     expect: 'fail',
-    mentions: ['4단계', 'Q16', 'Q18', 'Q21'],
-    mutate: write('src/sillok/_probe.py', '@app.get("/v1/status")\ndef s(): pass\n'),
+    mentions: ['7단계', 'Q12', 'Q15', 'Q19', 'Q20'],
+    mutate: write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n'),
   },
   {
     id: '10 6단계 라우트',
@@ -138,26 +141,26 @@ const CASES = [
   {
     id: '13 APIRouter(prefix) + 상대 경로',
     expect: 'fail',
-    mentions: ['4단계', '/v1/status'],
+    mentions: ['7단계', '/v1/files'],
     mutate: write(
       'src/sillok/_probe.py',
-      'router = APIRouter(prefix="/v1")\n\n@router.get("/status")\ndef s(): pass\n'
+      'router = APIRouter(prefix="/v1")\n\n@router.get("/files")\ndef s(): pass\n'
     ),
   },
   {
     id: '14 include_router(prefix=) + 상대 경로',
     expect: 'fail',
-    mentions: ['4단계', '/v1/events'],
+    mentions: ['5단계', '/v1/ingest'],
     mutate: write(
       'src/sillok/_probe.py',
-      'app.include_router(r, prefix="/v1")\n\n@r.post("/events")\ndef s(): pass\n'
+      'app.include_router(r, prefix="/v1")\n\n@r.post("/ingest")\ndef s(): pass\n'
     ),
   },
   {
     id: '15 path= 키워드 인자',
     expect: 'fail',
-    mentions: ['4단계', '/v1/stats/events'],
-    mutate: write('src/sillok/_probe.py', '@app.get(path="/v1/stats/events")\ndef s(): pass\n'),
+    mentions: ['6단계', '/v1/search/events'],
+    mutate: write('src/sillok/_probe.py', '@app.get(path="/v1/search/events")\ndef s(): pass\n'),
   },
   {
     id: '16 add_api_route',
@@ -170,16 +173,16 @@ const CASES = [
     expect: 'pass',
     mutate: write(
       'src/sillok/_probe.py',
-      '# 4단계에서 @app.get("/v1/status") 를 붙인다\nX = "/v1/events"\n'
+      '# 7단계에서 @app.get("/v1/files") 를 붙인다\nX = "/v1/ingest"\n'
     ),
   },
   {
     id: '18 Q 를 닫으면 같은 라우트가 통과한다',
     expect: 'pass',
     mutate: (dir) => {
-      write('src/sillok/_probe.py', '@app.get("/v1/status")\ndef s(): pass\n')(dir)
+      write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n')(dir)
       edit(dir, 'docs/open-questions.md', (s) => {
-        for (const q of [16, 18, 21]) {
+        for (const q of [12, 15, 19, 20]) {
           s = s.replace(new RegExp(`(\\*\\*Q${q}\\.[^\\n]*)`), '$1 — **해결 → D99**')
         }
         return s
