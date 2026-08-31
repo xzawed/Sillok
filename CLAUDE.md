@@ -75,7 +75,7 @@ Sillok은 RAG 플랫폼이 아니라 **저장 위치를 강제하는 지식 원�
 
 ```text
 Postgres          kb_documents, kb_chunks, kb_events, kb_ingest_runs, kb_query_logs
-Knowledge Service FastAPI — DB를 만지는 유일한 문
+Knowledge Service FastAPI — DB를 만지는 유일한 문 (단위는 함수지 HTTP가 아니다, D19)
 출구              MCP 도구 8개 + Skill + JSON 현황 API
 ```
 
