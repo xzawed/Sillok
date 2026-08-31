@@ -1,0 +1,18 @@
+# 호스트에서 DB 에 직접 붙어야 할 때만 쓴다.
+#
+#   cp compose.override.example.yml compose.override.yml
+#
+# compose.override.yml 은 .gitignore 에 있다. 커밋하지 않는다.
+#
+# 왜 기본 compose 에 없는가: D16 이 5432 미게시를 정했다. Compose 위생이지
+# D19 가 강제하는 것은 아니지만, 열어 두면 사람이 psql 로 들어오는 길이 상시 열린다.
+#
+# 3단계에서 api 서비스가 생기면 색인·마이그레이션은
+#   docker compose exec api sillok ingest ...
+# 로 컨테이너 안에서 부르므로 이 오버라이드가 필요 없어진다 (docs/plan.md §9).
+
+services:
+  db:
+    ports:
+      # 127.0.0.1 에만 바인딩한다. 0.0.0.0 으로 열지 않는다.
+      - "127.0.0.1:5432:5432"
