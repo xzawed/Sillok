@@ -5,11 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 이 저장소의 성격
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
-[docs/plan.md](docs/plan.md) §7의 **1–3단계까지 구현돼 있고 4단계부터는 아직 없다.**
+[docs/plan.md](docs/plan.md) §7의 **1–4단계까지 구현돼 있고 5단계부터는 아직 없다.**
 (진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
 `src/sillok/`(config · migrations 러너 · api 골격 · CLI `migrate`/`serve`), `tests/`.
-**업무 라우트는 하나도 없다** — `/v1/status` 같은 경로는 정직하게 404다. 스텁을 만들지 않는다.
+**업무 라우트는 4단계의 셋뿐이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status`.
+검색·ingest·`get_file`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
 없는 것: 8개 도구의 실제 구현, MCP, ingest, 검색 — 순서대로 붙인다.
 
 저장소 지도는 [README.md](README.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
@@ -35,8 +36,9 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 [docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
 추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D22 이후로 기록한다.
 
-A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**로 마감됐다 — 작업 순서 1–3단계를 이제 검증할 수 있다.
-남은 것이 단계별로 막는다: **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
+A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**로 마감됐다 —
+작업 순서 1–4단계를 이제 검증할 수 있다.
+남은 것이 단계별로 막는다: **5단계 전에 Q6·Q7·Q10**,
 6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17.
 
 ## 핵심 불변식
@@ -160,8 +162,9 @@ uv run pytest -q                       # 호스트. DB 검사는 skip 된다
 docker compose --profile test run --rm test   # DB 검사까지 (D22)
 ```
 
-**호스트에서는 `71 passed, 19 skipped`가 정상이다.** `skip 0`은 D16이 막은 `5432`를
+**호스트에서는 skip이 나오는 것이 정상이다.** `skip 0`은 D16이 막은 `5432`를
 게시했다는 신호이지 더 나은 결과가 아니다 — 보고할 때 skip 개수를 빼지 않는다.
+개수는 문서에 적지 않는다. 적으면 검사가 늘 때마다 낡는다.
 DB 검사까지 돌리려면 `docker compose --profile test run --rm test` (D22, `5432`는 닫힌 채).
 호스트에서 DB에 붙어야 하면(`pytest`의 DB 검사, `sillok migrate`)
 `compose.override.example.yml`을 `compose.override.yml`로 복사한다.
