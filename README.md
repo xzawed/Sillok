@@ -25,7 +25,7 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 | 경로 | 역할 | `doc_type` | 이 문서가 **정본**으로 소유하는 것 |
 |---|---|---|---|
 | [docs/plan.md](docs/plan.md) | 구현 계약. 진입 문서 | `other` | 작업 순서, v1 완료 조건, 금지 목록 |
-| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 확정 결정 D1–D15 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위) |
+| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 확정 결정 D1–D20 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위) |
 | [docs/spec.md](docs/spec.md) | 문제·목표·비목표·세 층 | `other` | 세 층 구조, 비목표, 은유 |
 | [docs/data-model.md](docs/data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
 | [docs/service-and-mcp.md](docs/service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON |
@@ -33,6 +33,7 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 | [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 전체 |
 | [AGENTS.md](AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위 |
 | [CLAUDE.md](CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
+| [.env.example](.env.example) | 환경변수 계약 사본 (D16) | *(색인 안 함)* | 없음 — 정본은 ADR §D16 |
 
 `AGENTS.md`와 `CLAUDE.md`는 **에이전트 도구 설정**이지 프로젝트 지식이 아니다.
 그래서 의도적으로 색인 경로(`docs/**`, 루트 `README*`, `adr/**`) 밖에 둔다.
@@ -86,12 +87,13 @@ node scripts/check-layout.mjs
 - 닫히지 않은 코드 펜스 — 열린 펜스가 뒤 본문을 코드로 먹어 위 검사를 무력화하는 것을 막는다
 
 `sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
-[docs/plan.md](docs/plan.md) §9, [docs/open-questions.md](docs/open-questions.md) Q3.
+[docs/plan.md](docs/plan.md) §7 5단계·§9. 그 전에 [docs/open-questions.md](docs/open-questions.md) Q6(ingest 결정성)이 답해져야 한다.
 
 ## 상태
 
 - 이름: Sillok (실록) — 확정
-- D1–D15: 2026-08-30 확정 → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
-- 스택: Python FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
+- D1–D15: 2026-08-30 확정 · D16–D20: 2026-08-31 확정 → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
+- 스택: Python 3.12 · uv · pytest · FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
 - SCAManager 연동: 비범위
-- 구현: 시작 전. 착수 전에 [docs/open-questions.md](docs/open-questions.md)를 먼저 처리한다.
+- 구현: 시작 전. **부트스트랩 공백(Q1–Q5)은 D16–D20으로 닫혔고 [docs/plan.md](docs/plan.md) §7 1–2단계를 이제 검증할 수 있다.**
+  5단계 이후는 [docs/open-questions.md](docs/open-questions.md) B·C·D절이 여전히 막는다.

@@ -13,33 +13,47 @@ module: null
 모순이 아니라 *아무 문서에도 답이 없는* 항목만 모았다. 확정된 모순은 이미 각 문서에서 고쳤다.
 
 각 항목은 **결정이 필요하다.** 추측으로 채우지 않는다.
-답이 정해지면 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)에 D16 이후로 기록하고,
+답이 정해지면 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)에 D21 이후로 기록하고,
 **이 항목은 지우지 말고 `해결 → Dnn` 으로 표시만 바꾼다.**
 Q 번호는 다른 문서가 참조하는 식별자다. 지우거나 재사용하거나 순서를 바꾸지 않는다.
+질문 본문도 고치지 않는다 — 전제가 틀린 채 닫힌 항목은 그 사실이 보여야 한다 (Q4가 그렇다).
 
-> [plan.md](plan.md) §9 완료 조건 중 여러 항목이 아래 공백 때문에 **현재 판정 불가**다.
+> **A절은 2026-08-31에 D16–D20으로 마감됐다.** [plan.md](plan.md) §7 1–2단계를 이제 검증할 수 있다.
+> 남은 절(B·C·D)과 Q24·Q25는 여전히 미해결이고, 5단계 이후를 단계별로 막는다.
 
 ---
 
 ## A. 부트스트랩 — §9 첫 항목을 막는 것
 
-**Q1. 환경변수 계약이 `OPENAI_API_KEY` 하나뿐이다.**
+**전부 해결됐다.** 아래 항목은 이력으로 남긴다.
+
+**Q1. 환경변수 계약이 `OPENAI_API_KEY` 하나뿐이다.** — **해결 → D16**
 DB 접속 문자열, 서비스 포트, workspace 경로, 외부 노출 시 Bearer 토큰의 변수 이름이 어디에도 없다.
 → `.env.example`이 필요하다.
+→ 단일 DSN `DATABASE_URL` + `SILLOK_*` 4개 + `OPENAI_API_KEY`. [.env.example](../.env.example) 추가됨.
+**Q20(project→workspace 매핑)은 닫히지 않았다** — D16은 workspace 루트 하나의 이름만 정했다.
 
-**Q2. 마이그레이션 실행 수단이 없다.**
+**Q2. 마이그레이션 실행 수단이 없다.** — **해결 → D17**
 [data-model.md](data-model.md)에 DDL은 있으나 `CREATE EXTENSION vector` / `pg_trgm` 문이 빠져 있고, 마이그레이션을 적용하는 도구·순서가 미정이다.
 → §9 `Compose로 DB가 뜬다`를 통과시킬 방법이 없다.
+→ 버전 붙인 raw `.sql`을 `serve` 기동 시 bind 전에 멱등 적용. 빠져 있던 `CREATE EXTENSION` 두 줄은 [data-model.md](data-model.md)에 추가했다.
 
-**Q3. 실행 환경이 미정이다.** Python 버전, 의존성 관리자(uv/poetry/pip), 테스트 러너, 스모크 실행 명령.
+**Q3. 실행 환경이 미정이다.** Python 버전, 의존성 관리자(uv/poetry/pip), 테스트 러너, 스모크 실행 명령. — **해결 → D18**
 → §9 체크리스트 전체를 돌릴 수단이 없다.
+→ CPython 3.12 · uv · pytest. 판정 명령은 [plan.md](plan.md) §9에 적었다.
 
 **Q4. CLI 계약이 없다.** `sillok ingest` / `sillok serve`의 인자가 정의되지 않았고,
 **ingest가 DB에 직접 붙는지 HTTP를 타는지**가 미정이다.
 [service-and-mcp.md](service-and-mcp.md)의 `Service가 DB의 유일한 문` 불변식을 지키려면 HTTP여야 하지만, 명시된 곳이 없다.
+— **해결 → D19. 단, 위 질문의 전제가 틀렸다.**
+불변식이 요구하는 것은 *Service 함수가 유일한 문*이지 *모든 호출자가 HTTP를 타라*가 아니다.
+`MCP와 사람용 UI는 HTTP만 호출한다`는 그 둘에 대한 규칙이고 CLI는 어느 쪽도 아니다.
+따라서 제3의 답 — 같은 앱에서 인프로세스로 Service 함수 호출 — 이 채택됐다. 금지되는 것은 CLI가 자기 SQL을 갖는 것이다.
 
-**Q5. `POST /v1/ingest`와 D8 `색인은 CLI`의 관계가 불명확하다.**
+**Q5. `POST /v1/ingest`와 D8 `색인은 CLI`의 관계가 불명확하다.** — **해결 → D20**
 [service-and-mcp.md](service-and-mcp.md)는 엔드포인트를 정의하는데 [plan.md](plan.md) §5 표에는 없다. 둘 중 무엇이 진입점인가.
+→ **둘 중 틀린 쪽은 없다.** 운영자 진입점은 CLI이고, 엔드포인트는 같은 함수의 HTTP 얼굴이다.
+§5 표에 없는 것은 의도이며 바로 다음 줄의 `MCP에 노출하지 않는 HTTP`가 그것을 명시하고 있었다.
 
 ## B. 색인·검색 결정성
 

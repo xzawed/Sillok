@@ -20,7 +20,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 - 동작이 명세와 다르면 **코드가 틀린 것으로 본다.**
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
-- ADR의 D1–D15는 2026-08-30 확정. 임의로 뒤집지 않는다.
+- ADR의 D1–D15는 2026-08-30, D16–D20은 2026-08-31 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
 - **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [README.md](README.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
   소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 소유자를 지도에 추가한다.
@@ -28,8 +28,10 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 ### 아직 답이 없는 것
 
 [docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
-추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D16 이후로 기록한다.
-특히 Q1–Q5(환경변수, 마이그레이션 실행, 실행 환경, CLI 계약)를 답하기 전에는 작업 순서 1–2단계를 검증할 수 없다.
+추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D21 이후로 기록한다.
+
+A절(Q1–Q5)은 **D16–D20으로 마감됐다** — 작업 순서 1–2단계를 이제 검증할 수 있다.
+남은 것이 단계별로 막는다: 5단계 전에 Q6·Q7·Q10, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20.
 
 ## 핵심 불변식
 
@@ -58,7 +60,11 @@ Sillok은 RAG 플랫폼이 아니라 **저장 위치를 강제하는 지식 원�
 | Service 주소 | `http://127.0.0.1:8080` |
 | 인증 | 로컬 무인증. 외부 노출 시에만 `Authorization: Bearer` |
 | 배포 | Docker Compose (db + api 2개) |
-| CLI | `sillok ingest`, `sillok serve` |
+| 런타임 | CPython 3.12, uv, pytest (D18) |
+| 환경변수 | `DATABASE_URL` + `SILLOK_HOST`·`SILLOK_PORT`·`SILLOK_WORKSPACE`·`SILLOK_BEARER_TOKEN` + `OPENAI_API_KEY` (D16) |
+| 마이그레이션 | 버전 붙인 raw `.sql`, `serve` 기동 시 bind 전 멱등 적용 (D17) |
+| CLI | `sillok ingest`, `sillok serve` (+ 마이그레이션 러너 `sillok migrate`) |
+| ingest 경로 | CLI가 Service 함수를 인프로세스 호출. CLI는 자기 SQL을 갖지 않는다 (D19) |
 | 색인 경로 | `docs/**`, 루트 `README*`, `adr/**` — 이 셋만 |
 | 사람 UI | JSON 현황 API만. **웹 페이지는 v1 비범위** |
 | 비밀키 | `OPENAI_API_KEY`는 env. 레포에 넣지 않음 |
@@ -69,7 +75,7 @@ Sillok은 RAG 플랫폼이 아니라 **저장 위치를 강제하는 지식 원�
 
 ```text
 Postgres          kb_documents, kb_chunks, kb_events, kb_ingest_runs, kb_query_logs
-Knowledge Service FastAPI — DB를 만지는 유일한 문
+Knowledge Service FastAPI — DB를 만지는 유일한 문 (단위는 함수지 HTTP가 아니다, D19)
 출구              MCP 도구 8개 + Skill + JSON 현황 API
 ```
 
@@ -90,6 +96,7 @@ API와 MCP 도구는 **같은 Service 함수를 탄다** (도구별로 로직을
 | `kb_status` | `GET /v1/status` |
 
 MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
+`POST /v1/ingest`는 삭제 대상이 아니라 CLI와 **같은 Service 함수의 HTTP 얼굴**이다. 운영자 진입점은 CLI (D20).
 입출력 JSON 전문은 [docs/service-and-mcp.md](docs/service-and-mcp.md). MCP 도구 설명문은 짧게 — 길면 모델이 도구를 안 고른다.
 
 공통 응답: `{ "ok": true, "data": {} }` / `{ "ok": false, "error": { "code": "...", "message": "..." } }`
@@ -99,7 +106,7 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 
 [docs/plan.md](docs/plan.md) §7. 요지는 **임베딩 없이 도는 것부터** 세운다는 것:
 
-1. Compose (Postgres + pgvector) → 2. 마이그레이션([docs/data-model.md](docs/data-model.md) DDL)
+1. Compose (Postgres + pgvector, `5432` 미게시) → 2. 마이그레이션 `001` 확장 → `002` 스키마, 멱등([docs/data-model.md](docs/data-model.md) DDL)
 → 3. FastAPI 골격 + 공통 응답 → 4. `save_event`/`event_stats`/`kb_status`
 → 5. ingest (스캔·해시·청크·tsv, 키 있으면 임베딩) → 6. `search_docs`/`search_events`
 → 7. `get_file`/`get_event`/`save_doc` 제안 → 8. MCP를 같은 함수에 연결
