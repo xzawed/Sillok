@@ -91,6 +91,14 @@ def _flatten(exc: RequestValidationError) -> str:
     return "; ".join(parts) or "invalid request"
 
 
+def _encode(value: str, encoding: str) -> bytes | None:
+    """인코딩할 수 없으면 None. 인증 경로에서 예외를 올리지 않기 위해서다."""
+    try:
+        return value.encode(encoding)
+    except UnicodeError:
+        return None
+
+
 class BearerGate(BaseHTTPMiddleware):
     """D7 게이트. 토큰이 설정됐을 때만 켜진다.
 
@@ -106,12 +114,30 @@ class BearerGate(BaseHTTPMiddleware):
         self._token = token
 
     async def dispatch(self, request: Request, call_next):
-        header = request.headers.get("authorization", "")
-        scheme, _, presented = header.partition(" ")
-        if scheme.lower() != "bearer" or not secrets.compare_digest(
-            presented.strip(), self._token
+        # 헤더가 여러 개면 거절한다. Headers.get 은 첫 번째만 보므로,
+        # 맞는 토큰 뒤에 아무 값이나 덧붙여 보내는 요청이 통과해 버린다.
+        presented_headers = request.headers.getlist("authorization")
+        if len(presented_headers) != 1:
+            return error(ErrorCode.UNAUTHORIZED, "bearer required")
+
+        scheme, _, presented = presented_headers[0].partition(" ")
+        # 바이트로 비교한다. compare_digest 는 비-ASCII str 에 TypeError 를 내고,
+        # 헤더는 latin-1 이라 0x80~0xFF 가 그대로 들어온다. str 로 비교하면
+        # 인증 실패가 INTERNAL 500 으로 새어 나간다 (실측으로 확인).
+        #
+        # 인코딩이 양쪽에서 다르다는 점이 함정이다. Starlette 은 헤더를 latin-1 로
+        # 디코드하므로 latin-1 로 되돌려야 클라이언트가 보낸 원래 바이트가 나온다.
+        # 반면 self._token 은 os.environ 이 UTF-8 로 디코드한 값이다.
+        # 둘을 맞추지 않으면 ASCII 밖 토큰이 영원히 불일치한다.
+        presented_bytes = _encode(presented.strip(), "latin-1")
+        expected_bytes = _encode(self._token, "utf-8")
+        if (
+            scheme.lower() != "bearer"
+            or presented_bytes is None
+            or expected_bytes is None
+            or not secrets.compare_digest(presented_bytes, expected_bytes)
         ):
-            # 무엇이 틀렸는지(헤더 없음/토큰 불일치)를 구분해 알려주지 않는다.
+            # 무엇이 틀렸는지(헤더 없음/스킴 오류/토큰 불일치)를 구분해 알려주지 않는다.
             return error(ErrorCode.UNAUTHORIZED, "bearer required")
         return await call_next(request)
 
@@ -120,7 +146,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or Config(
         database_url="", host="", port=0, workspace="", bearer_token="", openai_api_key=""
     )
-    app = FastAPI(title="Sillok", version="0.0.1", docs_url=None, redoc_url=None)
+    app = FastAPI(
+        title="Sillok",
+        version="0.0.1",
+        # D12: 사람이 볼 웹 페이지는 v1 비범위. openapi_url 까지 꺼야 한다 —
+        # docs_url 만 끄면 /openapi.json 이 살아남아 봉투 밖 200 을 돌려준다.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        # 슬래시 리다이렉트는 라우터가 **핸들러보다 먼저** 빈 본문 307 을 낸다.
+        # 계약 밖 상태에 봉투도 없는 응답이라 끈다. 경로는 정확히 일치해야 한다.
+        redirect_slashes=False,
+    )
 
     if cfg.auth_required:
         app.add_middleware(BearerGate, token=cfg.bearer_token)
