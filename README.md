@@ -74,8 +74,12 @@ Sillok의 색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
 ## 검증
 
 ```bash
-node scripts/check-layout.mjs
+node scripts/check-layout.mjs        # 검사
+node scripts/check-layout.test.mjs   # 검사가 실제로 무는지 (고장 주입)
 ```
+
+두 번째는 저장소를 임시 디렉토리로 **복사한 뒤 복사본에** 고장을 주입하므로 작업 트리를 건드리지 않는다.
+통과 출력만으로는 검사가 살아 있는지 알 수 없다 — 실제로 Q 게이트는 주입으로만 드러난 결함 3건을 갖고 나갔었다.
 
 이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드와 무관한 **문서 게이트**다.
 
