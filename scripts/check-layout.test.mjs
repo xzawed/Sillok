@@ -54,7 +54,13 @@ const edit = (dir, rel, fn) => {
   writeFileSync(p, after, 'utf8')
 }
 const append = (rel, text) => (dir) => edit(dir, rel, (s) => s + text)
+const prepend = (rel, text) => (dir) => edit(dir, rel, (s) => text + s)
 const write = (rel, text) => (dir) => writeFileSync(join(dir, rel), text, 'utf8')
+
+// 검사 12 가 지우게 한 바로 그 덩어리. 되살려 넣는 것이 주입이다 (D29).
+const FM = '---\ntitle: X\ndoc_type: readme\nstatus: current\nmodule: null\n---\n\n'
+const dropFM = (rel) => (dir) =>
+  edit(dir, rel, (s) => s.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, ''))
 
 // expect: 'pass' | 'fail'. mentions: 실패 메시지에 반드시 들어가야 하는 조각들.
 const CASES = [
@@ -271,6 +277,55 @@ const CASES = [
     // 왜 폐기했는지 적으려면 그 말을 써야 한다.
     mutate: append('docs/spec.md', '\n예전 문구 `같은 구조다` 는 쓰지 않는다.\n'),
   },
+
+  // --- 검사 12: 루트 README* 의 front matter (D29) ---
+  {
+    id: '27 루트 README 에 front matter 가 되살아나면 운다',
+    expect: 'fail',
+    // 파일명만 인용하면 통과 출력의 색인 목록에도 있어 아무것도 증명하지 못한다.
+    mentions: ['README.md : front matter 가 있다', 'D29'],
+    mutate: prepend('README.md', FM),
+  },
+  {
+    id: '28 한국어 사본도 같이 본다',
+    expect: 'fail',
+    mentions: ['README.ko.md : front matter 가 있다'],
+    mutate: prepend('README.ko.md', FM),
+  },
+  {
+    // 검사 3 에 뚫은 예외가 docs/** 까지 새면 이 케이스가 조용히 통과한다.
+    // D29 가 만드는 유일한 새 실패 모드다.
+    id: '29 docs 문서의 front matter 는 여전히 필수다',
+    expect: 'fail',
+    mentions: ['docs/spec.md : front matter 없음'],
+    mutate: dropFM('docs/spec.md'),
+  },
+  {
+    // GitHub 의 여는 울타리는 `---` 뒤 공백·탭을 허용한다. 좁게 잡으면 게이트는 통과하는데
+    // 첫 화면에는 표가 뜬다 — 검사 12 가 막으려던 바로 그 상태다.
+    id: '30 여는 울타리 뒤 공백이 붙어도 잡는다',
+    expect: 'fail',
+    mentions: ['README.md : front matter 가 있다'],
+    mutate: prepend('README.md', FM.replace('---\n', '--- \n')),
+  },
+  {
+    id: '31 선행 BOM 이 붙어도 잡는다',
+    expect: 'fail',
+    mentions: ['README.md : front matter 가 있다'],
+    mutate: prepend('README.md', '﻿' + FM),
+  },
+  // 아래 둘은 **한 번에 하나씩만** 어긋나게 한다. 둘을 겹치면 어느 쪽 때문에
+  // 통과했는지 고립되지 않아 한쪽 규칙이 느슨해져도 초록불이 유지된다.
+  {
+    id: '32 빈 첫 줄이 앞서면 front matter 가 아니다 (GitHub 도 그렇다)',
+    expect: 'pass',
+    mutate: prepend('README.md', '\n' + FM),
+  },
+  {
+    id: '33 네 줄표는 front matter 가 아니다 (GitHub 도 그렇다)',
+    expect: 'pass',
+    mutate: prepend('README.md', FM.replace('---\n', '----\n')),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
@@ -299,6 +354,18 @@ const META = [
     id: 'M4 검사 8(지시어)을 끄면 지시어 주입이 통과한다',
     disable: (s) => s.replace('for (const d of DEICTIC) {', 'for (const d of []) {'),
     inject: append('docs/spec.md', '\n이 PR은 그것을 고쳤다.\n'),
+  },
+  {
+    id: 'M5 검사 12(루트 README front matter)를 끄면 주입이 통과한다',
+    disable: (s) => s.replace('for (const p of readmes) {', 'for (const p of []) {'),
+    inject: prepend('README.md', FM),
+  },
+  {
+    // 앞의 줄바꿈이 **필수**다. 같은 문자열이 검사 2 안에도 들여쓰기된 채 있고
+    // String.replace 는 첫 개를 잡는다 — 열 0 의 검사 3 만 끄려면 \n 을 붙여야 한다.
+    id: 'M6 검사 3(front matter 필수)을 끄면 docs 문서의 결손이 통과한다',
+    disable: (s) => s.replace('\nfor (const p of indexed) {', '\nfor (const p of []) {'),
+    inject: dropFM('docs/spec.md'),
   },
 ]
 

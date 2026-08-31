@@ -1,14 +1,15 @@
 ---
-title: v1 확정 결정 D1–D28
+title: v1 확정 결정 D1–D29
 doc_type: adr
 status: current
 module: null
 ---
 
-# ADR 0001 — v1 확정 결정 D1–D28
+# ADR 0001 — v1 확정 결정 D1–D29
 
 상위: [docs/plan.md](../docs/plan.md) · [README](../README.md)
 상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D28 **2026-08-31 확정** (부트스트랩, HTTP 에러 표면, 테스트 경로, 4단계 계약, 공개 전환, 라이선스, 증거 신선도)
+· D29 **2026-09-01 확정** (README front matter)
 
 이 파일은 **모든 확정값의 정본**이다. 확정값이 다른 문서와 어긋나면 이 파일이 이긴다.
 
@@ -430,7 +431,7 @@ D26이 열어 둔 자리를 채운다. 아무도 의존하기 전인 지금이 �
 - **Q13** 목록·타임라인·페이지네이션. `GET /v1/events` 컬렉션을 만들지 않는다
 - **Q14** 이벤트 수정 경로
 - **Q12** `get_event`의 404 대 빈 결과, 프로젝트 경계 — 7단계
-- **Q22 · Q23 · Q25** `repo` 의미, front matter 규칙, Skill 사본 노후
+- **Q22 · Q23 · Q25** `repo` 의미, front matter 규칙(**절반은 D29 가 답했다**), Skill 사본 노후
 - D24는 재시도 부풀림을 **해결하지 않고 받아들인다**
 
 ### D16–D20이 닫지 않는 것
@@ -471,6 +472,116 @@ D26이 열어 둔 자리를 채운다. 아무도 의존하기 전인 지금이 �
 - 의존성 변경 시 재빌드를 강제하는 검사는 없다. `uv.lock`이 바뀌면 사람이 다시 빌드한다
 - 테스트가 제품 `db_data` 볼륨을 함께 쓰는 문제(D22)는 그대로다
 
+## D29 — 루트 `README*`는 front matter 를 갖지 않는다 (2026-09-01 확정)
+
+| ID | 선택 | 결정 내용 |
+|---|---|---|
+| D29 | A | 루트 `README*`에서 YAML front matter 를 **제거한다.** `kb_documents` 의 네 필드는 ingest 가 경로와 본문에서 유도한다. D9 색인 경로는 그대로다 |
+
+**GitHub 은 front matter 를 숨기지 않고 표로 렌더한다.** 저장소 첫 화면에서 제목보다 위에 4행 표가 먼저 나온다 —
+방문자 전원이 보고, 프로젝트에 대해 아무것도 말해 주지 않는다. D26 이 공개로 돌린 이유를 그 표가 스스로 깎는다.
+
+값을 지키려고 치르는 비용도 아니다. **v1 에는 `title` 을 돌려주는 문서 API 가 없다** — `search_docs` 응답 항목은
+`path`·`heading_path`·`excerpt`·`commit_sha`·`status`·`score` 이고([service-and-mcp.md](../docs/service-and-mcp.md)),
+v1 이후 문서 목록도 `path`·`status`·`indexed_at` 이다. 그 표가 매일 보여 주는 네 값은 지금 어느 소비자에게도 닿지 않는다.
+
+### 실측 — GitHub 이 무엇을 렌더하는가
+
+```bash
+gh api repos/xzawed/Sillok/readme -H "Accept: application/vnd.github.html+json"
+```
+
+```html
+<div id="readme" class="md" data-path="README.md"><article class="markdown-body …">
+<markdown-accessiblity-table><table><tbody>
+  <tr><th>title</th><td>Sillok</td></tr>
+  <tr><th>doc_type</th><td>readme</td></tr>
+  <tr><th>status</th><td>current</td></tr>
+  <tr><th>module</th><td></td></tr>
+</tbody></table></markdown-accessiblity-table>
+…
+<h1 class="heading-element">Sillok · 실록</h1>
+```
+
+표가 `<h1>` **앞**에 있다. `module: null` 은 빈 칸으로 렌더돼 뜻 없는 행이 하나 더 붙는다. `README.ko.md` 도 같다.
+**렌더러 설정으로 끄는 방법은 없다 — 파일에서 빼는 것이 유일한 수단이다.**
+
+| A | B | C | D | 버린 이유 |
+|---|---|---|---|---|
+| 제거 + 유도 | 그대로 두고 감수한다 | README 를 색인에서 뺀다 (D9 개정) | HTML 주석으로 감싼다 | B는 **얻는 것 없이** 첫 화면을 낸다 — 네 값의 소비자가 v1 에 없다. C는 잡음을 없애려고 신호를 버린다. README 는 프로젝트를 한 화면으로 설명하는 문서이고, D9 경로 목록은 여러 곳에 복제돼 있으며, "이 저장소 자신을 첫 ingest 스모크 대상으로 쓴다"는 서약도 얇아진다. D는 `^---` 파서가 못 읽으므로 **더 이상 front matter 가 아니다** — 규약도 게이트도 그 값을 지키지 못한 채 눈에 안 보이는 곳에서 낡는다. 이 저장소의 1위 실패 모드를 하나 새로 만든다 |
+
+### 왜 `docs/**`·`adr/**` 는 그대로 두는가
+
+**그 문서들은 방문자가 처음 보는 얼굴이 아니다.** 저장소 첫 화면에 렌더되는 파일은 루트 `README*` 뿐이고,
+그 아래 문서는 링크를 따라 들어간 사람만 본다 — 그 사람은 이미 문맥이 있어 상단 표를 잡음이 아니라 메타데이터로 읽는다.
+
+게다가 그쪽 값은 **경로에서 유도되지 않는다.** `doc_type` 이 `api`·`schema`·`other` 로 갈리고 `status` 도 문서마다 달라질 수 있다.
+파일이 스스로 선언하는 것이 맞는 자리다.
+
+**front matter 규칙의 정본은 이제 이 파일이다.** 지금까지 이 규칙을 *요구*하는 문장은 [CLAUDE.md](../CLAUDE.md) 한 줄뿐이었는데
+그 파일은 스스로 "여기에 정본은 없다"고 선언한다 — 소유자 없는 사실이었다. [plan.md](../docs/plan.md) §우선순위에 따라
+서열로 판정하고, 소유자를 [docs/conventions.md](../docs/conventions.md) 문서 지도에 등록한다.
+
+### 유도 규칙 (ingest 가 따른다)
+
+색인 대상은 두 부류다. **루트 `README*` 는 유도하고, `docs/**`·`adr/**` 는 front matter 를 읽는다.**
+
+| 필드 | 루트 `README*` 의 값 | 근거 |
+|---|---|---|
+| `doc_type` | `readme` | D9 패턴에 걸린 파일은 정의상 README 다. 경로만으로 결정된다 |
+| `status` | `current` | **못 박는다.** 파일 안팎에 status 신호가 없다. DDL 기본값과 같고 지금 값과도 같다 |
+| `module` | NULL | 컬럼이 nullable 이고 색인 문서 중 non-null `module` 은 하나도 없다. 잃는 정보가 0 이다 |
+| `title` | **코드 펜스 밖 첫 `# ` 제목의 텍스트.** 없으면 NULL | 실측: 두 README 모두 `# Sillok · 실록` |
+
+- **`title` 만은 지금 값을 재현하지 못한다.** 지금은 `Sillok` 과 `Sillok (한국어)` 인데 H1 이 글자까지 같아서
+  **두 행이 같은 제목을 갖고 `(한국어)` 는 소멸한다.** 받아들인다 — 언어는 `path` 에 그대로 살아 있고,
+  D27 이 정한 대로 둘은 같은 문서의 정본과 사본이다. 파일명 유도는 프로젝트 이름을 잃고,
+  `.ko` 를 언어로 읽는 규칙은 어느 문서에도 없다. 경로→제목 대응표를 따로 두는 안은
+  front matter 를 파일 밖으로 옮긴 것일 뿐이라 버렸다
+- H1 은 **줄 단위로 찾는다.** `<div align="center">` 같은 HTML 블록은 지나가고, 코드 펜스 안의 `# ` 는 제목이 아니다.
+  인라인 마크업은 벗기고 텍스트만 쓴다
+- **HTML 블록은 빈 줄에서 끝난다** — `</div>` 를 기다리지 않는다 (CommonMark 6형). 두 README 가 정확히 그 모양이라
+  `<div align="center">` · 빈 줄 · `# Sillok · 실록` 로 이어지고 그 H1 이 제목이다.
+  `</div>` 까지 건너뛰는 구현은 제목을 놓쳐 NULL 을 넣는다 — 추측하지 않도록 여기 적는다
+- `kb_documents.title` 에 길이 상한을 두지 않는다. D25 의 `title` 200자는 `kb_events` 의 것이지 여기가 아니다
+- **`doc_type` enum 에서 `readme` 를 빼지 않는다.** enum 은 [data-model.md](../docs/data-model.md) 가 소유하고,
+  ingest 가 루트 README 에 경로 기준으로 그 값을 부여한다. 선언하는 파일이 없어졌을 뿐 값은 살아 있다
+
+### 문서 게이트는 반대 방향도 본다
+
+검사 3(색인 대상은 front matter 를 갖는다)에 루트 `README*` 예외를 뚫는다. **예외만 뚫고 끝내지 않는다** —
+새 검사가 **루트 `README*` 에 front matter 가 있으면 실패**시킨다.
+
+**`AGENTS.md`·`CLAUDE.md` 를 색인하지 않는지 보는 기존 양방향 검사와 같은 이유다.** 한쪽만 보면 0건이 정상인지
+버그인지 구분할 수 없다. 예외를 뚫어 놓고 반대 방향을 안 보면, 누군가 편의로 front matter 를 되살렸을 때
+게이트가 초록불로 통과시키고 GitHub 첫 화면에 표가 돌아온다.
+
+- 예외는 **루트 한정**이다. `docs/README.md` 같은 사본은 `docs/` 패턴에 걸리므로 여전히 front matter 가 필수다
+- 색인 대상에 루트 `README*` 가 **하나도 없으면 실패**한다. 그렇지 않으면 D9 패턴이 깨졌을 때
+  새 검사가 "볼 것이 없어서 통과"로 조용히 죽는다
+- **고장 주입이 같은 변경에 따라온다.** 지금까지 검사 3 에 대한 주입은 하나도 없었다 —
+  예외를 너무 넓게 뚫어도 아무도 비명을 지르지 않는 상태였다
+- 게이트 출력의 `doc_type` 분포에서 `readme` 두 건이 빠진다. **게이트가 유도 규칙을 복제해서 채우지 않는다** —
+  ingest 와 게이트에 같은 규칙이 두 벌 생기면 그것이 곧 낡는 사본이다. 대신 면제된 파일 목록을 그대로 출력해 드러낸다
+
+### D9 는 바뀌지 않는다
+
+**루트 `README*` 는 여전히 색인 대상이다.** 검색으로 찾히고, `kb_documents` 에 행을 갖고, 첫 ingest 스모크 대상에 그대로 들어간다.
+바뀌는 것은 "색인 대상 문서는 front matter 를 갖는다"는 **등식**이지 색인 경로가 아니다.
+
+### D29가 닫지 않는 것
+
+- **Q23 은 닫히지 않는다.** D29 는 네 필드를 *어디서* 얻는지만 정했다. `draft`·`superseded`·`stale` 을 **언제** 붙이는지는
+  여전히 어느 문서에도 없다. 그 결과 루트 README 는 이제 **영원히 `current`** 다 — 해결한 것이 아니라 받아들인 것이다 (D24 선례)
+- **`title` 이 두 README 에서 같아진다.** v1 에는 소비자가 없어 지금 비용이 0 이지만, 문서 목록 UI 가 생기면
+  같은 제목의 줄이 둘 나온다. 그때 `path` 를 함께 보여 주는 것으로 충분한지 다시 본다
+- **다른 렌더러는 확인하지 않았다.** `gh api` 와 github.com 웹만 봤다. GitLab·Gitea·로컬 뷰어가 front matter 를
+  어떻게 다루는지는 이 결정의 근거가 아니다
+- **ingest 는 아직 없다 (5단계).** 유도 규칙은 계약일 뿐 한 번도 실행된 적이 없다 —
+  5단계가 구현할 때까지 이 결정을 지키는 것은 문서 게이트뿐이다
+- 두 README 가 갈라지는 것을 막는 검사는 여전히 없다. D27 이 남긴 그대로다
+- **Q22** (`kb_documents.repo` 의 의미) 는 이 결정과 무관하게 열려 있다
+
 ## 구현에 고정되는 값
 
 - `vector(1536)` — 임베딩 모델 ID `text-embedding-3-small`
@@ -508,6 +619,7 @@ D26이 열어 둔 자리를 채운다. 아무도 의존하기 전인 지금이 �
 
 ## 미기록
 
-D29 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
-2026-08-31 기준 남은 것은 B절(색인·검색 결정성) · C절의 Q12–Q15·Q17 · D절의 Q19·Q20·Q22·Q23과 Q24·Q25다.
+D30 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
+2026-09-01 기준 남은 것은 B절(색인·검색 결정성) · C절의 Q12–Q15·Q17 · D절의 Q19·Q20·Q22·Q23과 Q24·Q25다.
+Q23 은 D29 가 절반만 답했다 — 값을 어디서 얻는지는 정해졌고 `status` 의 생애가 남았다.
 E절(검증 경로)은 Q26 하나였고 D22로 닫혔다.
