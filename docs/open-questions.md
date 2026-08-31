@@ -94,7 +94,7 @@ D4(설정된 workspace)와 D5(멀티 프로젝트)가 만나는 지점인데 설
 
 **Q23. `status` / `doc_type` / `module` / `title`을 무엇으로 채우는지 규칙이 없다.**
 `search_docs`의 기본 필터 `status: "current"`가 이 값에 의존한다.
-→ 이 PR은 각 문서에 YAML front matter(`title`, `doc_type`, `status`, `module`)를 넣어 **이 저장소에 한해** 규칙을 세웠다. ingest가 front matter를 읽을지, 경로 규칙으로 추론할지는 여전히 미정.
+→ 2026-08-30 재배선(`bfc047c`)이 각 문서에 YAML front matter(`title`, `doc_type`, `status`, `module`)를 넣어 **이 저장소에 한해** 규칙을 세웠다. ingest가 front matter를 읽을지, 경로 규칙으로 추론할지는 여전히 미정.
 
 ---
 
@@ -106,6 +106,6 @@ D4(설정된 workspace)와 D5(멀티 프로젝트)가 만나는 지점인데 설
 ADR의 핵심 가치인 *왜 다른 안을 버렸는가*가 비어 있다.
 
 **Q25. 배포된 Skill 사본이 낡았는지 탐지할 방법이 없다.**
-[skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md)는 다른 레포로 물리 복제된다. 이 PR에서 원본 위치와 기준일을 헤더에 넣었으나, **사본이 자기가 낡았음을 스스로 확인할 경로는 없다.**
+[skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md)는 다른 레포로 물리 복제된다. 2026-08-30 재배선(`bfc047c`)이 원본 위치와 기준일을 헤더에 넣었으나, **사본이 자기가 낡았음을 스스로 확인할 경로는 없다.**
 대상 레포는 이 저장소의 검증 밖이므로 `check-layout.mjs`도 닿지 않는다.
 제안(미결정): Service가 Skill 본문을 서빙하고(`GET /v1/skill`) `kb_status` 응답에 `skill_version`을 포함시켜 사본이 대조하게 한다. 새 엔드포인트라 결정이 필요하다.
