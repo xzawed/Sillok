@@ -48,9 +48,11 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 주장이 아니라 **출력**이 남아야 한다. 세 가지다.
 
-- `node scripts/check-layout.mjs`
+- `node scripts/check-layout.mjs` — 검사가 무는지까지 보려면 `node scripts/check-layout.test.mjs`
 - `uv run pytest -q` — 통과 개수와 **skip 개수를 함께** 적는다. skip을 빼고 보고하지 않는다.
-  **커밋된 구성에서는 DB 검사가 skip된다** — `skip 0`은 `5432`를 게시했다는 신호이지 더 나은 결과가 아니다
+  호스트에서는 DB 검사가 skip된다. **`skip 0`은 `5432`를 게시했다는 신호이지 더 나은 결과가 아니다**
+- `docker compose --profile test run --rm test` — DB 검사까지 포함한 전체 (D22).
+  `5432`는 닫힌 채로 돈다. DB 스키마를 건드린 PR은 **이쪽 출력이 있어야 한다**
 - 새로 생긴 표면을 실제로 호출한 결과 하나
 
 §9는 **v1의** 완료 조건이지 PR 하나의 완료 조건이 아니다.

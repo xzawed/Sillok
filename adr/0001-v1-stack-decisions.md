@@ -1,14 +1,14 @@
 ---
-title: v1 확정 결정 D1–D21
+title: v1 확정 결정 D1–D22
 doc_type: adr
 status: current
 module: null
 ---
 
-# ADR 0001 — v1 확정 결정 D1–D21
+# ADR 0001 — v1 확정 결정 D1–D22
 
 상위: [docs/plan.md](../docs/plan.md) · [README](../README.md)
-상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D21 **2026-08-31 확정** (부트스트랩 공백과 HTTP 에러 표면)
+상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D22 **2026-08-31 확정** (부트스트랩 공백, HTTP 에러 표면, 테스트 실행 경로)
 
 이 파일은 **모든 확정값의 정본**이다. 확정값이 다른 문서와 어긋나면 이 파일이 이긴다.
 
@@ -90,8 +90,10 @@ Postgres 이미지는 확장 파일이 들어 있는 것(`pgvector/pgvector:pg16
 ```text
 python   3.12          (이미지도 로컬도 3.12. 범위를 두지 않는다)
 deps     uv lock · uv sync --frozen
-tests    uv run pytest -q
+tests    uv run pytest -q                             호스트. DB 검사는 skip 된다
+         docker compose --profile test run --rm test  DB 검사까지 (D22)
 문서 게이트  node scripts/check-layout.mjs
+         node scripts/check-layout.test.mjs           그 게이트가 무는지
 ```
 
 문서 게이트는 파이썬 툴체인과 무관하게 그대로 남는다.
@@ -219,6 +221,44 @@ Q11이 이미 `발생 조건조차 없다`고 적었고, 실제로 없다.
 - **Q17** MCP 입력 스키마와 마운트 경로. D7 게이트가 Streamable HTTP에 어떻게 걸리는지는 그때 확정한다
 - **Q10** 동시 실행. 경쟁 UniqueViolation을 `INTERNAL`로 둔다는 것 외에는 정하지 않았다
 
+## D22 — 커밋된 구성에서 DB 검사를 돌리는 방법 (2026-08-31 확정)
+
+[open-questions.md](../docs/open-questions.md) Q26을 마감한다.
+
+| ID | 선택 | 결정 내용 | 닫은 질문 |
+|---|---|---|---|
+| D22 | A | `profiles: ["test"]`로 게이트된 compose `test` 서비스. 내부 네트워크만 쓰고 **호스트 포트를 열지 않는다** | Q26 |
+
+```text
+docker compose --profile test run --rm test
+```
+
+- 이미지는 다단계다. `runtime`은 지금까지의 api 이미지 그대로이고, `test`는 거기에 `tests/`와 dev 의존성을 더한다
+- **`api`는 `target: runtime`을 명시해야 한다.** `build: .`은 *마지막* 스테이지를 쓰므로,
+  빠뜨리면 pytest가 운영 이미지로 들어간다 — 이 결정이 피하려던 바로 그것이다
+- 기본 `docker compose up`은 여전히 `db` + `api` 둘뿐이다. `profiles`가 붙은 서비스는 기본 `up`에 없다
+- `5432`는 계속 게시하지 않는다 (D16). `test`는 `api`와 같은 방식으로 `db:5432`에 붙는다
+
+### D13과 충돌하는가
+
+D13은 `로컬 Docker Compose: Postgres + Service 두 개`다. **`두 개`는 기본 `up`이 세우는 제품 스택을 가리킨다.**
+D17이 `세 번째 컨테이너 없음`으로 마이그레이션 전용 컨테이너를 배제한 것도 그 `up` 경로에 대한 것이다.
+`profiles`로 가려진 테스트 러너는 제품 스택이 아니고 `up`에 나타나지 않는다. **D22는 D13을 해석할 뿐 고치지 않는다.**
+
+**단, 게이트를 벗기면 곧바로 위반이다.** `test`에 `profiles`를 빼거나 `ports:`를 붙이면 D13 개정이 필요하다.
+
+### D22 선택지
+
+| A | B | C | D | 버린 이유 |
+|---|---|---|---|---|
+| profiles 게이트 `test` 서비스 | skip을 받아들이고 항상 드러낸다 | 운영 `api` 이미지에 테스트를 넣는다 | 별도 `compose.test.yml` | B는 19개가 커밋된 구성에서 **영원히 안 돌고** 4단계가 DB 검사를 더하면 구멍이 커진다. C는 런타임 이미지에 테스트 러너를 싣는다. D는 같은 효과지만 `-f` 두 개를 조합해야 해 잊기 쉽다 |
+
+### D22가 닫지 않는 것
+
+- 테스트가 제품 `db_data` 볼륨을 함께 쓴다. 격리는 정하지 않았다
+- 5단계 ingest 검사는 workspace 파일이 필요한데 `test` 이미지에는 `docs/`·`adr/`가 없다. 그때 더한다
+- **Q20 · Q10 · Q6–Q9 · Q12–Q19 · Q21 · Q23–Q25**는 그대로 열려 있다
+
 ### D16–D20이 닫지 않는 것
 
 - **Q20** `project` → workspace 경로 매핑. D16은 workspace 루트 **하나**의 이름만 정했다
@@ -263,6 +303,6 @@ Q11이 이미 `발생 조건조차 없다`고 적었고, 실제로 없다.
 
 ## 미기록
 
-D22 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
+D23 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
 2026-08-31 기준 남은 것은 B절(색인·검색 결정성) · C절의 Q12–Q17 · D절(무결성·보안) ·
 E절(검증 경로, Q26)과 Q24·Q25다.
