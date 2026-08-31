@@ -74,7 +74,7 @@ AI는 MCP로 행 몇 개만 읽고 쓴다. 문서를 대화에 통째로 넣지 
 | 사람 UI | `GET /v1/status` 등 JSON. **웹 페이지 없음** |
 | 배포 | Docker Compose (db + api 2개). 테스트용 `test`는 `profiles` 게이트라 기본 `up`에 없다 (D22) |
 | 본문 언어 | 한·영 혼용, tsvector `simple` |
-| 공개 | 비공개 |
+| 공개 | 공개 저장소 (D26). `개인 도구`라는 성격은 그대로다 |
 | 런타임 | CPython 3.12, uv, pytest (D18) |
 | 환경변수 | `DATABASE_URL` 하나 + `SILLOK_*` 4개 + `OPENAI_API_KEY` (D16) → [.env.example](../.env.example) |
 | 마이그레이션 | 버전 붙인 raw `.sql`, `serve` 기동 시 bind 전에 멱등 적용 (D17) |
