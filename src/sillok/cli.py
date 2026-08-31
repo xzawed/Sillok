@@ -36,13 +36,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     serve = sub.add_parser("serve", help="FastAPI 를 띄운다 (D6·D16)")
+    # D19 가 정한 인자만 둔다. 편의 플래그를 발명하지 않는다 —
+    # --skip-migrate 는 D17("bind 전에 적용")을 끄는 스위치라 계약 밖이었다.
     serve.add_argument("--host", default=None, help="기본값: SILLOK_HOST")
     serve.add_argument("--port", type=int, default=None, help="기본값: SILLOK_PORT")
-    serve.add_argument(
-        "--skip-migrate",
-        action="store_true",
-        help="기동 시 마이그레이션을 건너뛴다. D17 이 기본을 정했으므로 진단용이다",
-    )
     return parser
 
 
@@ -89,15 +86,12 @@ def main(argv: list[str] | None = None) -> int:
 
         # D17: bind 전에 마이그레이션을 적용한다. 여기서 실패하면 뜨지 않는 것이 맞다 —
         # 스키마가 없는 채로 포트를 열면 첫 요청까지 결함이 숨는다.
-        if args.skip_migrate:
-            print("마이그레이션 건너뜀 (--skip-migrate)", file=sys.stderr)
-        else:
-            try:
-                applied = migrations.apply(cfg.database_url)
-            except migrations.ConnectionFailed as exc:
-                print(str(exc), file=sys.stderr)
-                return 1
-            print(f"마이그레이션 {len(applied)}건 실행", file=sys.stderr)
+        try:
+            applied = migrations.apply(cfg.database_url)
+        except migrations.ConnectionFailed as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"마이그레이션 {len(applied)}건 실행", file=sys.stderr)
 
         uvicorn.run(create_app(cfg), host=host, port=port, log_level="info")
         return 0

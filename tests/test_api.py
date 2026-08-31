@@ -162,15 +162,68 @@ def test_mapping_matches_d21():
 
 
 def test_unknown_code_degrades_to_internal():
-    r = api.error("TEAPOT", "무엇이든")
+    r = api.error("TEAPOT", "postgresql://u:pw@h/db 와 hunter2")
     assert r.status_code == 500
+    assert r.body == b'{"ok":false,"error":{"code":"INTERNAL","message":"internal error"}}'
 
 
-def test_no_business_routes_yet():
-    """4단계 전에 §9 판정 대상 경로가 통과하는 것처럼 보이면 안 된다."""
-    paths = {route.path for route in api.create_app(_config()).routes}
-    for contract_path in ("/v1/status", "/v1/events", "/v1/stats/events"):
-        assert contract_path not in paths
+@pytest.mark.parametrize(
+    "message",
+    ["postgresql://sillok:hunter2@db:5432/sillok", "Traceback (most recent call last)"],
+)
+def test_internal_message_is_pinned_regardless_of_caller(message):
+    """호출자를 믿지 않는다.
+
+    이 고정이 없으면 4단계에서 HTTPException(500, detail=...) 하나로 DSN 이 샌다.
+    """
+    r = api.error(api.ErrorCode.INTERNAL, message)
+    assert r.status_code == 500
+    assert b"hunter2" not in r.body
+    assert b"Traceback" not in r.body
+    assert b'"message":"internal error"' in r.body
+
+
+def test_http_exception_5xx_does_not_leak_detail():
+    app = api.create_app(_config())
+
+    @app.get("/t/raise5xx")
+    async def _raise():
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=502, detail="postgresql://u:hunter2@h/db")
+
+    r = TestClient(app, raise_server_exceptions=False).get("/t/raise5xx")
+    assert r.status_code == 500
+    assert "hunter2" not in r.text
+    assert r.json()["error"] == {"code": "INTERNAL", "message": "internal error"}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/status",
+        "/v1/events",
+        "/v1/events/1",
+        "/v1/stats/events",
+        "/v1/search/docs",
+        "/v1/search/events",
+        "/v1/files",
+        "/v1/docs",
+        "/v1/docs/proposals",
+        "/v1/ingest",
+    ],
+)
+def test_no_business_routes_yet(path):
+    """4단계 전에 계약 경로가 통과하는 것처럼 보이면 안 된다.
+
+    `app.routes` 를 훑는 대신 **실제로 때린다.** 라우터를 mount 로 붙이면
+    경로 비교는 조용히 통과하지만 요청은 통과하지 않는다.
+    """
+    client = _client()
+    for method in ("GET", "POST"):
+        r = client.request(method, path)
+        assert r.status_code == 404, f"{method} {path} -> {r.status_code}"
+        assert r.json()["error"]["code"] == "NOT_FOUND"
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
