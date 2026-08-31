@@ -56,6 +56,11 @@ def ok(data: object = None) -> JSONResponse:
 
 
 def error(code: str, message: str) -> JSONResponse:
+    """실패 응답은 **반드시 이 함수를 지난다.**
+
+    4단계 이후 라우트가 JSONResponse 로 봉투를 직접 만들면 여기의 고정 장치가
+    통째로 우회된다. 봉투를 손으로 조립하지 않는다.
+    """
     status = STATUS_FOR_CODE.get(code)
     if status is None:
         # 계약에 없는 코드를 내보내느니 INTERNAL 로 떨어뜨린다.
