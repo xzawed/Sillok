@@ -12,8 +12,8 @@ AI는 MCP로 필요한 행 몇 개만 읽는다.
 
 Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장 위치를 강제하는 지식 원장**이다.
 
-이 저장소에는 아직 코드가 없다. **문서가 곧 구현 계약이다.**
-동작이 문서와 어긋나면 코드가 틀린 것으로 본다.
+**문서가 곧 구현 계약이다.** 동작이 문서와 어긋나면 코드가 틀린 것으로 본다.
+[docs/plan.md](docs/plan.md) §7의 1–2단계(Compose + 마이그레이션)까지 구현돼 있다.
 
 ## 시작점
 
@@ -75,7 +75,17 @@ Sillok의 색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
 node scripts/check-layout.mjs
 ```
 
-이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드가 없는 지금 유일하게 실행 가능한 검증이다.
+이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드와 무관한 **문서 게이트**다.
+
+구현된 부분(§7 1–2단계)의 검증은 따로 있다:
+
+```bash
+docker compose up -d --wait   # db. 5432 는 호스트에 게시하지 않는다 (D16)
+uv run sillok migrate         # D17 러너. 멱등
+uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
+```
+
+호스트에서 DB 에 직접 붙어야 하면 `compose.override.example.yml` 를 복사해 쓴다.
 
 - D9 색인 대상(`docs/**`, 루트 `README*`, `adr/**`)에 걸리는 문서 목록과 `doc_type` 분포
 - `AGENTS.md`·`CLAUDE.md`가 **색인되지 않는지** — 색인 0건이 정상인지 버그인지 구분하려면 양방향을 다 봐야 한다
@@ -95,5 +105,17 @@ node scripts/check-layout.mjs
 - D1–D15: 2026-08-30 확정 · D16–D20: 2026-08-31 확정 → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
 - 스택: Python 3.12 · uv · pytest · FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
 - SCAManager 연동: 비범위
-- 구현: 시작 전. **부트스트랩 공백(Q1–Q5)은 D16–D20으로 닫혔고 [docs/plan.md](docs/plan.md) §7 1–2단계를 이제 검증할 수 있다.**
-  5단계 이후는 [docs/open-questions.md](docs/open-questions.md) B·C·D절이 여전히 막는다.
+- 구현: **§7 1–2단계 완료** (2026-08-31 실측). 3단계(FastAPI 골격)부터 남았다.
+  5단계 이후는 [docs/open-questions.md](docs/open-questions.md) B·C·D절이 여전히 막는다 — 5단계 전에 Q6·Q7·Q10.
+
+## 코드 배치
+
+| 경로 | 역할 |
+|---|---|
+| `docker-compose.yml` | D13 스택. 지금은 `db`만 — `api`는 3단계에서 붙는다 |
+| `compose.override.example.yml` | 호스트에서 DB에 붙어야 할 때만 복사해 쓰는 오버라이드 (D16) |
+| `migrations/001_extensions.sql` · `002_schema.sql` | D17. DDL 정본은 [docs/data-model.md](docs/data-model.md) |
+| `src/sillok/config.py` | D16 환경변수 계약 |
+| `src/sillok/migrations.py` | D17 러너. **Service 쪽이지 CLI 쪽이 아니다** (D19) |
+| `src/sillok/cli.py` | `sillok migrate`. SQL을 갖지 않는다 |
+| `tests/` | pytest. DB 없으면 DB 검사만 skip |

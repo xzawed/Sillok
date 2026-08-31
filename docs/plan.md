@@ -170,7 +170,9 @@ A절(Q1–Q5)은 2026-08-31에 **D16–D20으로 마감됐다.** 1–2단계를 
 
 ## 9. v1 완료 조건
 
-- [ ] Compose로 DB가 뜬다
+- [x] Compose로 DB가 뜬다 — 2026-08-31 실측. `pgvector/pgvector:pg16` healthy,
+      `001`·`002` 적용 후 확장 `vector 0.8.2`·`pg_trgm 1.6`, 테이블 5개,
+      `kb_chunks.embedding`·`kb_events.embedding` 모두 `vector(1536)`
 - [ ] 필수 필드 없는 `save_event`가 `VALIDATION`으로 거절된다
 - [ ] ingest가 `docs/**`, 루트 `README*`, `adr/**`만 먹는다
 - [ ] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다
