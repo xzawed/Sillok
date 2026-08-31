@@ -15,19 +15,7 @@ import logging
 import sys
 from pathlib import Path
 
-import psycopg
-
 from . import config, migrations
-
-
-def _redact(dsn: str) -> str:
-    """오류 메시지에 암호를 흘리지 않는다."""
-    scheme, sep, rest = dsn.partition("://")
-    if not sep or "@" not in rest:
-        return dsn
-    credentials, _, host = rest.rpartition("@")
-    user, has_pw, _ = credentials.partition(":")
-    return f"{scheme}://{user}{':***' if has_pw else ''}@{host}"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -72,16 +60,14 @@ def main(argv: list[str] | None = None) -> int:
         cfg = config.load()
         try:
             applied = migrations.apply(cfg.database_url, args.migrations_dir)
-        except psycopg.OperationalError as exc:
+        except migrations.ConnectionFailed as exc:
             # 스택 트레이스 대신 무엇을 어디로 시도했는지 보여준다.
-            # DSN 은 그대로 찍지 않는다 — 암호가 들어 있다.
-            print(
-                f"DB 에 붙을 수 없다 ({_redact(cfg.database_url)}): "
-                f"{str(exc).strip()}",
-                file=sys.stderr,
-            )
+            # 메시지는 러너가 이미 암호를 가려서 만든 것이다.
+            print(str(exc), file=sys.stderr)
             return 1
-        print(f"적용 {len(applied)}건: " + ", ".join(m.name for m in applied))
+        # "적용" 이 아니라 "실행" 이다. IF NOT EXISTS 라 대부분은 no-op 이고,
+        # 러너는 무엇이 실제로 바뀌었는지 모른다. 아는 것보다 더 주장하지 않는다.
+        print(f"실행 {len(applied)}건: " + ", ".join(m.name for m in applied))
         return 0
 
     raise AssertionError(f"처리되지 않은 명령: {args.command}")
