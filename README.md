@@ -83,6 +83,7 @@ node scripts/check-layout.mjs
 - 구 파일명 잔존 참조
 - 존재하지 않는 `Q` 번호 참조 — `open-questions.md`가 실제로 정의한 집합과 대조
 - 머지되면 의미를 잃는 지시어(`이 PR` 등) — 커밋 해시·날짜·PR 번호로 고정해야 한다
+- 닫히지 않은 코드 펜스 — 열린 펜스가 뒤 본문을 코드로 먹어 위 검사를 무력화하는 것을 막는다
 
 `sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
 [docs/plan.md](docs/plan.md) §9, [docs/open-questions.md](docs/open-questions.md) Q3.
