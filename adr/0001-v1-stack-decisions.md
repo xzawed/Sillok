@@ -67,7 +67,9 @@ module: null
 Compose의 `db`는 앱 변수가 아니라 이미지 계약인 `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`를 쓴다.
 `api`는 `DATABASE_URL`을 `@db:5432`로, `SILLOK_HOST`를 `0.0.0.0`으로 덮는다 — 그래야 호스트의 `127.0.0.1:8080`에 닿는다.
 
-**`5432`를 호스트에 게시하지 않는다.** 게시하면 D19가 금지한 우회 SQL 경로가 물리적으로 열린다.
+**`5432`를 호스트에 게시하지 않는다.** 다만 이것은 Compose 위생이지 D19가 강제하는 것이 아니다 —
+D19가 금지하는 것은 CLI가 자기 SQL 계층을 갖는 것이고, 게시된 포트가 여는 것은 사람이 `psql`로 들어오는 길이다.
+둘 다 막을 값어치가 있지만 근거가 다르다.
 
 사본: [.env.example](../.env.example).
 
@@ -86,7 +88,7 @@ Postgres 이미지는 확장 파일이 들어 있는 것(`pgvector/pgvector:pg16
 ### D18 실행 환경
 
 ```text
-python   >=3.12,<3.14   (이미지는 3.12 고정)
+python   3.12          (이미지도 로컬도 3.12. 범위를 두지 않는다)
 deps     uv lock · uv sync --frozen
 tests    uv run pytest -q
 문서 게이트  node scripts/check-layout.mjs
@@ -109,8 +111,11 @@ sillok ingest --project PROJECT [--workspace PATH]
 
 **불변식의 정확한 뜻:** DB의 유일한 문은 *Service 함수*지 HTTP가 아니다.
 `MCP와 사람용 UI는 HTTP만 호출한다`는 규칙은 그 둘에 대한 것이고, CLI는 둘 중 어느 쪽도 아니다.
-D6이 MCP를 별도 클라이언트가 아니라 같은 프로세스의 다른 앞면으로 만든 것과 같은 구조다.
 **금지되는 것은 CLI가 자기 SQL을 갖는 것이다.**
+
+D6과 혼동하지 않는다. D6은 *프로세스 동일성*이다 — MCP는 `serve`와 같은 프로세스의 다른 앞면이다.
+`ingest`는 **별도 프로세스이고 같은 코드의 함수를 쓴다.** 공유되는 것은 데이터 접근 계층 하나뿐이지
+프로세스가 아니다. `serve`와 `ingest`가 각자 DB 세션을 여는 문제는 Q10으로 남는다.
 
 ### D20 색인 진입점
 
