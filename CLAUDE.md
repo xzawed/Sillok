@@ -28,7 +28,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
 - ADR의 D1–D15는 2026-08-30, D16–D20은 2026-08-31 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
-- **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [README.md](README.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
+- **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [docs/conventions.md](docs/conventions.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
   소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 소유자를 지도에 추가한다.
 
 ### 아직 답이 없는 것
