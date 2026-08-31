@@ -18,6 +18,8 @@ const STATUSES = ['current', 'draft', 'superseded', 'stale']
 //   - 여는 울타리 뒤의 공백·탭: micromark 의 fenceOpen 은 `sequenceOpen *spaceOrTab` 다
 //   - 선행 BOM: comrak 의 구분자는 BOM 을 허용한다
 // 반대로 GitHub 도 거부하는 것(빈 첫 줄, 선행 공백, 네 줄표, `...` 닫기)은 여기서도 안 잡는다.
+// 일부러 안 잡는 둘: CR 만 쓰는 줄끝(git 이 통과시키지 않는다)과 빈 front matter (`---\n---`).
+// 둘 다 "게이트는 초록인데 첫 화면에 표가 뜨는" 부류가 아니다 — 빈 것은 표로 그릴 행이 없다.
 const FRONT_MATTER = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---/
 // 루트 README* — D9 색인 대상이면서 front matter 를 갖지 **않는** 유일한 부류다 (D29).
 const isRootReadme = (p) => /^README[^/]*$/i.test(p)   // D9 는 확장자·대소문자를 가리지 않는다

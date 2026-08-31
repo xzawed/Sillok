@@ -314,12 +314,17 @@ const CASES = [
     mentions: ['README.md : front matter 가 있다'],
     mutate: prepend('README.md', '﻿' + FM),
   },
+  // 아래 둘은 **한 번에 하나씩만** 어긋나게 한다. 둘을 겹치면 어느 쪽 때문에
+  // 통과했는지 고립되지 않아 한쪽 규칙이 느슨해져도 초록불이 유지된다.
   {
-    // GitHub 도 front matter 로 보지 않는 모양이다. 여기서도 잡으면 안 된다 —
-    // 잡으면 정상 문서의 첫 수평선이 실패가 된다.
-    id: '32 GitHub 이 거부하는 모양은 여기서도 잡지 않는다',
+    id: '32 빈 첫 줄이 앞서면 front matter 가 아니다 (GitHub 도 그렇다)',
     expect: 'pass',
-    mutate: prepend('README.md', '\n' + FM.replace('---\n', '----\n')),
+    mutate: prepend('README.md', '\n' + FM),
+  },
+  {
+    id: '33 네 줄표는 front matter 가 아니다 (GitHub 도 그렇다)',
+    expect: 'pass',
+    mutate: prepend('README.md', FM.replace('---\n', '----\n')),
   },
 ]
 
