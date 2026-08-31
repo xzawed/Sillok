@@ -16,6 +16,12 @@ module: null
 Knowledge Service가 DB의 유일한 문이다.  
 MCP와 사람용 UI는 이 HTTP API만 호출한다.
 
+> **불변식의 단위는 Service 함수이지 HTTP가 아니다 (D19).**
+> 위 두 번째 줄은 MCP와 사람용 UI에 대한 규칙이다. CLI는 둘 중 어느 쪽도 아니며,
+> `sillok ingest`는 같은 앱에서 Service 함수를 인프로세스로 호출한다 — D6이 MCP를
+> 별도 클라이언트가 아니라 같은 프로세스의 다른 앞면으로 만든 것과 같은 구조다.
+> **금지되는 것은 CLI가 자기 SQL 계층을 갖는 것이다.**
+
 로컬 Compose 기본: Service `http://127.0.0.1:8080`.  
 인증: 로컬 무인증. HTTP를 외부에 열 때만 `Authorization: Bearer <token>`.
 
@@ -111,6 +117,11 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 `POST /v1/ingest`
 
 변경 파일 목록 또는 repo 경로. 해시 비교 후 변경분만 임베딩.
+
+**운영자 진입점은 이 엔드포인트가 아니라 CLI `sillok ingest`다 (D8·D20).**
+여기는 이미 떠 있는 api에 같은 Service 함수를 태우는 HTTP 얼굴이고, MCP에는 노출하지 않는다.
+[plan.md](plan.md) §5의 MCP 표에 없는 것은 누락이 아니라 의도다.
+나중에 n8n webhook을 붙인다면(ADR `나중에 바꿔도 되는 것`) 이 얼굴을 쓴다.
 
 ## MCP 도구
 
