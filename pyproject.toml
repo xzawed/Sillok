@@ -31,4 +31,6 @@ packages = ["src/sillok"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# addopts 에 -q 를 넣지 않는다. 문서가 시키는 `pytest -q` 와 겹치면 verbosity 가
+# 두 번 내려가 **통과·skip 개수 줄이 사라진다.** AGENTS.md 는 그 개수를 증거로 요구하므로,
+# 겹치는 순간 문서가 시키는 명령이 요구된 증거를 못 내게 된다 (감사에서 발견).
