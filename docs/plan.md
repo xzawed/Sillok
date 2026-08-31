@@ -148,6 +148,10 @@ A절(Q1–Q5)은 **D16–D20으로**, Q11은 **D21로** 마감됐다 (2026-08-31
 6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17이 필요하다.
 [open-questions.md](open-questions.md)를 참조하고, 답이 없는 항목을 추측으로 채우지 않는다.
 
+> **위 문장은 `scripts/check-layout.mjs`가 읽어 강제한다.** Q가 다 풀려도 절을 지우지 않는다 —
+> 해결 표시는 [open-questions.md](open-questions.md)가 하고, 여기서 절이 사라지면 그 단계가 무방비가 된다.
+> 절이 없으면 검사가 실패한다.
+
 1. Compose: Postgres + pgvector. `5432`는 호스트에 게시하지 않는다 (D16)
 2. 마이그레이션 — `001` 확장 → `002` 스키마, 전부 멱등 ([data-model.md](data-model.md) DDL, D17)
 3. FastAPI 골격, 공통 `{ok, data|error}`. 상태 매핑과 기본 응답 덮기는 D21.

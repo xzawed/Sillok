@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
 [docs/plan.md](docs/plan.md) §7의 **1–3단계까지 구현돼 있고 4단계부터는 아직 없다.**
+(진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
 `src/sillok/`(config · migrations 러너 · api 골격 · CLI `migrate`/`serve`), `tests/`.
 **업무 라우트는 하나도 없다** — `/v1/status` 같은 경로는 정직하게 404다. 스텁을 만들지 않는다.
