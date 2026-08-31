@@ -154,8 +154,9 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 ## 검증 명령
 
 ```bash
-node scripts/check-layout.mjs          # 문서 게이트
-node scripts/check-layout.test.mjs     # 그 게이트가 실제로 무는지 (고장 주입)
+node scripts/evidence.mjs              # PR 증거 4종을 한 번에 (AGENTS 가 요구하는 형태)
+node scripts/check-layout.mjs          # 문서 게이트만
+node scripts/check-layout.test.mjs     # 그 게이트가 실제로 무는지 (고장 주입 + 메타)
 docker compose up -d --wait            # db + api (5432 미게시, 8080 만 게시)
 curl -i http://127.0.0.1:8080/v1/nope  # 404 + 공통 봉투. detail 이 새면 계약 위반
 uv run pytest -q                       # 호스트. DB 검사는 skip 된다
@@ -172,6 +173,7 @@ DB 검사까지 돌리려면 `docker compose --profile test run --rm test` (D22,
 문서 게이트다. 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
 D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 링크 해석, 진입점 도달성, 구 파일명 잔존,
 존재하지 않는 `Q` 번호 참조, 머지 후 의미를 잃는 지시어(`이 PR` 등), 닫히지 않은 코드 펜스,
+산문에 박힌 테스트 수치, 폐기된 문구,
 **Q 게이트**(단계를 막는 Q가 열려 있는데 그 단계의 라우트·CLI·MCP가 `src/`에 있는가)를
 검사하고 실패 시 종료 코드 1.
 
