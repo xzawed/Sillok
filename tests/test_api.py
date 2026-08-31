@@ -31,6 +31,17 @@ class _Body(BaseModel):
     result: str
 
 
+# 4단계 검증 케이스의 바탕. 유효한 최소 이벤트다.
+_EVENT = {
+    "project": "t_api",
+    "kind": "failure",
+    "title": "제목",
+    "summary": "요약",
+    "occurred_at": "2026-08-31T09:00:00Z",
+    "result": "failure",
+}
+
+
 def _client(**overrides) -> TestClient:
     """핸들러를 때릴 수 있는 임시 라우트를 붙인 클라이언트."""
     app = api.create_app(_config(**overrides))
@@ -201,10 +212,8 @@ def test_http_exception_5xx_does_not_leak_detail():
 @pytest.mark.parametrize(
     "path",
     [
-        "/v1/status",
-        "/v1/events",
+        # 5~8단계. Q6·Q7·Q10 / Q8·Q9 / Q12·Q15·Q19·Q20 / Q17 이 아직 열려 있다.
         "/v1/events/1",
-        "/v1/stats/events",
         "/v1/search/docs",
         "/v1/search/events",
         "/v1/files",
@@ -213,8 +222,8 @@ def test_http_exception_5xx_does_not_leak_detail():
         "/v1/ingest",
     ],
 )
-def test_no_business_routes_yet(path):
-    """4단계 전에 계약 경로가 통과하는 것처럼 보이면 안 된다.
+def test_later_step_routes_do_not_exist_yet(path):
+    """뒤 단계의 계약 경로가 통과하는 것처럼 보이면 안 된다.
 
     `app.routes` 를 훑는 대신 **실제로 때린다.** 라우터를 mount 로 붙이면
     경로 비교는 조용히 통과하지만 요청은 통과하지 않는다.
@@ -224,6 +233,65 @@ def test_no_business_routes_yet(path):
         r = client.request(method, path)
         assert r.status_code == 404, f"{method} {path} -> {r.status_code}"
         assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("POST", "/v1/events"), ("GET", "/v1/stats/events"), ("GET", "/v1/status")],
+)
+def test_step4_routes_exist(method, path):
+    """4단계 경로는 이제 있어야 한다. 404 면 붙지 않은 것이다."""
+    r = _client().request(method, path)
+    assert r.status_code != 404
+
+
+def test_step4_routes_stay_in_the_envelope_without_a_db():
+    """DB 가 없어도 봉투를 깨지 않고, **무한히 매달리지 않는다.**
+
+    타임아웃이 없으면 한 요청이 130초를 먹는다 (실측). 그건 서비스가 죽은 것과 같다.
+    """
+    import time
+
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    started = time.monotonic()
+    r = client.get("/v1/status?project=sillok")
+    elapsed = time.monotonic() - started
+
+    assert r.status_code == 500
+    assert r.json() == {"ok": False, "error": {"code": "INTERNAL", "message": "internal error"}}
+    assert elapsed < 30, f"연결 타임아웃이 없다: {elapsed:.0f}초"
+
+
+@pytest.mark.parametrize(
+    ("payload", "fragment"),
+    [
+        ({}, "missing required field"),
+        ({**_EVENT, "occurred_at": "2026-08-31T09:00:00"}, "offset"),
+        ({**_EVENT, "resolved_at": "2026-08-31T08:00:00Z"}, "resolved_at"),
+        ({**_EVENT, "title": "a" * 201}, "title"),
+        ({**_EVENT, "project": "has/slash"}, "project"),
+        ({**_EVENT, "kind": "typo"}, "kind"),
+    ],
+)
+def test_save_event_validation_reaches_the_client(payload, fragment):
+    """D21: VALIDATION 만 메시지를 그대로 돌려준다. 모델이 무엇을 고칠지 알아야 한다.
+
+    DB 에 닿기 전에 걸리므로 DSN 이 죽어 있어도 422 다.
+    """
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    r = client.post("/v1/events", json=payload)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION"
+    assert fragment in r.json()["error"]["message"]
+
+
+def test_stats_and_status_require_project():
+    """D5: project 필수. 없으면 FastAPI 요청 검증이 VALIDATION 으로 나간다."""
+    client = _client()
+    for path in ("/v1/stats/events", "/v1/status"):
+        r = client.get(path)
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "VALIDATION"
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])

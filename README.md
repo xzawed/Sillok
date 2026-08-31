@@ -13,7 +13,7 @@ AI는 MCP로 필요한 행 몇 개만 읽는다.
 Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장 위치를 강제하는 지식 원장**이다.
 
 **문서가 곧 구현 계약이다.** 동작이 문서와 어긋나면 코드가 틀린 것으로 본다.
-[docs/plan.md](docs/plan.md) §7의 1–3단계(Compose · 마이그레이션 · FastAPI 골격)까지 구현돼 있다.
+[docs/plan.md](docs/plan.md) §7의 1–4단계(Compose · 마이그레이션 · FastAPI 골격 · `save_event`/`event_stats`/`kb_status`)까지 구현돼 있다.
 
 > 진행 상태의 정본은 [docs/plan.md](docs/plan.md) §7·§9다 — 값이 다르면 정본이 이긴다.
 
@@ -138,8 +138,8 @@ docker compose --profile test run --rm test   # 90 passed. 5432 는 닫힌 채�
 - D1–D15: 2026-08-30 확정 · D16–D20: 2026-08-31 확정 → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
 - 스택: Python 3.12 · uv · pytest · FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
 - SCAManager 연동: 비범위
-- 구현: **§7 1–3단계 완료** (2026-08-31 실측). 4단계(`save_event`·`event_stats`·`kb_status`)부터 남았다.
-  [docs/open-questions.md](docs/open-questions.md)가 단계별로 막는다 — **4단계 전에 Q16·Q18·Q21**.
+- 구현: **§7 1–4단계 완료** (2026-08-31 실측). 5단계(ingest)부터 남았다.
+  [docs/open-questions.md](docs/open-questions.md)가 단계별로 막는다 — **5단계 전에 Q6·Q7·Q10**.
 
 ## 코드 배치
 
@@ -150,6 +150,7 @@ docker compose --profile test run --rm test   # 90 passed. 5432 는 닫힌 채�
 | `migrations/001_extensions.sql` · `002_schema.sql` | D17. DDL 정본은 [docs/data-model.md](docs/data-model.md) |
 | `src/sillok/config.py` | D16 환경변수 계약 |
 | `src/sillok/migrations.py` | D17 러너. **Service 쪽이지 CLI 쪽이 아니다** (D19) |
-| `src/sillok/api.py` | D21 공통 봉투와 D7 게이트. **업무 라우트는 없다** — 4단계 |
+| `src/sillok/api.py` | D21 공통 봉투와 D7 게이트, 4단계 라우트 3개. **SQL을 갖지 않는다** (D19) |
+| `src/sillok/service.py` | DB를 만지는 유일한 문. `save_event`·`event_stats`·`kb_status`와 D25 검증 |
 | `src/sillok/cli.py` | `sillok migrate` · `sillok serve`. SQL을 갖지 않는다 |
 | `tests/` | pytest. DB 없으면 DB 검사만 skip |
