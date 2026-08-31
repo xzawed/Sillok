@@ -82,8 +82,13 @@ for m in auth auth billing billing; do
 done
 ```
 
+네 번 도니 응답도 넷이다. 빈 DB 기준이고 `id`는 이어서 증가한다.
+
 ```json
 { "ok": true, "data": { "id": 1 } }
+{ "ok": true, "data": { "id": 2 } }
+{ "ok": true, "data": { "id": 3 } }
+{ "ok": true, "data": { "id": 4 } }
 ```
 
 성공이든 실패든 **본문은 언제나 같은 봉투**다. 프레임워크 기본 응답이 새어 나오지 않는다.
@@ -102,7 +107,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
   "total": 4,
   "by_kind":   { "failure": 4 },
   "by_result": { "failure": 4 },
-  "by_module": { "billing": 2, "auth": 2 },
+  "by_module": { "auth": 2, "billing": 2 },
   "repeat_causes": [
     { "module": "auth",    "root_cause": "pool exhausted", "count": 2 },
     { "module": "billing", "root_cause": "pool exhausted", "count": 2 }
@@ -113,6 +118,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 
 통계는 **벡터를 쓰지 않는다.** 필터와 `COUNT`/`AVG`뿐이다.
 아직 해결되지 않은 건은 평균에서 빠진다 — 전부 미해결이면 `0`이 아니라 `null`이다.
+(`by_*`는 JSON 객체라 키 순서는 보장하지 않는다. 값만 보면 된다.)
 
 ## 지금 되는 것 / 아직 아닌 것
 
@@ -261,7 +267,8 @@ docker compose build \
 - 확정 결정 **D1–D26** → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
 - 스택: Python 3.12 · uv · pytest · FastAPI · PostgreSQL 16 + pgvector · Docker Compose
 - **결정만 되어 있고 아직 안 붙은 것**: OpenAI `text-embedding-3-small`(1536) · MCP stdio + HTTP
-- **키가 없어도 돈다** — `embedding`은 NULL이고 `tsv` 키워드 검색만 동작한다 (D2)
+- **키가 없어도 돌도록 설계했다** — `OPENAI_API_KEY`가 없으면 `embedding`은 NULL이고
+  검색은 `tsv` 키워드만 쓴다 (D2). 검색 자체는 §7 6단계다
 - 다음: 색인(§7 5단계). 그 전에 [docs/open-questions.md](docs/open-questions.md)의 Q6·Q7·Q10을 답해야 한다
 - SCAManager 연동 · 전사 검색 · 웹 UI: **비범위**
 
