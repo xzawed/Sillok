@@ -225,6 +225,23 @@ const CASES = [
     expect: 'pass',
     mutate: append('docs/spec.md', '\n당시 수치는 `42 passed, 7 skipped` 였다.\n'),
   },
+  {
+    id: '23b 산문 속 "N skipped" (passed 없이)',
+    expect: 'fail',
+    mentions: ['테스트 수치', 'skipped'],
+    mutate: append('docs/spec.md', '\n그때는 7 skipped 였다.\n'),
+  },
+  {
+    id: '23c 산문 속 "N종 통과"',
+    expect: 'fail',
+    mentions: ['테스트 수치'],
+    mutate: append('docs/spec.md', '\n검사는 26종 통과했다.\n'),
+  },
+  {
+    id: '23d 숫자 없는 "통과" 는 잡지 않는다',
+    expect: 'pass',
+    mutate: append('docs/spec.md', '\n배치 검증 통과가 전제다.\n'),
+  },
 
   // --- 검사 11: 폐기된 문구 ---
   {
@@ -238,6 +255,12 @@ const CASES = [
     expect: 'fail',
     mentions: ['폐기된 문구'],
     mutate: write('src/sillok/_probe.py', '# 업무 라우트는 아직 없다\n'),
+  },
+  {
+    id: '26 문서에서 백틱으로 인용하는 것은 허용한다',
+    expect: 'pass',
+    // 왜 폐기했는지 적으려면 그 말을 써야 한다.
+    mutate: append('docs/spec.md', '\n예전 문구 `같은 구조다` 는 쓰지 않는다.\n'),
   },
 ]
 

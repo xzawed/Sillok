@@ -320,10 +320,11 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
 //     숫자는 검사가 늘 때마다 낡는데 아무도 다시 세지 않는다 — 이번 세션에서만 세 번 고쳤다.
 //     이력으로 인용하려면 백틱 안에 넣는다. 코드 스팬·펜스는 검사 8과 같은 이유로 제외한다.
 const NUMBER_CLAIMS = [
-  [/\d+\s*passed/, 'N passed'],
-  [/\d+\s*skipped/, 'N skipped'],
+  [/\d+\s*(tests?\s*)?passed/, 'N passed'],
+  [/\d+\s*(tests?\s*)?skipped/, 'N skipped'],
   [/skip\s*0\b/, 'skip 0'],
-  [/\d+\s*tests?\s*통과/, 'N tests 통과'],
+  // "3종 통과" 같은 표현도 잡는다. 다만 "배치 검증 통과" 처럼 숫자 없는 통과는 건드리지 않는다.
+  [/\d+\s*(개|건|종|tests?)?\s*통과/, 'N 통과'],
   [/주입\s*\d+\s*종/, '주입 N종'],
 ]
 for (const p of md) {
@@ -346,7 +347,8 @@ const RETIRED = [
   ['같은 구조다', 'D6 유추 (ingest 는 별도 프로세스다)'],
   ['업무 라우트는 아직 없다', '4단계에서 라우트가 생겼다'],
   ['업무 라우트가 없으므로', '4단계에서 라우트가 생겼다'],
-  ['후 다시 돌린다', '거짓 skip 사유 (그 명령은 5432 를 게시하지 않는다)'],
+  // "--wait" 까지 포함해야 한다. "고친 후 다시 돌린다" 같은 정상 문장을 잡으면 안 된다.
+  ['--wait 후 다시 돌린다', '거짓 skip 사유 (그 명령은 5432 를 게시하지 않는다)'],
   ['이 오버라이드가 필요 없어진다', 'sillok ingest 가 아직 없다'],
   ['-p no:warnings', '증거 명령은 pytest -q 로 통일했다'],
 ]
@@ -356,7 +358,10 @@ const textish = all.filter(
     /\.(md|py|yml|yaml|toml|example|sql)$|(^|\/)Dockerfile$/.test(p)
 )
 for (const p of textish) {
-  const s = readFileSync(join(ROOT, p), 'utf8')
+  // 문서에서는 폐기된 문구를 **인용**할 수 있어야 한다 — 왜 폐기했는지 적으려면 그 말을 써야 한다.
+  // 검사 8·10 과 같은 규칙으로 코드 스팬을 제외한다. 코드 파일은 그대로 본다(마크다운이 아니다).
+  const raw = readFileSync(join(ROOT, p), 'utf8')
+  const s = p.endsWith('.md') ? stripCode(raw).prose : raw
   for (const [phrase, why] of RETIRED) {
     if (s.includes(phrase)) fail(`${p} : 폐기된 문구 "${phrase}" — ${why}`)
   }

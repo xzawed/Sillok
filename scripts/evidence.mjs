@@ -30,13 +30,15 @@ const STEPS = [
   {
     name: '호스트 테스트',
     cmd: ['uv', ['run', 'pytest', '-q']],
-    summary: (out) => lastMatch(out, /\d+ (passed|failed)[^\n]*/),
+    // 전부 skip 된 실행은 "N passed" 줄이 없다. skipped 만 있는 줄도 잡아야
+    // 요약이 비지 않는다 — 요약이 비면 아래에서 실패로 본다.
+    summary: (out) => lastMatch(out, /\d+ (passed|failed|skipped|error)[^\n]*/),
     note: 'DB 검사는 skip 된다. skip 0 이면 5432 가 게시된 것이다 (D16)',
   },
   {
     name: 'DB 포함 테스트 (D22)',
     cmd: ['docker', ['compose', '--profile', 'test', 'run', '--rm', 'test']],
-    summary: (out) => lastMatch(out, /\d+ (passed|failed)[^\n]*/),
+    summary: (out) => lastMatch(out, /\d+ (passed|failed|skipped|error)[^\n]*/),
   },
 ]
 
@@ -53,7 +55,12 @@ function runStep(step) {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    return { ok: true, line: step.summary(out) || '(요약 줄을 찾지 못했다)' }
+    const line = step.summary(out)
+    // 명령이 0 으로 끝나도 **요약을 못 뽑으면 증거가 아니다.** 통과로 적지 않는다.
+    if (!line) {
+      return { ok: false, line: '종료 코드 0 이지만 요약 줄을 찾지 못했다 — 증거로 쓸 수 없다' }
+    }
+    return { ok: true, line }
   } catch (e) {
     if (e.code === 'ENOENT') {
       return { ok: false, line: `실행 불가 — \`${bin}\` 을 찾을 수 없다`, missing: true }
