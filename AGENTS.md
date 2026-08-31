@@ -46,7 +46,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 ## PR 하나의 증거
 
-주장이 아니라 **출력**이 남아야 한다. 세 가지다.
+주장이 아니라 **출력**이 남아야 한다.
 
 - `node scripts/check-layout.mjs` — 검사가 무는지까지 보려면 `node scripts/check-layout.test.mjs`
 - `uv run pytest -q` — 통과 개수와 **skip 개수를 함께** 적는다. skip을 빼고 보고하지 않는다.

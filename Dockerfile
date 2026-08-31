@@ -36,3 +36,11 @@ COPY tests ./tests
 RUN uv sync --frozen
 
 CMD ["uv", "run", "--no-sync", "pytest", "-q"]
+
+
+# 마지막 스테이지를 다시 runtime 으로 돌려놓는다.
+# docker build 는 --target 이 없으면 **마지막** 스테이지를 만든다. test 로 끝내면
+# `docker build .` 한 줄이 pytest 를 실은 이미지를 뱉는다 — compose 를 거치지 않는 경로다.
+# compose 의 api 는 target: runtime 을 명시하므로 여기에 기대지 않지만,
+# 기본값이 안전한 쪽이어야 한다.
+FROM runtime AS default
