@@ -13,7 +13,7 @@
 // 사용: node scripts/check-layout.test.mjs
 
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
-import { join, dirname, resolve } from 'node:path'
+import { join, dirname, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -25,10 +25,7 @@ const F4 = '`'.repeat(4)
 
 function copyRepo() {
   const dest = mkdtempSync(join(tmpdir(), 'sillok-layout-'))
-  cpSync(ROOT, dest, {
-    recursive: true,
-    filter: (src) => !SKIP.has(src.slice(src.lastIndexOf('\\') + 1).split('/').pop()),
-  })
+  cpSync(ROOT, dest, { recursive: true, filter: (src) => !SKIP.has(basename(src)) })
   return dest
 }
 
@@ -44,9 +41,14 @@ function run(dir) {
   }
 }
 
+// 치환이 빗나가면 파일이 그대로다. 그러면 "고장을 주입했다" 는 전제가 거짓인데
+// 케이스는 조용히 통과한다 — 문서 문구가 바뀌면 정확히 그렇게 된다.
 const edit = (dir, rel, fn) => {
   const p = join(dir, rel)
-  writeFileSync(p, fn(readFileSync(p, 'utf8')), 'utf8')
+  const before = readFileSync(p, 'utf8')
+  const after = fn(before)
+  if (after === before) throw new Error(`주입이 아무것도 바꾸지 못했다: ${rel}`)
+  writeFileSync(p, after, 'utf8')
 }
 const append = (rel, text) => (dir) => edit(dir, rel, (s) => s + text)
 const write = (rel, text) => (dir) => writeFileSync(join(dir, rel), text, 'utf8')
@@ -83,7 +85,7 @@ const CASES = [
   {
     id: '05 정상 펜스 뒤 산문 위반',
     expect: 'fail',
-    mentions: ['지시어'],
+    mentions: ['지시어', '이 커밋'],
     mutate: append('docs/spec.md', `\n${F3}\n코드\n${F3}\n\n산문: 이 커밋에서 고쳤다.\n`),
   },
   {
@@ -184,7 +186,8 @@ const CASES = [
   {
     id: '19 §7 게이트 문장을 통째로 지우면 운다',
     expect: 'fail',
-    mentions: ['게이트'],
+    // "문장을 하나도 찾지 못했다" 를 콕 집는다. 단계별 메시지만 남아도 통과하면 안 된다.
+    mentions: ['문장을 하나도 찾지 못했다'],
     mutate: (dir) =>
       edit(dir, 'docs/plan.md', (s) =>
         s.replace(/남은 공백은 단계별로 걸린다 —[\s\S]*?필요하다\./, '남은 공백이 있다.')
@@ -203,8 +206,22 @@ let failures = 0
 for (const c of CASES) {
   const dir = copyRepo()
   try {
-    c.mutate(dir)
+    try {
+      c.mutate(dir)
+    } catch (e) {
+      // 주입이 실패하면 그 케이스만 BAD 로 두고 나머지는 계속 돌린다.
+      failures++
+      console.log(`BAD  ${c.id}  주입 실패: ${e.message}`)
+      continue
+    }
     const { code, out } = run(dir)
+    // 대조군이 깨지면 아래 "fail" 단언은 이미 실패하는 복사본에 얹히는 것이라
+    // 아무것도 증명하지 못한다. 즉시 멈춘다.
+    if (c.id.startsWith('00') && code !== 0) {
+      console.log('BAD  00 무손상 복사본이 이미 실패한다. 이후 케이스는 의미가 없다.')
+      console.log(out)
+      process.exit(1)
+    }
     const got = code === 0 ? 'pass' : 'fail'
     let ok = got === c.expect
     const missing = []
