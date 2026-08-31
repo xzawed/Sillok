@@ -179,6 +179,102 @@ for (const p of md) {
   }
 }
 
+// 9. Q 게이트 — 단계를 막는 질문이 열려 있는데 그 단계의 표면이 코드에 있는가.
+//    plan.md §7 이 "n단계 전에 Qx·Qy" 를 소유한다. 여기서는 그 문장을 읽어 강제만 한다.
+//    문장을 고치면 검사가 따라온다 — 사실을 두 곳에 적지 않기 위해서다.
+//
+//    이 검사가 없으면 "먼저 결정한다" 는 강제되지 않는 산문이다.
+const planPath = 'docs/plan.md'
+if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
+  const plan = readFileSync(join(ROOT, planPath), 'utf8')
+  const oq = readFileSync(join(ROOT, oqPath), 'utf8')
+
+  // "4단계 전에 Q16·Q18·Q21" 에서 단계와 Q 목록을 뽑는다.
+  const gates = new Map()
+  // 쉼표·줄바꿈·한글 중 먼저 오는 것에서 끊는다.
+  // 쉼표를 넣지 않으면 "…Q21**, 5" 처럼 **다음 단계의 숫자를 먹어** 그 단계가
+  // 통째로 파싱되지 않는다. 실제로 그 상태로 4·6·8단계만 지키고 있었다 (고장 주입으로 발견).
+  for (const m of plan.matchAll(/(\d+)단계 전에([^,\n가-힣]*)/g)) {
+    const qs = [...m[2].matchAll(/Q(\d+)/g)].map((q) => Number(q[1]))
+    if (qs.length) gates.set(Number(m[1]), qs)
+  }
+
+  // 파싱 실패를 조용히 넘기지 않는다. 문장은 있는데 못 읽으면 게이트가 비어도 통과한다.
+  const declared = (plan.match(/\d+단계 전에/g) || []).length
+  if (declared !== gates.size) {
+    fail(
+      `${planPath} §7 : "n단계 전에 Qx" ${declared}건 중 ${gates.size}건만 읽었다. ` +
+        'Q 게이트가 조용히 비어 있게 된다.'
+    )
+  }
+
+  // 해결된 Q. "**Q11. ..." 로 시작하는 덩어리 안에 "해결 →" 가 있으면 닫힌 것이다.
+  const resolved = new Set()
+  const blocks = oq.split(/(?=\*\*Q\d+\.)/)
+  for (const block of blocks) {
+    const head = /^\*\*Q(\d+)\./.exec(block)
+    if (head && block.includes('해결 →')) resolved.add(Number(head[1]))
+  }
+
+  // 단계별 표면. 정본은 plan.md §5 와 docs/service-and-mcp.md 다.
+  // 긴 접두사부터 본다 — /v1/events/{id}(7단계 get_event)가 /v1/events(4단계)보다 먼저다.
+  const SURFACE = [
+    ['/v1/search/docs', 6],
+    ['/v1/search/events', 6],
+    ['/v1/stats/events', 4],
+    ['/v1/docs/proposals', 7],
+    ['/v1/events/', 7],
+    ['/v1/events', 4],
+    ['/v1/ingest', 5],
+    ['/v1/status', 4],
+    ['/v1/files', 7],
+    ['/v1/docs', 7],
+  ]
+  const CLI_STEP = { ingest: 5 }
+
+  const stepOf = (path) => {
+    for (const [prefix, step] of SURFACE) if (path.startsWith(prefix)) return step
+    return null
+  }
+
+  const py = all.filter((p) => p.startsWith('src/') && p.endsWith('.py'))
+  const found = [] // { step, what, file }
+  for (const p of py) {
+    // 주석 줄은 지운다. 설명에 적은 경로까지 잡으면 "4단계에서 붙인다" 라는
+    // 주석을 쓸 수 없다. 문자열 안의 # 는 건드리지 않으려고 줄 전체 주석만 본다.
+    const s = readFileSync(join(ROOT, p), 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n')
+    for (const m of s.matchAll(/@\w+\.(?:get|post|put|patch|delete)\(\s*["']([^"']+)["']/g)) {
+      const step = stepOf(m[1])
+      if (step) found.push({ step, what: `라우트 ${m[1]}`, file: p })
+    }
+    for (const m of s.matchAll(/\.(?:mount|include_router)\(\s*["']([^"']+)["']/g)) {
+      const step = stepOf(m[1])
+      if (step) found.push({ step, what: `마운트 ${m[1]}`, file: p })
+    }
+    for (const m of s.matchAll(/add_parser\(\s*["']([^"']+)["']/g)) {
+      const step = CLI_STEP[m[1]]
+      if (step) found.push({ step, what: `CLI ${m[1]}`, file: p })
+    }
+    if (/^\s*(?:from|import)\s+mcp\b/m.test(s)) {
+      found.push({ step: 8, what: 'MCP SDK import', file: p })
+    }
+  }
+
+  for (const hit of found) {
+    const open = (gates.get(hit.step) || []).filter((q) => !resolved.has(q))
+    if (open.length) {
+      const names = open.map((q) => 'Q' + q).join('·')
+      fail(
+        `${hit.file} : ${hit.what} 는 ${hit.step}단계인데 ${names} 가 아직 열려 있다 ` +
+          `(${planPath} §7). 먼저 결정하고 ADR 에 기록한다.`
+      )
+    }
+  }
+}
+
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
