@@ -118,7 +118,11 @@ def test_source_defaults_to_agent():
 
 @pytest.fixture
 def db():
-    """롤백해서 개발 DB 를 더럽히지 않는다."""
+    """단언·정리용 연결.
+
+    **격리 장치가 아니다.** `save_event` 는 자기 연결에서 커밋하므로 여기서 롤백해도
+    그 행은 남는다. 실제 정리는 아래 `clean_project` 의 커밋된 DELETE 다.
+    """
     with psycopg.connect(DSN) as conn:
         try:
             yield conn
@@ -128,7 +132,7 @@ def db():
 
 @pytest.fixture
 def clean_project(db):
-    """이 파일이 쓰는 project 의 잔여 행을 지운 상태로 시작한다."""
+    """이 파일이 쓰는 project 의 잔여 행을 지운 상태로 시작하고, 끝나면 지운다."""
     db.execute("DELETE FROM kb_events WHERE project = %s", ("t_step4",))
     db.commit()
     yield "t_step4"

@@ -36,8 +36,9 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 [docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
 추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D22 이후로 기록한다.
 
-A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**로 마감됐다 — 작업 순서 1–3단계를 이제 검증할 수 있다.
-남은 것이 단계별로 막는다: **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
+A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**로 마감됐다 —
+작업 순서 1–4단계를 이제 검증할 수 있다.
+남은 것이 단계별로 막는다: **5단계 전에 Q6·Q7·Q10**,
 6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17.
 
 ## 핵심 불변식
@@ -161,8 +162,9 @@ uv run pytest -q                       # 호스트. DB 검사는 skip 된다
 docker compose --profile test run --rm test   # DB 검사까지 (D22)
 ```
 
-**호스트에서는 `71 passed, 19 skipped`가 정상이다.** `skip 0`은 D16이 막은 `5432`를
+**호스트에서는 skip이 나오는 것이 정상이다.** `skip 0`은 D16이 막은 `5432`를
 게시했다는 신호이지 더 나은 결과가 아니다 — 보고할 때 skip 개수를 빼지 않는다.
+개수는 문서에 적지 않는다. 적으면 검사가 늘 때마다 낡는다.
 DB 검사까지 돌리려면 `docker compose --profile test run --rm test` (D22, `5432`는 닫힌 채).
 호스트에서 DB에 붙어야 하면(`pytest`의 DB 검사, `sillok migrate`)
 `compose.override.example.yml`을 `compose.override.yml`로 복사한다.
