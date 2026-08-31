@@ -30,10 +30,11 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 ### 아직 답이 없는 것
 
 [docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
-추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D21 이후로 기록한다.
+추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D22 이후로 기록한다.
 
-A절(Q1–Q5)은 **D16–D20으로 마감됐다** — 작업 순서 1–2단계를 이제 검증할 수 있다.
-남은 것이 단계별로 막는다: 5단계 전에 Q6·Q7·Q10, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20.
+A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**로 마감됐다 — 작업 순서 1–3단계를 이제 검증할 수 있다.
+남은 것이 단계별로 막는다: **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
+6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17.
 
 ## 핵심 불변식
 
@@ -102,7 +103,8 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 입출력 JSON 전문은 [docs/service-and-mcp.md](docs/service-and-mcp.md). MCP 도구 설명문은 짧게 — 길면 모델이 도구를 안 고른다.
 
 공통 응답: `{ "ok": true, "data": {} }` / `{ "ok": false, "error": { "code": "...", "message": "..." } }`
-에러 코드: `VALIDATION` | `NOT_FOUND` | `CONFLICT` | `INTERNAL` (HTTP 상태 매핑은 미정 — Q11)
+에러 코드 → HTTP (D21): `VALIDATION` 422 · `UNAUTHORIZED` 401 · `NOT_FOUND` 404 · `CONFLICT` 409(예약, v1 미발신) · `INTERNAL` 500
+`INTERNAL`의 `message`는 고정 문자열 `internal error`. 예외 문구를 싣지 않는다 — DSN·토큰·키가 새는 길이다.
 
 ## 구현 순서 (이 순서를 어기지 말 것)
 

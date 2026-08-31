@@ -42,7 +42,23 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 { "ok": false, "error": { "code": "VALIDATION", "message": "result required" } }
 ```
 
-에러 코드: `VALIDATION` | `NOT_FOUND` | `CONFLICT` | `INTERNAL`
+에러 코드: `VALIDATION` | `UNAUTHORIZED` | `NOT_FOUND` | `CONFLICT` | `INTERNAL`
+
+**성공이든 실패든 본문은 언제나 위 봉투다.** 상태 매핑의 정본은 [adr/0001](../adr/0001-v1-stack-decisions.md) §D21.
+
+| 코드 | HTTP | v1에서 언제 |
+|---|---|---|
+| `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락 |
+| `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
+| `NOT_FOUND` | 404 | 없는 경로. `get_event`의 404 대 빈 결과는 **Q12로 미결** |
+| `CONFLICT` | 409 | **예약. v1은 발신하지 않는다** — 발신 조건이 없다 |
+| `INTERNAL` | 500 | 서버 결함. `message`는 고정 문자열 `internal error` |
+
+`INTERNAL`에 예외 문구·트레이스백·경로를 싣지 않는다. DSN·`SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`가 새는 길이다.
+`에러 메시지를 그대로 돌려준다`는 규칙은 `VALIDATION`에만 해당한다.
+
+FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검증 실패와 없는 경로 둘 다 핸들러로 덮는다.
+빈 검색 결과는 오류가 아니다 — 200에 `{ "results": [] }`.
 
 ### 검색
 
