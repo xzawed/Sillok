@@ -18,9 +18,12 @@ MCP와 사람용 UI는 이 HTTP API만 호출한다.
 
 > **불변식의 단위는 Service 함수이지 HTTP가 아니다 (D19).**
 > 위 두 번째 줄은 MCP와 사람용 UI에 대한 규칙이다. CLI는 둘 중 어느 쪽도 아니며,
-> `sillok ingest`는 같은 앱에서 Service 함수를 인프로세스로 호출한다 — D6이 MCP를
-> 별도 클라이언트가 아니라 같은 프로세스의 다른 앞면으로 만든 것과 같은 구조다.
+> `sillok ingest`는 같은 앱에서 Service 함수를 인프로세스로 호출한다.
 > **금지되는 것은 CLI가 자기 SQL 계층을 갖는 것이다.**
+>
+> **D6과 혼동하지 않는다.** D6은 프로세스 동일성이다 — MCP는 `serve`와 같은 프로세스의 다른 앞면이다.
+> `ingest`는 **별도 프로세스이고 같은 코드의 함수를 쓴다.** 공유되는 것은 데이터 접근 계층 하나뿐이지 프로세스가 아니다.
+> `serve`와 `ingest`가 각자 DB 세션을 여는 문제는 [open-questions.md](open-questions.md) Q10으로 남는다.
 
 로컬 Compose 기본: Service `http://127.0.0.1:8080`.  
 인증: 로컬 무인증. HTTP를 외부에 열 때만 `Authorization: Bearer <token>`.
