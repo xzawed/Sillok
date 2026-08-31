@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 검색·ingest·`get_file`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
 없는 것: 8개 도구의 실제 구현, MCP, ingest, 검색 — 순서대로 붙인다.
 
-저장소 지도는 [README.md](README.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
+저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
 
 이 파일은 Claude Code 전용 컨텍스트다. **여기에 정본은 없다 — 전부 미러다.**
@@ -28,7 +28,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
 - ADR의 D1–D15는 2026-08-30, D16–D20은 2026-08-31 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
-- **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [README.md](README.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
+- **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [docs/conventions.md](docs/conventions.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
   소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 소유자를 지도에 추가한다.
 
 ### 아직 답이 없는 것
@@ -181,7 +181,7 @@ D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 
 
 ## 이 저장소의 규약
 
-- **문서 front matter**: `docs/**`, `adr/**`, 루트 `README.md`의 각 문서는 `title`·`doc_type`·`status`·`module`을 YAML front matter로 갖는다. 필드는 `kb_documents` 컬럼과 1:1이다. `AGENTS.md`/`CLAUDE.md`는 색인 대상이 아니므로 예외다.
+- **문서 front matter**: `docs/**`, `adr/**`, 루트 `README*`의 각 문서는 `title`·`doc_type`·`status`·`module`을 YAML front matter로 갖는다. 필드는 `kb_documents` 컬럼과 1:1이다. `AGENTS.md`/`CLAUDE.md`는 색인 대상이 아니므로 예외다.
 - **자기 색인**: 이 저장소의 배치는 Sillok 자신의 색인 경로(D9)를 따른다. 첫 ingest 스모크는 이 레포를 대상으로 돌린다.
 - **작업 단위**: 모든 변경은 브랜치 + PR. `main`에 직접 커밋하지 않는다.
 - 이벤트는 Git에 원본이 없는 유일한 데이터 → **백업 대상**. 문서 인덱스는 언제든 재생성 가능.

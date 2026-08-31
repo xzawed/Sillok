@@ -1,0 +1,96 @@
+---
+title: 저장소 규약
+doc_type: other
+status: current
+module: null
+---
+
+# 저장소 규약
+
+상위: [plan.md](plan.md) · [README](../README.md)
+
+**문서가 곧 구현 계약이다.** 동작이 문서와 어긋나면 코드가 틀린 것으로 본다.
+이 파일은 그 계약을 **어떻게 관리하는가**를 소유한다 — 무엇을 만드는가는 [plan.md](plan.md)가 소유한다.
+
+> README는 [D27](../adr/0001-v1-stack-decisions.md)에 따라 영문이 정본이고 방문자용 소개다.
+> 저장소 규약은 한국어로 여기에 둔다.
+
+## 문서 지도
+
+| 경로 | 역할 | `doc_type` | 이 문서가 **정본**으로 소유하는 것 |
+|---|---|---|---|
+| [plan.md](plan.md) | 구현 계약. 진입 문서 | `other` | 작업 순서, v1 완료 조건, 금지 목록 |
+| [../adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md) | 확정 결정 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위, 에러 코드↔HTTP 매핑, 라이선스) |
+| [conventions.md](conventions.md) | 저장소 규약 | `other` | **문서 지도, 충돌 판정, 정본 표기, 자기 색인, 문서 게이트** |
+| [spec.md](spec.md) | 문제·목표·비목표·세 층 | `other` | 세 층 구조, 비목표, 은유 |
+| [data-model.md](data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
+| [service-and-mcp.md](service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, 에러 코드 enum |
+| [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
+| [open-questions.md](open-questions.md) | 아직 답이 없는 것 | `other` | 미해결 질문 전체 |
+| [../README.md](../README.md) | 방문자용 소개 (영문 정본) | `readme` | 프로젝트 소개, 빠른 시작, 코드 배치 |
+| [../README.ko.md](../README.ko.md) | 같은 내용의 한국어 사본 | `readme` | 없음 — 어긋나면 영문이 이긴다 |
+| [../AGENTS.md](../AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위, 출하 루프 · PR 증거 · 테스트 방식 |
+| [../CLAUDE.md](../CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
+| [../.env.example](../.env.example) | 환경변수 계약 사본 | *(색인 안 함)* | 없음 — 정본은 ADR §D16 |
+
+`AGENTS.md`와 `CLAUDE.md`는 **에이전트 도구 설정**이지 프로젝트 지식이 아니다.
+그래서 의도적으로 색인 경로(`docs/**`, 루트 `README*`, `adr/**`) 밖에 둔다.
+
+## 충돌 판정
+
+```text
+plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
+        >  spec.md, data-model.md, service-and-mcp.md, conventions.md, skills/**
+```
+
+**다만 파일 서열보다 사실 소유권이 먼저다.** 두 문서가 같은 사실을 다르게 말하면
+위 지도에서 **그 사실을 정본으로 소유한 파일이 이긴다.**
+
+소유자가 표에 없는 새 사실이면 서열로 판정하고 **그 사실의 소유자를 표에 추가한다.**
+서열만으로 판정하면 문서가 늘 때마다 서열을 다시 협상하게 된다.
+
+계약을 바꾸려면 `plan.md`와 ADR을 **먼저** 고치고 나서 하위 문서와 구현을 맞춘다.
+
+## 정본 표기 규칙
+
+같은 값이 여러 문서에 나오면 사본에는 반드시 정본 위치를 적는다.
+
+> 정본: [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md) — 값이 다르면 정본이 이긴다.
+
+사본을 지우지 않는 이유는 진입 문서와 도구 컨텍스트에서 값이 바로 보여야 하기 때문이다.
+대신 **어긋났을 때 누가 이기는지가 항상 명시**되어야 한다.
+
+**사본이 낡는 것은 이 저장소의 알려진 실패 모드다.** 문구를 바꿔 고쳤으면
+옛 문구를 `scripts/check-layout.mjs`의 `RETIRED`에 등록한다.
+
+## 자기 색인
+
+색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
+**이 저장소의 배치가 그 규칙을 그대로 따른다** — 즉 첫 ingest 스모크는 이 저장소 자신을 대상으로 돌릴 수 있다.
+
+## 문서 게이트가 검사하는 것
+
+```bash
+node scripts/check-layout.mjs        # 검사
+node scripts/check-layout.test.mjs   # 그 검사가 실제로 무는지 (고장 주입 + 메타)
+```
+
+- D9 색인 대상에 걸리는 문서 목록과 `doc_type` 분포
+- `AGENTS.md`·`CLAUDE.md`가 **색인되지 않는지** — 색인 0건이 정상인지 버그인지 구분하려면 양방향을 다 봐야 한다
+- front matter 존재와 `doc_type`·`status`가 taxonomy 안에 있는지
+- 상대 링크가 전부 해석되는지, 진입점에서 모든 문서에 도달하는지
+- 구 파일명 잔존 참조 / 존재하지 않는 `Q` 번호 참조
+- 머지되면 의미를 잃는 지시어 — 커밋 해시·날짜·PR 번호로 고정해야 한다
+- 닫히지 않은 코드 펜스 — 열린 펜스가 뒤 본문을 먹어 위 검사를 무력화하는 것을 막는다
+- 산문에 박힌 테스트 수치 — 검사가 늘면 낡는다. 이력으로 인용하려면 백틱 안에 넣는다
+- 폐기된 문구 — 정본을 고치고 사본에 옛 문장을 남기는 것을 막는다
+- **Q 게이트** — 어떤 단계를 막는 질문이 아직 열려 있는데 그 단계의 라우트·CLI·MCP가 `src/`에 있으면 실패한다.
+  [plan.md](plan.md) §7의 *"n단계 전에 Qx"* 문장을 **읽어서** 강제하므로 그 문장을 고치면 검사가 따라온다.
+  §7에서 절이 사라지거나 파싱되지 않으면 그 자체를 실패로 본다.
+
+**Q 게이트의 한계:** 경로가 **문자열 리터럴**일 때만 본다. 데코레이터·`add_api_route`·`mount`·`include_router`와
+라우터 `prefix` 조합까지는 잡지만 변수나 f-string 경로는 못 잡는다. `prefix`는 **같은 파일 안에서만** 합쳐 보므로
+라우터를 여러 모듈로 쪼개면 놓친다 — 쪼갤 때 이 검사를 함께 넓힌다.
+
+**통과 출력만으로는 검사가 살아 있는지 알 수 없다.** 그래서 고장 주입을 커밋한다 —
+각 검사를 껐을 때 같은 주입이 통과하는지 보는 메타 케이스까지 함께 돈다.
