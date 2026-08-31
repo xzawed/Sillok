@@ -181,7 +181,7 @@ D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 
 
 ## 이 저장소의 규약
 
-- **문서 front matter**: `docs/**`, `adr/**`, 루트 `README.md`의 각 문서는 `title`·`doc_type`·`status`·`module`을 YAML front matter로 갖는다. 필드는 `kb_documents` 컬럼과 1:1이다. `AGENTS.md`/`CLAUDE.md`는 색인 대상이 아니므로 예외다.
+- **문서 front matter**: `docs/**`, `adr/**`, 루트 `README*`의 각 문서는 `title`·`doc_type`·`status`·`module`을 YAML front matter로 갖는다. 필드는 `kb_documents` 컬럼과 1:1이다. `AGENTS.md`/`CLAUDE.md`는 색인 대상이 아니므로 예외다.
 - **자기 색인**: 이 저장소의 배치는 Sillok 자신의 색인 경로(D9)를 따른다. 첫 ingest 스모크는 이 레포를 대상으로 돌린다.
 - **작업 단위**: 모든 변경은 브랜치 + PR. `main`에 직접 커밋하지 않는다.
 - 이벤트는 Git에 원본이 없는 유일한 데이터 → **백업 대상**. 문서 인덱스는 언제든 재생성 가능.

@@ -169,6 +169,19 @@ def test_stats_groups_repeat_causes_by_module(clean_project):
 
 
 @needs_db
+def test_repeat_causes_order_is_total(clean_project):
+    """D23: count 와 root_cause 가 같아도 순서가 흔들리면 LIMIT 이 자르는 대상이 달라진다.
+
+    module 까지 정렬 키에 넣어야 순서가 완전해진다. NULL module 은 마지막이다.
+    """
+    for module in ("zeta", "zeta", "alpha", "alpha", None, None):
+        service.save_event(DSN, body(module=module, root_cause="pool exhausted"))
+
+    causes = service.event_stats(DSN, clean_project)["repeat_causes"]
+    assert [c["module"] for c in causes] == ["alpha", "zeta", None]
+
+
+@needs_db
 def test_repeat_causes_needs_two(clean_project):
     """Skill 의 '2회 이상' 이 임계값이다."""
     service.save_event(DSN, body(module="auth", root_cause="once only"))

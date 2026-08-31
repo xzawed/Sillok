@@ -268,7 +268,7 @@ def event_stats(
             WHERE {where} AND root_cause IS NOT NULL
             GROUP BY module, root_cause
             HAVING count(*) >= {REPEAT_MIN_COUNT}
-            ORDER BY count DESC, root_cause ASC
+            ORDER BY count DESC, root_cause ASC, module ASC NULLS LAST
             LIMIT {REPEAT_LIMIT}
             """,
             params,

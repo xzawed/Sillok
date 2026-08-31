@@ -165,7 +165,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 | 문서 | 소유하는 것 |
 |---|---|
 | [docs/plan.md](docs/plan.md) | 구현 계약. 작업 순서, v1 완료 조건 |
-| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 모든 확정값 — 스택, 차원, 경로, 인증, 에러 매핑 |
+| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 모든 확정값 — 스택, 차원, 경로, 인증, 에러 매핑, 라이선스 |
 | [docs/conventions.md](docs/conventions.md) | 문서 지도, 충돌 판정, 문서 게이트 |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | 문제 정의 · 스키마 · API와 MCP 계약 |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 결정 트리 — 무엇이 문서가 되고 무엇이 이벤트가 되는가 |

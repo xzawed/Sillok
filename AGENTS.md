@@ -22,7 +22,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 ```
 
 계약을 바꾸려면 **[docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 먼저** 고치고,
-그 다음 하위 문서([spec](docs/spec.md), [data-model](docs/data-model.md), [service-and-mcp](docs/service-and-mcp.md), [SKILL](docs/skills/sillok-storage/SKILL.md))와 구현을 맞춘다.
+그 다음 하위 문서([conventions](docs/conventions.md), [spec](docs/spec.md), [data-model](docs/data-model.md), [service-and-mcp](docs/service-and-mcp.md), [SKILL](docs/skills/sillok-storage/SKILL.md))와 구현을 맞춘다.
 
 같은 값이 여러 문서에 있으면 사본에 정본 위치를 적는다. 어긋나면 정본이 이긴다.
 **충돌 판정은 파일 서열보다 사실 소유권이 먼저다** — [docs/conventions.md](docs/conventions.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.

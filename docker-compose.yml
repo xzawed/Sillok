@@ -100,6 +100,13 @@ services:
     environment:
       # api 와 같은 방식으로 내부 네트워크의 db 에 붙는다. 5432 는 계속 닫혀 있다 (D16).
       DATABASE_URL: postgresql://${POSTGRES_USER:-sillok}:${POSTGRES_PASSWORD:-sillok}@db:5432/${POSTGRES_DB:-sillok}
+    volumes:
+      # D28. Dockerfile 의 test 스테이지가 소스를 굽지만 compose run 은 이미지가 있으면
+      # 다시 만들지 않는다. 마운트하지 않으면 **새로 쓴 검사가 없는 옛 이미지가 통과로 보고한다** —
+      # 실패가 아니라 통과로 나오므로 조용하다. 읽기 전용이라 검사가 작업 트리를 고치지 못한다.
+      # .venv 는 이미지에 남는다. 의존성을 바꾸면 다시 빌드해야 하고 그때는 ImportError 로 시끄럽게 죽는다.
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
 
 volumes:
   db_data:
