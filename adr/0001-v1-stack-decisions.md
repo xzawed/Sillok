@@ -173,6 +173,10 @@ Exception                                    -> INTERNAL / 500
 `starlette` 쪽을 등록해야 한다. `fastapi.HTTPException`만 등록하면 프레임워크 내부에서 나는 것이 잡히지 않는다.
 같은 이유로 기본 `fastapi.security.HTTPBearer`를 그대로 쓰지 않는다 — 그것도 `{"detail": ...}`를 돌려준다.
 
+**계약 밖 상태는 살아남지 않는다.** 프레임워크가 405 같은 상태를 들고 오면 위 표의 코드로 접고,
+나가는 상태는 **그 코드의 상태**다(405 → `VALIDATION` → 422). 코드↔상태를 1:1로 유지하기 위해서다.
+5xx는 `INTERNAL`, 나머지 4xx는 `VALIDATION`으로 접는다. 코드를 늘리는 것은 계약 변경이다.
+
 ### `CONFLICT`에 v1 발신자가 없다
 
 Q11이 이미 `발생 조건조차 없다`고 적었고, 실제로 없다.

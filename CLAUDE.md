@@ -5,9 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 이 저장소의 성격
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
-[docs/plan.md](docs/plan.md) §7의 **1–2단계(Compose + 마이그레이션)까지 구현돼 있고 3단계부터는 아직 없다.**
-있는 것: `docker-compose.yml`(db만), `migrations/*.sql`, `src/sillok/`(config·migrations 러너·CLI `migrate`), `tests/`.
-없는 것: FastAPI 골격, MCP, ingest, 검색 — 순서대로 붙인다.
+[docs/plan.md](docs/plan.md) §7의 **1–3단계까지 구현돼 있고 4단계부터는 아직 없다.**
+있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
+`src/sillok/`(config · migrations 러너 · api 골격 · CLI `migrate`/`serve`), `tests/`.
+**업무 라우트는 하나도 없다** — `/v1/status` 같은 경로는 정직하게 404다. 스텁을 만들지 않는다.
+없는 것: 8개 도구의 실제 구현, MCP, ingest, 검색 — 순서대로 붙인다.
 
 저장소 지도는 [README.md](README.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -150,10 +152,13 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 
 ```bash
 node scripts/check-layout.mjs          # 문서 게이트
-docker compose up -d --wait            # db (5432 미게시 — compose.override.example.yml 참조)
-uv run sillok migrate                  # D17 러너. 멱등이라 여러 번 돌려도 된다
+docker compose up -d --wait            # db + api (5432 미게시, 8080 만 게시)
+curl -i http://127.0.0.1:8080/v1/nope  # 404 + 공통 봉투. detail 이 새면 계약 위반
 uv run pytest -q                       # DB 없으면 DB 검사만 skip 되고 나머지는 돈다
 ```
+
+호스트에서 DB에 붙어야 하면(`pytest`의 DB 검사, `sillok migrate`)
+`compose.override.example.yml`을 `compose.override.yml`로 복사한다.
 
 문서 게이트다. 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
 D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 링크 해석, 진입점 도달성, 구 파일명 잔존,
