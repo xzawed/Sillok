@@ -171,7 +171,8 @@ DB 검사까지 돌리려면 `docker compose --profile test run --rm test` (D22,
 `compose.override.example.yml`을 `compose.override.yml`로 복사한다.
 
 문서 게이트다. 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
-D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 링크 해석, 진입점 도달성, 구 파일명 잔존,
+D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy(루트 `README*`는 **없어야** 한다, D29),
+링크 해석, 진입점 도달성, 구 파일명 잔존,
 존재하지 않는 `Q` 번호 참조, 머지 후 의미를 잃는 지시어(`이 PR` 등), 닫히지 않은 코드 펜스,
 산문에 박힌 테스트 수치, 폐기된 문구,
 **Q 게이트**(단계를 막는 Q가 열려 있는데 그 단계의 라우트·CLI·MCP가 `src/`에 있는가)를
@@ -181,7 +182,9 @@ D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 
 
 ## 이 저장소의 규약
 
-- **문서 front matter**: `docs/**`, `adr/**`, 루트 `README*`의 각 문서는 `title`·`doc_type`·`status`·`module`을 YAML front matter로 갖는다. 필드는 `kb_documents` 컬럼과 1:1이다. `AGENTS.md`/`CLAUDE.md`는 색인 대상이 아니므로 예외다.
+- **문서 front matter**: `docs/**`와 `adr/**`의 각 문서는 `title`·`doc_type`·`status`·`module`을 YAML front matter로 갖는다. 필드는 `kb_documents` 컬럼과 1:1이다. `AGENTS.md`/`CLAUDE.md`는 색인 대상이 아니므로 예외다.
+- **루트 `README*`는 반대다 (D29)**: front matter를 **갖지 않는다** — GitHub가 최상단에 표로 렌더한다. 네 값은 ingest가 경로(`readme`·`current`·`null`)와 첫 H1(`title`)에서 유도한다. 게이트가 양방향으로 본다.
+- **README 어조·개행**: [docs/conventions.md](docs/conventions.md)가 소유한다. 요지는 한국어 README의 산문은 합쇼체, 제목·표 셀은 개조식, 줄은 문장 경계에서 끊고 표시폭 100칸 이내.
 - **자기 색인**: 이 저장소의 배치는 Sillok 자신의 색인 경로(D9)를 따른다. 첫 ingest 스모크는 이 레포를 대상으로 돌린다.
 - **작업 단위**: 모든 변경은 브랜치 + PR. `main`에 직접 커밋하지 않는다.
 - 이벤트는 Git에 원본이 없는 유일한 데이터 → **백업 대상**. 문서 인덱스는 언제든 재생성 가능.

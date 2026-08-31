@@ -130,6 +130,8 @@ D4(설정된 workspace)와 D5(멀티 프로젝트)가 만나는 지점인데 설
 **Q23. `status` / `doc_type` / `module` / `title`을 무엇으로 채우는지 규칙이 없다.**
 `search_docs`의 기본 필터 `status: "current"`가 이 값에 의존한다.
 → 2026-08-30 재배선(`bfc047c`)이 각 문서에 YAML front matter(`title`, `doc_type`, `status`, `module`)를 넣어 **이 저장소에 한해** 규칙을 세웠다. ingest가 front matter를 읽을지, 경로 규칙으로 추론할지는 여전히 미정.
+→ **절반 마감 (D29).** 값을 *어디서* 얻는지는 정해졌다 — 루트 `README*`는 경로와 첫 H1에서 유도하고, `docs/**`·`adr/**`는 front matter를 읽는다.
+**남은 것은 `status` 의 생애다** — 문서가 언제 `draft`·`superseded`·`stale` 이 되는지는 여전히 어느 문서에도 없다. 그래서 이 항목은 열려 있다.
 
 ---
 

@@ -1,15 +1,8 @@
----
-title: Sillok
-doc_type: readme
-status: current
-module: null
----
-
 <div align="center">
 
 # Sillok · 실록
 
-**A knowledge ledger that forces the storage decision.**
+**A knowledge ledger that forces the storage decision.**<br>
 Current truth lives in Git. What happened lives in Postgres. AI reads a handful of rows.
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -19,7 +12,7 @@ Current truth lives in Git. What happened lives in Postgres. AI reads a handful 
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-[한국어 README](README.ko.md) · this English page is canonical; the Korean one is a copy
+[한국어 README](README.ko.md) · this English page is canonical; the Korean one is a copy (D27)
 
 </div>
 
@@ -27,8 +20,8 @@ Current truth lives in Git. What happened lives in Postgres. AI reads a handful 
 
 ## What it is
 
-Sillok is **not** a RAG platform. It is a small, opinionated store that keeps a project's
-**rules** and its **history** in separate places, on purpose — so a wiki never turns into a log.
+Sillok is **not** a RAG platform. It is a small, opinionated store that keeps a project's **rules**
+and its **history** in separate places, on purpose — so a wiki never turns into a log.
 
 - **Git** holds current truth: one latest version, written in the present tense.
 - **Postgres** holds the event ledger plus a search index over the Git documents.
@@ -54,8 +47,8 @@ docker compose up -d --wait
 curl -s "http://127.0.0.1:8080/v1/status?project=demo"
 ```
 
-Only `8080` is published. Postgres stays on the internal network, so nothing reaches the
-database except the service itself.
+Only `8080` is published. Postgres stays on the internal network,
+so nothing reaches the database except the service itself.
 
 ```json
 { "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0,
@@ -101,12 +94,13 @@ Four calls, four envelopes. Ids start at 1 on an empty database and increment.
 { "ok": true, "data": { "id": 4 } }
 ```
 
-Success or failure, **the body is always the same envelope.** Framework defaults never leak through.
+Success or failure, **the body is always the same envelope.**
+Framework defaults never leak through.
 
 ### Repeats are counted per module
 
-The same `root_cause` in a different module is a different repeat. Collapsing them would
-report **four recurrences that never happened**.
+The same `root_cause` in a different module is a different repeat.
+Collapsing them would report **four recurrences that never happened**.
 
 ```bash
 curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
@@ -126,8 +120,9 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 } }
 ```
 
-Statistics **never use vectors** — filters plus `COUNT` / `AVG` only. Unresolved events are
-excluded from the average, so an all-unresolved window returns `null` rather than `0`.
+Statistics **never use vectors** — filters plus `COUNT` / `AVG` only.
+Unresolved events are excluded from the average,
+so an all-unresolved window returns `null` rather than `0`.
 `by_*` are JSON objects; key order is not guaranteed.
 
 ## How it works
@@ -140,11 +135,12 @@ excluded from the average, so an all-unresolved window returns `null` rather tha
 
 Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 
-- **The unit of the invariant is the Service function, not HTTP.** MCP and any human UI must go
-  through the HTTP API; the CLI calls the same functions in-process. What is forbidden is a
-  second SQL layer anywhere.
-- **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column stays
-  NULL and search will use `tsv` keywords only. Search itself is stage 6 and is not built yet.
+- **The unit of the invariant is the Service function, not HTTP.** MCP and any human UI
+  must go through the HTTP API; the CLI calls the same functions in-process.
+  What is forbidden is a second SQL layer anywhere.
+- **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column
+  stays NULL and search will use `tsv` keywords only.
+  Search itself is stage 6 and is not built yet.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
 
 ## Status
@@ -158,10 +154,11 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 
-**No stubs.** A route that merely responds, parked on a completion criterion, would look like progress.
+**No stubs.** A route that merely responds, parked on a completion criterion,
+would look like progress.
 
-Open design questions are tracked in [docs/open-questions.md](docs/open-questions.md) and they
-**block the stages that depend on them** — enforced by a check, not by convention.
+Open design questions are tracked in [docs/open-questions.md](docs/open-questions.md),
+and they **block the stages that depend on them** — enforced by a check, not by convention.
 
 ## Documentation
 
@@ -193,8 +190,8 @@ node scripts/evidence.mjs   # runs everything a change must show, in one command
 | `docker compose --profile test run --rm test` | Everything, including database tests, with `5432` still closed |
 
 Seeing `skip 0` on the host means the port override is on — it is a signal, not a better result.
-The committed Compose file does not publish `5432`; copy `compose.override.example.yml` if you
-need to reach the database from the host.
+The committed Compose file does not publish `5432`;
+copy `compose.override.example.yml` if you need to reach the database from the host.
 
 <details>
 <summary>If <code>docker compose build</code> fails on DNS</summary>

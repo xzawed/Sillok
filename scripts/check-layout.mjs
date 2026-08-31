@@ -12,10 +12,15 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DOC_TYPES = ['adr', 'api', 'runbook', 'readme', 'schema', 'other']
 const STATUSES = ['current', 'draft', 'superseded', 'stale']
 
+// 검사 3 과 검사 12 가 같은 것을 반대 방향으로 본다. 파서를 두 벌 두면 갈라진다.
+const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---/
+// 루트 README* — D9 색인 대상이면서 front matter 를 갖지 **않는** 유일한 부류다 (D29).
+const isRootReadme = (p) => /^README[^/]*$/i.test(p)   // D9 는 확장자·대소문자를 가리지 않는다
+
 // D9 색인 대상. 값을 바꾸려면 adr/0001-v1-stack-decisions.md 를 먼저 고친다.
 const INCLUDE = [
   (p) => p.startsWith('docs/'),
-  (p) => /^README[^/]*$/i.test(p),   // D9 는 확장자·대소문자를 가리지 않는다
+  isRootReadme,
   (p) => p.startsWith('adr/'),
 ]
 // 색인되면 안 되는 것. 에이전트 도구 설정이지 프로젝트 지식이 아니다.
@@ -52,10 +57,15 @@ for (const x of MUST_EXCLUDE) {
 }
 
 // 3. 색인 대상 전부 front matter 를 갖고 값이 taxonomy 안에 있는가
+//    루트 README* 만 예외다 — GitHub 이 최상단에 표로 렌더한다 (D29).
+//    유도 규칙(경로 → readme/current/null, 첫 H1 → title)은 ingest 가 소유한다. 여기서 복제해
+//    분포를 채우지 않는다 — 같은 규칙이 두 벌이면 그것이 곧 낡는 사본이다. 대신 면제 목록을 출력한다.
+//    반대 방향(README 에 front matter 가 되살아나는 것)은 검사 12 가 본다.
 const seen = { doc_type: {}, status: {} }
 for (const p of indexed) {
+  if (isRootReadme(p)) continue
   const s = readFileSync(join(ROOT, p), 'utf8')
-  const m = s.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  const m = s.match(FRONT_MATTER)
   if (!m) { fail(`${p} : front matter 없음`); continue }
   const fm = Object.fromEntries(
     m[1].split(/\r?\n/).filter((l) => l.includes(':'))
@@ -352,6 +362,8 @@ const RETIRED = [
   ['--wait 후 다시 돌린다', '거짓 skip 사유 (그 명령은 5432 를 게시하지 않는다)'],
   ['이 오버라이드가 필요 없어진다', 'sillok ingest 가 아직 없다'],
   ['-p no:warnings', '증거 명령은 pytest -q 로 통일했다'],
+  // 코드 스팬은 stripCode 가 지우므로 백틱 없는 조각을 고른다.
+  ['front matter 존재와', 'D29 가 루트 README* 를 반대로 뒤집었다 (있으면 실패)'],
 ]
 const textish = all.filter(
   (p) =>
@@ -370,9 +382,22 @@ for (const p of textish) {
   }
 }
 
+// 12. 루트 README* 는 front matter 를 갖지 않는가 (D29).
+//     GitHub 이 최상단 front matter 를 4행 표로 렌더해 제목보다 위에 얹는다 — 공개 얼굴에 잡음이다.
+//     검사 3 이 이 부류를 건너뛰므로 반대 방향은 여기서만 지킨다. 예외만 뚫고 끝내면
+//     누군가 되살렸을 때 게이트가 초록불로 통과시키고 첫 화면에 표가 돌아온다.
+const readmes = indexed.filter(isRootReadme)
+if (readmes.length === 0) fail('루트 README* 가 색인 대상에 없다. D9 패턴이 깨졌다.')
+for (const p of readmes) {
+  if (FRONT_MATTER.test(readFileSync(join(ROOT, p), 'utf8'))) {
+    fail(`${p} : front matter 가 있다 — GitHub 이 최상단에 표로 렌더한다 (D29). 지운다.`)
+  }
+}
+
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
+console.log(`FM 없음     ${readmes.join(', ')}`)
 console.log(`doc_type    ${JSON.stringify(seen.doc_type)}`)
 console.log(`status      ${JSON.stringify(seen.status)}`)
 console.log(`상대 링크   ${links}개`)

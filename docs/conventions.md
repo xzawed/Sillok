@@ -21,14 +21,14 @@ module: null
 |---|---|---|---|
 | [plan.md](plan.md) | 구현 계약. 진입 문서 | `other` | 작업 순서, v1 완료 조건, 금지 목록 |
 | [../adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md) | 확정 결정 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위, 에러 코드↔HTTP 매핑, 라이선스) |
-| [conventions.md](conventions.md) | 저장소 규약 | `other` | **문서 지도, 충돌 판정, 정본 표기, 자기 색인, 문서 게이트** |
+| [conventions.md](conventions.md) | 저장소 규약 | `other` | **문서 지도, 충돌 판정, 정본 표기, README 어조·개행, 자기 색인, 문서 게이트** |
 | [spec.md](spec.md) | 문제·목표·비목표·세 층 | `other` | 세 층 구조, 비목표, 은유 |
 | [data-model.md](data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
 | [service-and-mcp.md](service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, 에러 코드 enum |
 | [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
 | [open-questions.md](open-questions.md) | 아직 답이 없는 것 | `other` | 미해결 질문 전체 |
-| [../README.md](../README.md) | 방문자용 소개 (영문 정본) | `readme` | 프로젝트 소개, 빠른 시작, 코드 배치 |
-| [../README.ko.md](../README.ko.md) | 같은 내용의 한국어 사본 | `readme` | 없음 — 어긋나면 영문이 이긴다 |
+| [../README.md](../README.md) | 방문자용 소개 (영문 정본) | `readme` *(경로에서 유도, D29)* | 프로젝트 소개, 빠른 시작, 코드 배치 |
+| [../README.ko.md](../README.ko.md) | 같은 내용의 한국어 사본 | `readme` *(경로에서 유도, D29)* | 없음 — 어긋나면 영문이 이긴다 |
 | [../AGENTS.md](../AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위, 출하 루프 · PR 증거 · 테스트 방식 |
 | [../CLAUDE.md](../CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
 | [../.env.example](../.env.example) | 환경변수 계약 사본 | *(색인 안 함)* | 없음 — 정본은 ADR §D16 |
@@ -63,9 +63,22 @@ plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
 **사본이 낡는 것은 이 저장소의 알려진 실패 모드다.** 문구를 바꿔 고쳤으면
 옛 문구를 `scripts/check-layout.mjs`의 `RETIRED`에 등록한다.
 
+## README 어조와 개행
+
+두 README 는 방문자용이라 나머지 문서와 규칙이 다르다. 여기 적어 두지 않으면 다음 편집자가 조용히 뒤섞는다.
+
+- **어조.** [README.ko.md](../README.ko.md)의 **산문은 합쇼체**(-입니다/-습니다)다.
+  **제목과 표 셀은 개조식**(-다/-한다)으로 둔다 — 표 셀을 합쇼체로 바꾸면 한 칸짜리 열이 부풀어
+  영문판 표(`Working` · `Not yet`)와의 대칭도 깨진다. 다른 한국어 문서는 전부 개조식이다
+- **개행.** 줄은 **문장 경계**에서 끊는다. 한 문장이 길면 절 경계(쉼표·줄표·연결어미 뒤)에서 나눈다.
+  관형사·조사와 명사 사이, 주어와 서술어 사이, 구동사 사이에서는 끊지 않는다
+- **줄 길이는 표시폭 100칸 이내**다 (한글 2칸). **표 행은 예외** — 한 행이 한 줄이라 접을 수 없다
+- 두 파일의 **산문 블록 수와 문단 구조를 맞춘다.** 나란히 놓고 대조할 수 있어야 번역 사본이 덜 낡는다
+
 ## 자기 색인
 
 색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
+루트 `README*`만 front matter 를 갖지 않는다 — 네 값은 ingest 가 경로와 첫 H1 에서 유도한다 (D29).
 **이 저장소의 배치가 그 규칙을 그대로 따른다** — 즉 첫 ingest 스모크는 이 저장소 자신을 대상으로 돌릴 수 있다.
 
 ## 문서 게이트가 검사하는 것
@@ -77,7 +90,9 @@ node scripts/check-layout.test.mjs   # 그 검사가 실제로 무는지 (고장
 
 - D9 색인 대상에 걸리는 문서 목록과 `doc_type` 분포
 - `AGENTS.md`·`CLAUDE.md`가 **색인되지 않는지** — 색인 0건이 정상인지 버그인지 구분하려면 양방향을 다 봐야 한다
-- front matter 존재와 `doc_type`·`status`가 taxonomy 안에 있는지
+- front matter 가 있는지와 `doc_type`·`status`가 taxonomy 안에 있는지 — **루트 `README*`는 반대다.**
+  거기에 front matter 가 **있으면** 실패한다 (D29). GitHub 이 최상단에 표로 렌더하기 때문이고,
+  네 값은 ingest 가 경로와 첫 H1 에서 유도한다. 위의 `AGENTS.md`·`CLAUDE.md` 검사와 같은 양방향이다
 - 상대 링크가 전부 해석되는지, 진입점에서 모든 문서에 도달하는지
 - 구 파일명 잔존 참조 / 존재하지 않는 `Q` 번호 참조
 - 머지되면 의미를 잃는 지시어 — 커밋 해시·날짜·PR 번호로 고정해야 한다
