@@ -152,7 +152,8 @@ ADR의 핵심 가치인 *왜 다른 안을 버렸는가*가 비어 있다.
 **Q26. 커밋된 구성에서 DB 검사를 돌릴 방법이 없다.** — **해결 → D22**
 `tests/test_migrations.py`의 19개는 호스트에서 `5432`에 닿아야 도는데 **D16이 그 포트를 게시하지 않는다.**
 컨테이너 안에서도 못 돈다 — 이미지가 `tests`를 제외하고(`.dockerignore`) `--no-dev`로 설치해 `pytest`가 없다.
-결과: 커밋된 구성은 `71 passed, 19 skipped`이고, `skip 0`은 D16을 어긴 상태에서만 나온다.
+결과: 커밋된 구성에서는 DB 검사가 전부 skip되고, `skip 0`은 D16을 어긴 상태에서만 나온다.
+(발견 당시 수치는 `71 passed, 19 skipped` 대 `90 passed`였다. 개수는 검사가 늘면 낡으므로 이력으로만 적는다.)
 
 > 2026-08-31 감사에서 발견. PR #5·#6·#7이 `skip 0`을 머지 근거의 머리줄로 썼다.
 > (#5 본문은 다른 대목에서 `DB 검사 13건만 skip`을 적었으므로 전제를 완전히 감춘 것은 아니다.
@@ -164,5 +165,5 @@ D13 `두 개`와 부딪히는지 판단 필요. (b) skip을 그대로 두고 보
 
 → **(a)로 확정 (D22).** `profiles: ["test"]`가 붙어 기본 `up`에 나타나지 않으므로 D13의 `두 개`
 (기본 `up`의 제품 스택)를 어기지 않는다. `docker compose --profile test run --rm test`.
-**호스트의 `uv run pytest -q`는 그대로 `71 passed, 19 skipped`이고 그것이 정상이다** — 보고에서 skip을 빼지 않는다.
-실측: `db PORTS: 5432/tcp`(미게시) 상태에서 `--profile test run` → `90 passed`.
+**호스트의 `uv run pytest -q`는 그대로 skip이 나오고 그것이 정상이다** — 보고에서 skip을 빼지 않는다.
+실측(당시): `db PORTS: 5432/tcp`(미게시) 상태에서 `--profile test run`이 skip 없이 전부 통과했다.
