@@ -156,11 +156,13 @@ node scripts/check-layout.mjs          # 문서 게이트
 node scripts/check-layout.test.mjs     # 그 게이트가 실제로 무는지 (고장 주입)
 docker compose up -d --wait            # db + api (5432 미게시, 8080 만 게시)
 curl -i http://127.0.0.1:8080/v1/nope  # 404 + 공통 봉투. detail 이 새면 계약 위반
-uv run pytest -q                       # DB 없으면 DB 검사만 skip 되고 나머지는 돈다
+uv run pytest -q                       # 호스트. DB 검사는 skip 된다
+docker compose --profile test run --rm test   # DB 검사까지 (D22)
 ```
 
-**커밋된 구성에서는 `71 passed, 19 skipped`가 정상이다.** `skip 0`은 D16이 막은 `5432`를
-게시했다는 신호이지 더 나은 결과가 아니다 — 보고할 때 skip 개수를 빼지 않는다 (Q26).
+**호스트에서는 `71 passed, 19 skipped`가 정상이다.** `skip 0`은 D16이 막은 `5432`를
+게시했다는 신호이지 더 나은 결과가 아니다 — 보고할 때 skip 개수를 빼지 않는다.
+DB 검사까지 돌리려면 `docker compose --profile test run --rm test` (D22, `5432`는 닫힌 채).
 호스트에서 DB에 붙어야 하면(`pytest`의 DB 검사, `sillok migrate`)
 `compose.override.example.yml`을 `compose.override.yml`로 복사한다.
 

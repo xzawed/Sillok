@@ -1,7 +1,6 @@
 .git
 .venv
 .uv
-tests
 docs
 adr
 scripts
