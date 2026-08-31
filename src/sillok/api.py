@@ -59,8 +59,17 @@ def error(code: str, message: str) -> JSONResponse:
     status = STATUS_FOR_CODE.get(code)
     if status is None:
         # 계약에 없는 코드를 내보내느니 INTERNAL 로 떨어뜨린다.
-        log.error("계약에 없는 에러 코드: %s", code)
-        code, status, message = ErrorCode.INTERNAL, 500, INTERNAL_MESSAGE
+        log.error("계약에 없는 에러 코드: %s (message=%r)", code, message)
+        code, status = ErrorCode.INTERNAL, 500
+
+    if code == ErrorCode.INTERNAL:
+        # **호출자를 믿지 않는다.** INTERNAL 의 본문은 여기서 무조건 고정한다 (D21).
+        # 이 한 줄이 없으면 HTTPException(500, detail=...) 하나로 DSN 이 새어 나간다.
+        # 넘어온 문구는 서버 로그에만 남긴다.
+        if message != INTERNAL_MESSAGE:
+            log.error("INTERNAL 메시지를 버렸다: %r", message)
+        message = INTERNAL_MESSAGE
+
     return JSONResponse(
         {"ok": False, "error": {"code": code, "message": message}}, status_code=status
     )
