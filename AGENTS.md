@@ -1,7 +1,7 @@
 # Sillok — Agent 협업 규칙
 
 Claude와 Grok이 같은 저장소를 만질 때 따른다.
-세션 시작 시 **[docs/plan.md](docs/plan.md)** 를 먼저 읽는다. 저장소 지도는 [README.md](README.md).
+세션 시작 시 **[docs/plan.md](docs/plan.md)** 를 먼저 읽는다. 저장소 지도는 [docs/conventions.md](docs/conventions.md).
 
 이 파일은 에이전트 운영 규약이지 프로젝트 지식이 아니다. 그래서 Sillok 색인 대상이 아니다.
 

@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 검색·ingest·`get_file`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
 없는 것: 8개 도구의 실제 구현, MCP, ingest, 검색 — 순서대로 붙인다.
 
-저장소 지도는 [README.md](README.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
+저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
 
 이 파일은 Claude Code 전용 컨텍스트다. **여기에 정본은 없다 — 전부 미러다.**

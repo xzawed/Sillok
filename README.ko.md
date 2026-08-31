@@ -54,6 +54,8 @@ docker compose up -d --wait
 curl -s "http://127.0.0.1:8080/v1/status?project=demo"
 ```
 
+게시되는 포트는 `8080` 하나다. Postgres는 내부 네트워크에 남으므로 Service 말고는 DB에 닿지 않는다.
+
 ```json
 { "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0,
                         "last_ingest_at": null, "zero_hit_queries": 0 } }
@@ -137,7 +139,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 
 - **불변식의 단위는 Service 함수이지 HTTP가 아니다.** MCP와 사람용 UI는 HTTP API를 통해야 하고,
   CLI는 같은 함수를 인프로세스로 부른다. 금지되는 것은 어디서든 **두 번째 SQL 계층**이 생기는 것이다.
-- **임베딩은 선택이다.** `OPENAI_API_KEY`가 없으면 `embedding`은 NULL이고 검색은 `tsv` 키워드로 돈다.
+- **임베딩은 설계상 선택이다.** `OPENAI_API_KEY`가 없으면 `embedding`은 NULL이고 검색은 `tsv` 키워드만 쓴다. 검색 자체는 6단계이고 아직 없다.
 - **비밀은 환경변수로만.** [.env.example](.env.example) 참조.
 
 ## 상태
@@ -146,7 +148,8 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 |---|---|
 | Compose · 마이그레이션 · FastAPI 골격 | 된다 |
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
-| 색인(`sillok ingest`) · 검색 · `get_file` · MCP 도구 | **아직이다 — 그 경로는 정직하게 404다** |
+| 검색 · `get_file` · `save_doc` | **아직이다 — 그 경로는 정직하게 404다** |
+| 색인(`sillok ingest` CLI) · MCP 도구 | **아직이다 — 명령과 도구 표면 자체가 없다** |
 
 > 진행 상태의 정본은 [docs/plan.md](docs/plan.md) §7·§9다.
 
@@ -157,7 +160,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 
 ## 문서
 
-README 아래의 문서는 전부 한국어다.
+설계 문서는 한국어로 쓴다.
 
 | 문서 | 소유하는 것 |
 |---|---|
@@ -165,6 +168,7 @@ README 아래의 문서는 전부 한국어다.
 | [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 모든 확정값 — 스택, 차원, 경로, 인증, 에러 매핑 |
 | [docs/conventions.md](docs/conventions.md) | 문서 지도, 충돌 판정, 문서 게이트 |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | 문제 정의 · 스키마 · API와 MCP 계약 |
+| [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 결정 트리 — 무엇이 문서가 되고 무엇이 이벤트가 되는가 |
 | [docs/open-questions.md](docs/open-questions.md) | 아직 답이 없는 것 |
 | [AGENTS.md](AGENTS.md) | 한 변경이 나가는 절차와 무엇이 증거인가 |
 

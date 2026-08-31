@@ -15,7 +15,7 @@ module: null
 
 ```text
 docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
-        >  spec.md, data-model.md, service-and-mcp.md, skills/**
+        >  spec.md, data-model.md, service-and-mcp.md, conventions.md, skills/**
 ```
 
 **충돌 판정은 두 단계다.**

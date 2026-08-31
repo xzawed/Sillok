@@ -19,7 +19,7 @@ Current truth lives in Git. What happened lives in Postgres. AI reads a handful 
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-[한국어 README](README.ko.md)
+[한국어 README](README.ko.md) · this English page is canonical; the Korean one is a copy
 
 </div>
 
@@ -53,6 +53,9 @@ Requires Docker. Nothing else — the API container carries its own Python.
 docker compose up -d --wait
 curl -s "http://127.0.0.1:8080/v1/status?project=demo"
 ```
+
+Only `8080` is published. Postgres stays on the internal network, so nothing reaches the
+database except the service itself.
 
 ```json
 { "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0,
@@ -140,8 +143,8 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 - **The unit of the invariant is the Service function, not HTTP.** MCP and any human UI must go
   through the HTTP API; the CLI calls the same functions in-process. What is forbidden is a
   second SQL layer anywhere.
-- **Embeddings are optional.** Without `OPENAI_API_KEY` the `embedding` column stays NULL and
-  search falls back to `tsv` keywords.
+- **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column stays
+  NULL and search will use `tsv` keywords only. Search itself is stage 6 and is not built yet.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
 
 ## Status
@@ -150,7 +153,8 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 |---|---|
 | Compose, migrations, FastAPI skeleton | Working |
 | `POST /v1/events`, `GET /v1/stats/events`, `GET /v1/status` | Working |
-| Indexing (`sillok ingest`), search, `get_file`, MCP tools | **Not yet — those routes honestly return 404** |
+| Search, `get_file`, `save_doc` | **Not yet — those routes honestly return 404** |
+| Indexing (`sillok ingest` CLI), MCP tools | **Not yet — the command and the tool surface do not exist** |
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 
@@ -161,14 +165,15 @@ Open design questions are tracked in [docs/open-questions.md](docs/open-question
 
 ## Documentation
 
-Everything below the README is written in Korean.
+The design documents are written in Korean.
 
 | Document | What it owns |
 |---|---|
 | [docs/plan.md](docs/plan.md) | The implementation contract. Build order, v1 done criteria |
-| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | Every settled value — stack, dimensions, paths, auth, error mapping |
+| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | Every settled value — stack, dimensions, paths, auth, error mapping, licence |
 | [docs/conventions.md](docs/conventions.md) | Document map, conflict resolution, the documentation gate |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | Problem framing · schema · API and MCP contract |
+| [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | The storage decision tree — which writes become documents and which become events |
 | [docs/open-questions.md](docs/open-questions.md) | What has no answer yet |
 | [AGENTS.md](AGENTS.md) | How a change ships, and what counts as evidence |
 
