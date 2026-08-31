@@ -153,7 +153,7 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 
 ```bash
 node scripts/check-layout.mjs          # 문서 게이트
-node scripts/check-layout.test.mjs     # 그 게이트가 실제로 무는지 (고장 주입 21종)
+node scripts/check-layout.test.mjs     # 그 게이트가 실제로 무는지 (고장 주입)
 docker compose up -d --wait            # db + api (5432 미게시, 8080 만 게시)
 curl -i http://127.0.0.1:8080/v1/nope  # 404 + 공통 봉투. detail 이 새면 계약 위반
 uv run pytest -q                       # DB 없으면 DB 검사만 skip 되고 나머지는 돈다
