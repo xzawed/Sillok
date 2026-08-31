@@ -158,9 +158,12 @@ function stripCode(src) {
   for (const line of src.split('\n')) {
     const m = /^ {0,3}(`{3,}|~{3,})/.exec(line)
     if (m) {
+      // CommonMark: 닫는 펜스는 여는 펜스와 같은 문자이고 길이가 같거나 길어야 한다.
+      // 길이를 무시하면 ```` 로 연 블록이 안쪽 예시의 ``` 에 닫혀 그 뒤가 산문으로 샌다.
       const marker = m[1][0]
-      if (fence === null) fence = marker
-      else if (marker === fence) fence = null
+      const len = m[1].length
+      if (fence === null) fence = { marker, len }
+      else if (marker === fence.marker && len >= fence.len) fence = null
       continue
     }
     if (fence === null) out.push(line.replace(/`[^`\n]*`/g, ''))
