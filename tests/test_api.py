@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from sillok import api
+from sillok import api, service
 from sillok.config import Config
 
 
@@ -246,20 +246,31 @@ def test_step4_routes_exist(method, path):
 
 
 def test_step4_routes_stay_in_the_envelope_without_a_db():
-    """DB 가 없어도 봉투를 깨지 않고, **무한히 매달리지 않는다.**
-
-    타임아웃이 없으면 한 요청이 130초를 먹는다 (실측). 그건 서비스가 죽은 것과 같다.
-    """
-    import time
-
+    """DB 가 없어도 봉투를 깨지 않는다 — INTERNAL 이지 스택 트레이스가 아니다."""
     client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
-    started = time.monotonic()
     r = client.get("/v1/status?project=sillok")
-    elapsed = time.monotonic() - started
-
     assert r.status_code == 500
     assert r.json() == {"ok": False, "error": {"code": "INTERNAL", "message": "internal error"}}
-    assert elapsed < 30, f"연결 타임아웃이 없다: {elapsed:.0f}초"
+
+
+def test_service_connect_always_passes_a_timeout(monkeypatch):
+    """타임아웃이 없으면 DB 가 닿지 않을 때 요청이 매달린다 (실측 130초).
+
+    경과 시간으로 재면 OS 마다 다르다 — 리눅스는 죽은 포트에 즉시 RST 를 보내므로
+    타임아웃이 없어도 빨리 끝나 검사가 공허해진다(Grok 지적).
+    그래서 시간이 아니라 **인자가 넘어가는지**를 본다.
+    """
+    seen = {}
+
+    def _fake_connect(dsn, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("연결하지 않는다")
+
+    monkeypatch.setattr(service.psycopg, "connect", _fake_connect)
+    with pytest.raises(RuntimeError):
+        service.connect("postgresql://x/y")
+
+    assert seen.get("connect_timeout"), "connect_timeout 이 넘어가지 않는다"
 
 
 @pytest.mark.parametrize(

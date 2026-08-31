@@ -202,9 +202,10 @@ curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
 uv run pytest -q
 ```
 
-> **지금은 가운데 두 줄이 돌지 않는다.** `sillok ingest`는 5단계, `/v1/status`는 4단계에서 생긴다.
-> 오늘 돌릴 수 있는 것은 1·2·5번째 줄뿐이고, 5번째는 커밋된 구성에서 `71 passed, 19 skipped`가 정상이다 (Q26).
-> 이 블록은 **목표**이지 현재 상태가 아니다.
+> **지금은 3번째 줄이 돌지 않는다.** `sillok ingest`는 5단계에서 생긴다.
+> `/v1/status`는 4단계에서 생겼으므로 4번째 줄은 돈다.
+> 5번째 줄은 호스트에서 DB 검사가 skip된 채로 돈다 — 전부 돌리려면 D22의 `--profile test`다.
+> 이 블록은 **v1 목표**이지 현재 상태가 아니다.
 
 `sillok ingest`는 `serve`가 떠 있지 않아도 도는 것이 D19의 요점이다.
 위 명령이 `exec api`를 쓰는 것은 Compose 안에서 워크스페이스와 DSN이 이미 맞춰져 있기 때문이지, HTTP를 타서가 아니다.

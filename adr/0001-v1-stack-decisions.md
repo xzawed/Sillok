@@ -289,7 +289,11 @@ D17이 `세 번째 컨테이너 없음`으로 마이그레이션 전용 컨테�
 
 - `root_cause IS NULL`은 제외한다. 원인이 아니다
 - `HAVING count >= 2` — Skill의 *2회 이상*이 그대로 임계값이다
-- `ORDER BY count DESC LIMIT 12` — 상한이 없으면 distinct 원인 전부가 나가 토큰 불변식을 깬다. `12`는 검색 최대치와 같은 값이다
+- `ORDER BY count DESC, root_cause ASC LIMIT 12` — 상한이 없으면 distinct 원인 전부가 나가 토큰 불변식을 깬다.
+  `12`는 검색 최대치와 같은 값이다. **동수일 때 `root_cause`로 다시 정렬한다** — 그렇지 않으면 `LIMIT`이 자르는 대상이 실행마다 달라진다
+- `module`이 없는 반복도 항목으로 나간다(`"module": null`). `by_module`이 NULL **키**를 못 만드는 것과 다르다 —
+  여기서는 필드라 `null`을 표현할 수 있고, 모듈 없는 반복도 승격 제안 대상이다
+- `avg_resolution_seconds`는 `ROUND(EXTRACT(EPOCH FROM AVG(...)))` — 소수 첫째 자리에서 반올림한 정수 초다
 - `by_module`은 `module IS NULL`인 행의 키를 **넣지 않는다.** JSON 키는 null일 수 없고 `"null"`은 실제 모듈명과 충돌한다.
   그 행들은 `total`에 그대로 있으므로 `sum(by_module) <= total`이 신호다. 0인 키도 넣지 않는다
 - `avg_resolution_seconds`는 정수 초 또는 `null`. `resolved_at`이 NULL인 행은 `AVG`에서 빠지므로
@@ -332,6 +336,8 @@ Compose에서 우연히 UTC가 되는 것이지 계약이 아니다.
 CHECK로 걸면 Postgres 예외가 되고 D21이 그것을 `INTERNAL 500`으로 접는다 — 클라이언트 입력 문제인데 서버 결함으로 보고된다.
 
 **`title` 상한 200자** — **새 사실이다.** 지금까지 어디에도 없었다. `summary` 2000자와 같은 자리에 적는다.
+
+**`source`를 생략하면 `agent`다.** DDL의 컬럼 기본값과 같은 값이고, 서비스가 그 값을 채워 넣는다.
 
 **DDL에 CHECK를 넣지 않는다.** enum은 서비스에만 둔다. Skill의 값이 바뀔 때 마이그레이션이 되지 않게 하려는 것이다.
 넣기로 한다면 `002`를 고치면 안 된다 — 이미 적용된 `CREATE TABLE IF NOT EXISTS`는 제약을 추가하지 않는다.

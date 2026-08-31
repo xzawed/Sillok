@@ -83,7 +83,7 @@ node scripts/check-layout.test.mjs   # 검사가 실제로 무는지 (고장 주
 
 이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드와 무관한 **문서 게이트**다.
 
-구현된 부분(§7 1–3단계)의 검증은 따로 있다:
+구현된 부분(§7 1–4단계)의 검증은 따로 있다:
 
 ```bash
 docker compose up -d --wait   # db + api. 5432 는 게시하지 않고 8080 만 게시한다 (D16)
@@ -91,19 +91,21 @@ curl -i http://127.0.0.1:8080/v1/nope   # 404 + 공통 봉투. FastAPI 기본 de
 uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
 ```
 
-**호스트에서 `uv run pytest -q`는 `71 passed, 19 skipped`가 정상이다.** DB 검사 19개는 `5432`에 닿아야 하는데
-D16이 그 포트를 게시하지 않기 때문이다. `skip 0`을 보았다면 오버라이드가 켜져 있다는 뜻이지 더 나은 결과가 아니다.
+**호스트에서 `uv run pytest -q`는 skip이 나오는 것이 정상이다.** DB 검사는 `5432`에 닿아야 하는데
+D16이 그 포트를 게시하지 않기 때문이다. **`skip 0`을 보았다면 오버라이드가 켜져 있다는 뜻이지 더 나은 결과가 아니다.**
+(개수는 여기 적지 않는다. 적으면 검사가 늘 때마다 낡는다.)
 
-그 19개까지 돌리려면 (D22):
+DB 검사까지 돌리려면 (D22):
 
 ```bash
-docker compose --profile test run --rm test   # 90 passed. 5432 는 닫힌 채로 돈다
+docker compose --profile test run --rm test   # skip 없이 전부. 5432 는 닫힌 채로 돈다
 ```
 
 `profiles`가 붙어 있어 기본 `docker compose up`에는 나타나지 않는다 — 제품 스택은 `db` + `api` 둘 그대로다.
 
 `api`는 bind 전에 마이그레이션을 돌린다 (D17) — 기동 로그에서 순서가 보인다.
-**업무 라우트는 아직 없다.** `/v1/status` 같은 4단계 경로는 정직하게 404를 돌려준다.
+**업무 라우트는 4단계의 셋뿐이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status`.
+검색·ingest·`get_file`·MCP 경로는 정직하게 404를 돌려준다.
 
 호스트에서 DB 에 직접 붙어야 하면(`uv run pytest`의 DB 검사, `uv run sillok migrate`)
 `compose.override.example.yml` 를 복사해 쓴다.
