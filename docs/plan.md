@@ -84,7 +84,7 @@ AI는 MCP로 행 몇 개만 읽고 쓴다. 문서를 대화에 통째로 넣지 
 
 ```text
 Postgres          kb_documents, kb_chunks, kb_events, ingest/query logs
-Knowledge Service FastAPI. DB의 유일한 문
+Knowledge Service FastAPI. DB의 유일한 문 — 단위는 함수지 HTTP가 아니다 (D19)
 출구              MCP 도구 + Skill + JSON 현황
 ```
 
@@ -144,7 +144,7 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 
 A절(Q1–Q5)은 2026-08-31에 **D16–D20으로 마감됐다.** 1–2단계를 이제 검증할 수 있다.
-남은 공백은 단계별로 걸린다 — 5단계 전에 Q6·Q7, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20이 필요하다.
+남은 공백은 단계별로 걸린다 — 5단계 전에 Q6·Q7·Q10, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20이 필요하다.
 [open-questions.md](open-questions.md)를 참조하고, 답이 없는 항목을 추측으로 채우지 않는다.
 
 1. Compose: Postgres + pgvector. `5432`는 호스트에 게시하지 않는다 (D16)

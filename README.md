@@ -87,13 +87,13 @@ node scripts/check-layout.mjs
 - 닫히지 않은 코드 펜스 — 열린 펜스가 뒤 본문을 코드로 먹어 위 검사를 무력화하는 것을 막는다
 
 `sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
-[docs/plan.md](docs/plan.md) §9, [docs/open-questions.md](docs/open-questions.md) Q3.
+[docs/plan.md](docs/plan.md) §7 5단계·§9. 그 전에 [docs/open-questions.md](docs/open-questions.md) Q6(ingest 결정성)이 답해져야 한다.
 
 ## 상태
 
 - 이름: Sillok (실록) — 확정
 - D1–D15: 2026-08-30 확정 · D16–D20: 2026-08-31 확정 → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
-- 스택: Python 3.12 · uv · FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
+- 스택: Python 3.12 · uv · pytest · FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
 - SCAManager 연동: 비범위
 - 구현: 시작 전. **부트스트랩 공백(Q1–Q5)은 D16–D20으로 닫혔고 [docs/plan.md](docs/plan.md) §7 1–2단계를 이제 검증할 수 있다.**
   5단계 이후는 [docs/open-questions.md](docs/open-questions.md) B·C·D절이 여전히 막는다.

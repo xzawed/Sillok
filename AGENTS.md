@@ -65,7 +65,7 @@ DECIDED: ingest CLI; docs/** + root README* + adr/**
 DECIDED: no web UI in v1 (JSON status API only)
 DECIDED: python 3.12 + uv + pytest
 DECIDED: env = DATABASE_URL + SILLOK_{HOST,PORT,WORKSPACE,BEARER_TOKEN} + OPENAI_API_KEY
-DECIDED: migrations = versioned raw .sql, idempotent, applied on serve startup
+DECIDED: migrations = versioned raw .sql, idempotent, applied on serve startup before bind
 DECIDED: sillok ingest calls Service functions in-process; the CLI owns no SQL
 DECIDED: POST /v1/ingest = same function over HTTP; operator entry point is the CLI
 ```

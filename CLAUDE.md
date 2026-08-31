@@ -31,7 +31,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D21 이후로 기록한다.
 
 A절(Q1–Q5)은 **D16–D20으로 마감됐다** — 작업 순서 1–2단계를 이제 검증할 수 있다.
-남은 것이 단계별로 막는다: 5단계 전에 Q6·Q7, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20.
+남은 것이 단계별로 막는다: 5단계 전에 Q6·Q7·Q10, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20.
 
 ## 핵심 불변식
 
@@ -106,7 +106,7 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 
 [docs/plan.md](docs/plan.md) §7. 요지는 **임베딩 없이 도는 것부터** 세운다는 것:
 
-1. Compose (Postgres + pgvector) → 2. 마이그레이션([docs/data-model.md](docs/data-model.md) DDL)
+1. Compose (Postgres + pgvector, `5432` 미게시) → 2. 마이그레이션 `001` 확장 → `002` 스키마, 멱등([docs/data-model.md](docs/data-model.md) DDL)
 → 3. FastAPI 골격 + 공통 응답 → 4. `save_event`/`event_stats`/`kb_status`
 → 5. ingest (스캔·해시·청크·tsv, 키 있으면 임베딩) → 6. `search_docs`/`search_events`
 → 7. `get_file`/`get_event`/`save_doc` 제안 → 8. MCP를 같은 함수에 연결
