@@ -166,7 +166,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 - `repeat_causes`는 `module`까지 묶는다 — Skill의 결정 트리가 `project+module+root_cause`로 세기 때문이다.
   `root_cause`만 묶으면 `?module=` 없이 부른 결과가 그 트리와 어긋난다. `project`는 질의 파라미터이므로 항목에 넣지 않는다
-- `root_cause`가 없는 행은 제외. **2회 이상만**, `count` 내림차순(동수면 `root_cause`, 그래도 같으면 `module` 오름차순, NULL 은 마지막), **최대 12개**
+- `root_cause`가 없는 행은 제외. **2회 이상만**, `count` 내림차순 → `root_cause` 오름차순 → `module` 오름차순(NULL 은 마지막), **최대 12개**
 - `module`이 없는 반복도 `"module": null`로 나간다. `by_module`이 NULL 키를 못 만드는 것과 다르다 — 여기는 필드다
 - `by_module`은 `module`이 없는 행의 키를 넣지 않는다. 그 행들은 `total`에 남아 있으므로 `sum(by_module) <= total`이다. 0인 키도 넣지 않는다
 - `avg_resolution_seconds`는 정수 초 또는 `null`. `resolved_at`이 없는 행은 평균에서 빠지고, 전부 미해결이면 `0`이 아니라 `null`이다

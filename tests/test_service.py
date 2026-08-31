@@ -174,7 +174,9 @@ def test_repeat_causes_order_is_total(clean_project):
 
     module 까지 정렬 키에 넣어야 순서가 완전해진다. NULL module 은 마지막이다.
     """
-    for module in ("zeta", "zeta", "alpha", "alpha", None, None):
+    # NULL 그룹을 가운데 넣는다. 마지막에 넣으면 NULLS LAST 가 삽입 순서와 구분되지 않아
+    # 그 절반이 검사되지 않는다.
+    for module in ("zeta", "zeta", None, None, "alpha", "alpha"):
         service.save_event(DSN, body(module=module, root_cause="pool exhausted"))
 
     causes = service.event_stats(DSN, clean_project)["repeat_causes"]
