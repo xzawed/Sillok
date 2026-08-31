@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import os
 
+import psycopg
 import pytest
 
 from sillok import migrations
-
-psycopg = pytest.importorskip("psycopg")
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://sillok:sillok@127.0.0.1:5432/sillok")
 
@@ -64,6 +63,34 @@ def test_duplicate_version_is_an_error(tmp_path):
         migrations.discover(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://sillok:secret@127.0.0.1:5432/sillok",
+        "postgresql://sillok:p@ss@127.0.0.1:5432/sillok",
+        "postgresql://sillok:secret@[::1]:5432/sillok",
+        "postgresql://sillok:secret@127.0.0.1:5432/sillok?sslmode=require",
+        # libpq 는 URI 말고 이 두 형태도 받는다. 여기서 새면 오류 로그에 암호가 남는다.
+        "postgresql://sillok@127.0.0.1:5432/sillok?password=secret",
+        "postgresql://localhost/sillok?user=sillok&password=secret",
+        "host=127.0.0.1 port=5432 user=sillok password=secret dbname=sillok",
+        "host=127.0.0.1 user=sillok password='se cret' dbname=sillok",
+    ],
+)
+def test_redact_never_leaks_the_password(dsn):
+    assert "secret" not in migrations.redact_dsn(dsn)
+
+
+def test_redact_keeps_what_is_useful():
+    out = migrations.redact_dsn("postgresql://sillok:secret@127.0.0.1:5432/sillok")
+    assert out == "postgresql://sillok:***@127.0.0.1:5432/sillok"
+
+
+def test_redact_leaves_passwordless_dsn_alone():
+    dsn = "postgresql://db:5432/sillok"
+    assert migrations.redact_dsn(dsn) == dsn
+
+
 # --- DB 필요 --------------------------------------------------------------
 
 
@@ -88,10 +115,17 @@ def applied():
 
 @pytest.fixture
 def conn():
-    """데이터 단언용. 커밋하지 않고 롤백한다."""
+    """데이터 단언용. 커밋하지 않고 롤백한다.
+
+    psycopg 의 connect() 컨텍스트는 정상 종료 시 commit 한다. 그래서 rollback 이
+    반드시 먼저 돌아야 한다 — 테스트가 실패해도 돌도록 finally 에 둔다.
+    테스트가 스스로 commit 하면 이 장치는 막지 못한다. 테스트에서 commit 하지 않는다.
+    """
     with psycopg.connect(DSN) as c:
-        yield c
-        c.rollback()
+        try:
+            yield c
+        finally:
+            c.rollback()
 
 
 @needs_db
@@ -155,13 +189,23 @@ def test_tsv_is_generated_and_populated(applied, conn):
         (doc_id,),
     ).fetchone()
     assert row[1] > 0, "tsv 가 비어 있다"
-    # D14: 구성은 simple. 한국어 어절이 그대로 남는다.
-    assert "compose" in row[0].lower()
+    tsv = row[0].lower()
+    # D14: 구성은 simple. 영어는 소문자화만 되고 어간 추출은 없다.
+    assert "compose" in tsv
+    # simple 은 한국어를 형태소로 쪼개지 않으므로 어절이 그대로 남는다.
+    # english 구성이었다면 'postgres' 로 어간이 잘려 아래가 깨진다.
+    assert "postgres" in tsv
+    assert "를" in tsv
+    # heading_path 도 tsv 에 들어가야 한다 — 생성식에 coalesce(heading_path,'') 가 있다.
+    assert "작업" in tsv
 
 
 @needs_db
 def test_chunks_cascade_with_document(applied, conn):
-    """재색인은 (project, repo, path) 단위로 청크를 지우고 다시 넣는다."""
+    """문서를 지우면 청크가 따라 지워진다 (FK ON DELETE CASCADE).
+
+    재색인이 (project, repo, path) 단위로 도는 전제가 이 제약이다.
+    """
     doc_id = conn.execute(
         """
         INSERT INTO kb_documents (project, path, content_hash)
@@ -189,12 +233,55 @@ def test_tsv_gin_index_exists(applied, conn):
 
 
 @needs_db
+@pytest.mark.parametrize(
+    "index",
+    [
+        "kb_events_project_time",
+        "kb_events_filter",
+        "kb_docs_lookup",
+        # UNIQUE 제약이 만드는 인덱스. 재색인 upsert 와 청크 교체가 이것에 기댄다.
+        "kb_documents_project_repo_path_key",
+        "kb_chunks_document_id_chunk_idx_key",
+    ],
+)
+def test_declared_index_exists(applied, conn, index):
+    row = conn.execute(
+        "SELECT indexname FROM pg_indexes WHERE indexname = %s", (index,)
+    ).fetchone()
+    assert row is not None, f"{index} 가 없다"
+
+
+@needs_db
+def test_document_identity_is_project_repo_path(applied, conn):
+    """재색인 단위가 (project, repo, path) 라는 계약을 DB 가 강제하는지 본다."""
+    conn.execute(
+        """
+        INSERT INTO kb_documents (project, path, content_hash)
+        VALUES ('t_smoke', 'docs/dup.md', 'h1')
+        """
+    )
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute(
+            """
+            INSERT INTO kb_documents (project, path, content_hash)
+            VALUES ('t_smoke', 'docs/dup.md', 'h2')
+            """
+        )
+
+
+@needs_db
 def test_hnsw_is_absent_in_v1(applied, conn):
     """data-model.md 와 plan.md §6 이 v1 에서 생략을 명시적으로 허용한다.
 
-    있다고 착각하면 검색 성능 판단이 틀어지므로 부재를 단언한다.
+    이름이 아니라 접근 방법(pg_am)으로 본다. 이름으로만 보면
+    kb_chunks_embedding_idx 같은 이름의 HNSW 인덱스를 놓친다.
     """
     rows = conn.execute(
-        "SELECT indexname FROM pg_indexes WHERE indexname LIKE %s", ("%hnsw%",)
+        """
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_am am ON am.oid = c.relam
+        WHERE c.relkind = 'i' AND am.amname = 'hnsw'
+        """
     ).fetchall()
     assert rows == []
