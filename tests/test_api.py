@@ -173,6 +173,77 @@ def test_no_business_routes_yet():
         assert contract_path not in paths
 
 
-def test_openapi_docs_are_off():
-    """v1은 웹 페이지 비범위 (D12). 사람이 볼 UI 를 열지 않는다."""
-    assert _client().get("/docs").status_code == 404
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_no_human_facing_surface(path):
+    """v1은 웹 페이지 비범위 (D12).
+
+    docs_url 만 끄면 /openapi.json 이 살아남아 **봉투 밖 200**을 돌려준다.
+    """
+    r = _client().get(path)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.parametrize("path", ["/t/validate/", "/v1/nope/", "/openapi.json/"])
+def test_trailing_slash_does_not_redirect(path):
+    """라우터의 슬래시 리다이렉트는 핸들러보다 먼저 **빈 본문 307**을 낸다.
+
+    계약 밖 상태에 봉투도 없는 응답이므로 꺼야 한다.
+    """
+    r = _client().get(path, follow_redirects=False)
+    assert r.status_code != 307
+    assert r.json()["ok"] is False
+
+
+def test_duplicate_authorization_headers_are_rejected():
+    """Headers.get 은 첫 번째만 본다.
+
+    맞는 토큰 뒤에 아무 값이나 덧붙인 요청이 통과하면 안 된다.
+    """
+    app = api.create_app(_config(bearer_token="secret-token"))
+    client = TestClient(app, raise_server_exceptions=False)
+    r = client.get(
+        "/v1/nope",
+        headers=[
+            ("authorization", "Bearer secret-token"),
+            ("authorization", "Bearer wrong"),
+        ],
+    )
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+@pytest.mark.parametrize(
+    ("token", "presented"),
+    [
+        # 헤더는 latin-1 이라 0x80~0xFF 가 비-ASCII str 로 들어온다.
+        ("secret-token", b"Bearer \xe9\xff"),
+        # 토큰 자체가 ASCII 밖인 구성.
+        ("비밀토큰", b"Bearer wrong"),
+        ("비밀토큰", "Bearer 다른토큰".encode()),
+    ],
+)
+def test_non_ascii_never_degrades_to_internal(token, presented):
+    """compare_digest 는 비-ASCII str 에 TypeError 를 낸다.
+
+    그대로 두면 인증 실패가 INTERNAL 500 으로 새어 나간다 — 서버 결함이 아닌데도.
+    """
+    client = TestClient(
+        api.create_app(_config(bearer_token=token)), raise_server_exceptions=False
+    )
+    r = client.get("/v1/nope", headers={"Authorization": presented})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_non_ascii_token_still_accepts_the_right_value():
+    """양쪽 인코딩이 어긋나면 맞는 토큰도 영원히 불일치한다.
+
+    Starlette 은 헤더를 latin-1 로 디코드하고 os.environ 은 UTF-8 로 디코드한다.
+    """
+    client = TestClient(
+        api.create_app(_config(bearer_token="비밀토큰")), raise_server_exceptions=False
+    )
+    # 클라이언트가 실제로 보내는 것은 UTF-8 바이트다.
+    r = client.get("/v1/nope", headers={"Authorization": "Bearer 비밀토큰".encode()})
+    assert r.status_code == 404  # 게이트는 통과, 라우트가 없어 404
