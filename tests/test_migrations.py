@@ -64,21 +64,27 @@ def test_duplicate_version_is_an_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "dsn",
+    ("dsn", "password"),
     [
-        "postgresql://sillok:secret@127.0.0.1:5432/sillok",
-        "postgresql://sillok:p@ss@127.0.0.1:5432/sillok",
-        "postgresql://sillok:secret@[::1]:5432/sillok",
-        "postgresql://sillok:secret@127.0.0.1:5432/sillok?sslmode=require",
-        # libpq 는 URI 말고 이 두 형태도 받는다. 여기서 새면 오류 로그에 암호가 남는다.
-        "postgresql://sillok@127.0.0.1:5432/sillok?password=secret",
-        "postgresql://localhost/sillok?user=sillok&password=secret",
-        "host=127.0.0.1 port=5432 user=sillok password=secret dbname=sillok",
-        "host=127.0.0.1 user=sillok password='se cret' dbname=sillok",
+        ("postgresql://sillok:secret@127.0.0.1:5432/sillok", "secret"),
+        # 암호에 @ 나 : 가 들어간 경우. 검사 문자열도 그 암호여야 한다 —
+        # 'secret' 을 찾으면 실제로 샜을 때도 통과한다.
+        ("postgresql://sillok:p@ss@127.0.0.1:5432/sillok", "p@ss"),
+        ("postgresql://sillok:pa:ss@127.0.0.1:5432/sillok", "pa:ss"),
+        ("postgresql://sillok:secret@[::1]:5432/sillok", "secret"),
+        ("postgresql://sillok:secret@127.0.0.1:5432/sillok?sslmode=require", "secret"),
+        # libpq 는 URI 말고 아래 형태도 받는다. 여기서 새면 오류 로그에 암호가 남는다.
+        ("postgresql://sillok@127.0.0.1:5432/sillok?password=secret", "secret"),
+        ("postgresql://localhost/sillok?user=sillok&password=secret", "secret"),
+        ("postgresql://h/db?password=one&password=two", "two"),
+        ("postgresql://h/db?Password=MixedCase", "MixedCase"),
+        ("host=127.0.0.1 port=5432 user=sillok password=secret dbname=sillok", "secret"),
+        ("host=127.0.0.1 user=sillok password='se cret' dbname=sillok", "se cret"),
     ],
 )
-def test_redact_never_leaks_the_password(dsn):
-    assert "secret" not in migrations.redact_dsn(dsn)
+def test_redact_never_leaks_the_password(dsn, password):
+    assert password in dsn, "테스트 입력이 그 암호를 실제로 담고 있어야 한다"
+    assert password not in migrations.redact_dsn(dsn)
 
 
 def test_redact_keeps_what_is_useful():
