@@ -91,10 +91,16 @@ curl -i http://127.0.0.1:8080/v1/nope   # 404 + 공통 봉투. FastAPI 기본 de
 uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
 ```
 
-**커밋된 구성에서는 `71 passed, 19 skipped`가 정상이다.** DB 검사 19개는 호스트에서 `5432`에 닿아야 도는데
-D16이 그 포트를 게시하지 않기 때문이다. `skip 0`을 보았다면 오버라이드가 켜져 있다는 뜻이지
-더 나은 결과가 아니다. 이 19개를 커밋된 구성에서 돌릴 방법은 아직 없다 →
-[docs/open-questions.md](docs/open-questions.md) Q26.
+**호스트에서 `uv run pytest -q`는 `71 passed, 19 skipped`가 정상이다.** DB 검사 19개는 `5432`에 닿아야 하는데
+D16이 그 포트를 게시하지 않기 때문이다. `skip 0`을 보았다면 오버라이드가 켜져 있다는 뜻이지 더 나은 결과가 아니다.
+
+그 19개까지 돌리려면 (D22):
+
+```bash
+docker compose --profile test run --rm test   # 90 passed. 5432 는 닫힌 채로 돈다
+```
+
+`profiles`가 붙어 있어 기본 `docker compose up`에는 나타나지 않는다 — 제품 스택은 `db` + `api` 둘 그대로다.
 
 `api`는 bind 전에 마이그레이션을 돌린다 (D17) — 기동 로그에서 순서가 보인다.
 **업무 라우트는 아직 없다.** `/v1/status` 같은 4단계 경로는 정직하게 404를 돌려준다.

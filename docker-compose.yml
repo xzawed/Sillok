@@ -34,7 +34,11 @@ services:
     restart: unless-stopped
 
   api:
-    build: .
+    build:
+      context: .
+      # **반드시 명시한다.** Dockerfile 이 다단계라 생략하면 마지막 스테이지(test)가
+      # api 이미지가 되어 pytest 가 운영 이미지로 들어간다 (D22).
+      target: runtime
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +81,23 @@ services:
       retries: 12
       start_period: 20s
     restart: unless-stopped
+
+  # D22: DB 검사를 커밋된 구성에서 돌린다.
+  #   docker compose --profile test run --rm test
+  # profiles 가 붙어 있으므로 기본 `docker compose up` 에는 나타나지 않는다 —
+  # 그래서 D13 의 "두 개"(기본 up 의 제품 스택)를 어기지 않는다.
+  # ports 를 붙이거나 profiles 를 빼면 그 순간 D13 개정이 필요하다.
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # api 와 같은 방식으로 내부 네트워크의 db 에 붙는다. 5432 는 계속 닫혀 있다 (D16).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sillok}:${POSTGRES_PASSWORD:-sillok}@db:5432/${POSTGRES_DB:-sillok}
 
 volumes:
   db_data:

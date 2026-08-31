@@ -108,9 +108,16 @@ def _db_available() -> bool:
         return False
 
 
+# 사유 문구가 거짓이면 안 된다. 예전 문구는 "docker compose up -d --wait 후 다시 돌린다"
+# 였는데, 그 명령은 5432 를 게시하지 않으므로 다시 돌려도 똑같이 skip 된다 (D16).
 needs_db = pytest.mark.skipif(
     not _db_available(),
-    reason=f"Postgres 에 붙을 수 없다: {DSN} — docker compose up -d --wait 후 다시 돌린다",
+    reason=(
+        f"Postgres 에 붙을 수 없다: {DSN}. 호스트에서 돌리려면 5432 게시가 필요한데"
+        " D16 이 그것을 막는다 — DB 검사까지 돌리려면"
+        " `docker compose --profile test run --rm test` (D22)."
+        " 호스트에서 그대로 돌리려면 compose.override.example.yml 을 복사한다."
+    ),
 )
 
 

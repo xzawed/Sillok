@@ -72,7 +72,7 @@ AI는 MCP로 행 몇 개만 읽고 쓴다. 문서를 대화에 통째로 넣지 
 | 이벤트 | 필수 필드 없으면 거절 |
 | 승격 | `repeat_causes` 통계와 제안까지만 |
 | 사람 UI | `GET /v1/status` 등 JSON. **웹 페이지 없음** |
-| 배포 | Docker Compose (db + api 2개) |
+| 배포 | Docker Compose (db + api 2개). 테스트용 `test`는 `profiles` 게이트라 기본 `up`에 없다 (D22) |
 | 본문 언어 | 한·영 혼용, tsvector `simple` |
 | 공개 | 비공개 |
 | 런타임 | CPython 3.12, uv, pytest (D18) |
