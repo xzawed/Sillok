@@ -138,10 +138,39 @@ if (existsSync(join(ROOT, oqPath))) {
 //    머지 후에도 유효한 참조(커밋 해시, 날짜, PR 번호)로 고정한다.
 //    코드 스팬·코드 블록은 제외한다. 규칙 자체를 인용하려면 그 표현을 적어야 하고,
 //    백틱으로 감싼 인용까지 잡으면 이 검사를 문서화하는 순간 자기 자신을 잡는다.
-const DEICTIC = ['이 PR', '이번 PR', '본 PR', '해당 PR', '이 커밋', '이번 커밋', '이 변경에서', '이 브랜치에서']
-const stripCode = (s) => s.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+//
+//    조사가 붙는 자리(은/는/에서/의)까지 열거하면 반드시 빠지는 게 생기므로 어간만 본다.
+//    "이 작업" 류는 일반 문장에서도 흔해 넣지 않았다 — 여기서 잡으려는 건 PR·커밋 참조다.
+const DEICTIC = [
+  '이 PR', '이번 PR', '본 PR', '해당 PR', '현재 PR', '이 MR',
+  '이 커밋', '이번 커밋', '본 커밋', '해당 커밋', '현재 커밋',
+  '이 변경', '이번 변경', '본 변경', '해당 변경',
+  '이 브랜치', '이번 브랜치', '본 브랜치',
+  '이 패치', '이번 패치',
+]
+
+// 펜스를 정규식으로 짝지으면 열린 펜스 하나가 다음 펜스까지의 본문을 통째로 먹어
+// 그 사이의 위반이 사라진다(false negative). 줄 단위로 상태를 추적하고,
+// 닫히지 않은 펜스는 그 자체를 결함으로 보고한다. ~~~ 펜스도 같이 처리된다.
+function stripCode(src) {
+  const out = []
+  let fence = null
+  for (const line of src.split('\n')) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+    if (m) {
+      const marker = m[1][0]
+      if (fence === null) fence = marker
+      else if (marker === fence) fence = null
+      continue
+    }
+    if (fence === null) out.push(line.replace(/`[^`\n]*`/g, ''))
+  }
+  return { prose: out.join('\n'), unclosed: fence !== null }
+}
+
 for (const p of md) {
-  const prose = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  const { prose, unclosed } = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  if (unclosed) fail(`${p} : 닫히지 않은 코드 펜스 — 이후 본문이 코드로 먹혀 검사에서 빠진다.`)
   for (const d of DEICTIC) {
     if (prose.includes(d)) fail(`${p} : 머지 후 의미를 잃는 지시어 "${d}" — 커밋 해시·날짜·PR 번호로 고정한다.`)
   }
