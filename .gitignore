@@ -21,3 +21,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Compose 로컬 오버라이드 (compose.override.example.yml 참조)
+compose.override.yml
+
+# uv
+.uv/
