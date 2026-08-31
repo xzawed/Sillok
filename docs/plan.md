@@ -75,6 +75,10 @@ AI는 MCP로 행 몇 개만 읽고 쓴다. 문서를 대화에 통째로 넣지 
 | 배포 | Docker Compose (db + api 2개) |
 | 본문 언어 | 한·영 혼용, tsvector `simple` |
 | 공개 | 비공개 |
+| 런타임 | CPython 3.12, uv, pytest (D18) |
+| 환경변수 | `DATABASE_URL` 하나 + `SILLOK_*` 4개 + `OPENAI_API_KEY` (D16) → [.env.example](../.env.example) |
+| 마이그레이션 | 버전 붙인 raw `.sql`, `serve` 기동 시 bind 전에 멱등 적용 (D17) |
+| ingest 경로 | CLI가 Service 함수를 인프로세스 호출. **CLI는 자기 SQL을 갖지 않는다** (D19) |
 
 ## 3. 세 층
 
@@ -117,7 +121,9 @@ Knowledge Service FastAPI. DB의 유일한 문
 
 MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 
-추가로 CLI: `sillok ingest`, `sillok serve`.
+추가로 CLI: `sillok ingest`, `sillok serve`. 인자 계약은 D19 — 색인 경로는 플래그가 아니라 항상 D9다.
+`POST /v1/ingest`는 삭제 대상이 아니라 같은 함수의 HTTP 얼굴이다 (D20). 운영자 진입점은 CLI.
+마이그레이션 러너 `sillok migrate`는 D17이 정한 별도 명령이고 D8이 정한 CLI 두 개에 포함되지 않는다.
 
 금지: 임의 SQL 도구, 전체 덤프, 기본 `top_k` > 8 (최대 12), 통계에 벡터.
 
@@ -137,10 +143,12 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 
-착수 전에 [open-questions.md](open-questions.md)의 A절(Q1–Q5)을 먼저 답한다. 그것 없이는 1–2단계를 검증할 수 없다.
+A절(Q1–Q5)은 2026-08-31에 **D16–D20으로 마감됐다.** 1–2단계를 이제 검증할 수 있다.
+남은 공백은 단계별로 걸린다 — 5단계 전에 Q6·Q7, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20이 필요하다.
+[open-questions.md](open-questions.md)를 참조하고, 답이 없는 항목을 추측으로 채우지 않는다.
 
-1. Compose: Postgres + pgvector
-2. 마이그레이션 ([data-model.md](data-model.md) DDL)
+1. Compose: Postgres + pgvector. `5432`는 호스트에 게시하지 않는다 (D16)
+2. 마이그레이션 — `001` 확장 → `002` 스키마, 전부 멱등 ([data-model.md](data-model.md) DDL, D17)
 3. FastAPI 골격, 공통 `{ok, data|error}`
 4. `save_event` / `event_stats` / `kb_status` (임베딩 없이도 동작)
 5. ingest: 경로 스캔, 해시, 청크, tsv. 키 있으면 임베딩
@@ -172,6 +180,19 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 - [ ] 검색 0건이 `kb_query_logs`에 `hit_count=0`으로 남는다
 
 이 저장소 자신이 색인 경로 규칙을 따르므로, **첫 ingest 스모크는 이 레포를 대상으로 돌린다.**
+
+판정에 쓰는 명령 (D18):
+
+```bash
+node scripts/check-layout.mjs
+docker compose up -d --wait
+docker compose exec api sillok ingest --project sillok
+curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
+uv run pytest -q
+```
+
+`sillok ingest`는 `serve`가 떠 있지 않아도 도는 것이 D19의 요점이다.
+위 명령이 `exec api`를 쓰는 것은 Compose 안에서 워크스페이스와 DSN이 이미 맞춰져 있기 때문이지, HTTP를 타서가 아니다.
 
 ## 10. 하지 말 것 (반복)
 
