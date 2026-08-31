@@ -58,9 +58,10 @@ services:
       # get_file 은 7단계지만 workspace 계약은 D16 이 이미 정했다. 읽기 전용.
       - .:/workspace:ro
     healthcheck:
-      # 포트가 열렸는지가 아니라 **공통 봉투로 답하는지**를 본다.
-      # 업무 라우트가 없으므로 없는 경로의 404 봉투가 지금의 유일한 증거다.
-      # 4단계에서 GET /v1/status 가 생기면 그쪽으로 옮긴다.
+      # 포트가 열렸는지가 아니라 **업무 라우트가 실제로 답하는지**를 본다.
+      # 4단계에서 GET /v1/status 가 생겼으므로 약속대로 옮겼다 (그전에는 없는 경로의 404 봉투를 봤다).
+      # 이제 DB 까지 살아 있어야 healthy 다 — api 는 DB 없이 할 수 있는 일이 없고
+      # D17 이 이미 마이그레이션 없이는 뜨지 않게 해 두었다.
       #
       # SILLOK_BEARER_TOKEN 이 설정되면 D7 게이트가 켜진다. 검사도 토큰을 보내야 한다 —
       # 안 보내면 자기 게이트에 401 로 막혀 컨테이너가 영원히 unhealthy 가 되고
@@ -73,9 +74,10 @@ services:
           import http.client as h,os,sys;
           t=os.environ.get('SILLOK_BEARER_TOKEN','');
           c=h.HTTPConnection('127.0.0.1',8080,timeout=3);
-          c.request('GET','/',headers={'Authorization':'Bearer '+t} if t else {});
+          c.request('GET','/v1/status?project=healthcheck',
+          headers={'Authorization':'Bearer '+t} if t else {});
           r=c.getresponse();
-          sys.exit(0 if r.status==404 and b'NOT_FOUND' in r.read() else 1)
+          sys.exit(0 if r.status==200 and b'"ok":true' in r.read() else 1)
       interval: 5s
       timeout: 5s
       retries: 12
