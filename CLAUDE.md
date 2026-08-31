@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
 [docs/plan.md](docs/plan.md) §7의 **1–3단계까지 구현돼 있고 4단계부터는 아직 없다.**
+(진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
 `src/sillok/`(config · migrations 러너 · api 골격 · CLI `migrate`/`serve`), `tests/`.
 **업무 라우트는 하나도 없다** — `/v1/status` 같은 경로는 정직하게 404다. 스텁을 만들지 않는다.
@@ -162,8 +163,11 @@ uv run pytest -q                       # DB 없으면 DB 검사만 skip 되고 �
 
 문서 게이트다. 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
 D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 링크 해석, 진입점 도달성, 구 파일명 잔존,
-존재하지 않는 `Q` 번호 참조, 머지 후 의미를 잃는 지시어(`이 PR` 등), 닫히지 않은 코드 펜스를
+존재하지 않는 `Q` 번호 참조, 머지 후 의미를 잃는 지시어(`이 PR` 등), 닫히지 않은 코드 펜스,
+**Q 게이트**(단계를 막는 Q가 열려 있는데 그 단계의 라우트·CLI·MCP가 `src/`에 있는가)를
 검사하고 실패 시 종료 코드 1.
+
+한 변경이 나가는 절차와 PR 하나의 증거는 [AGENTS.md](AGENTS.md)가 소유한다.
 
 ## 이 저장소의 규약
 

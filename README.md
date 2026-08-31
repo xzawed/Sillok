@@ -15,6 +15,8 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 **문서가 곧 구현 계약이다.** 동작이 문서와 어긋나면 코드가 틀린 것으로 본다.
 [docs/plan.md](docs/plan.md) §7의 1–3단계(Compose · 마이그레이션 · FastAPI 골격)까지 구현돼 있다.
 
+> 진행 상태의 정본은 [docs/plan.md](docs/plan.md) §7·§9다 — 값이 다르면 정본이 이긴다.
+
 ## 시작점
 
 구현 에이전트는 **[docs/plan.md](docs/plan.md)** 부터 읽는다. 나머지 문서는 PLAN이 가리킨다.
@@ -31,7 +33,7 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 | [docs/service-and-mcp.md](docs/service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, **에러 코드 enum** |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
 | [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 전체 |
-| [AGENTS.md](AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위 |
+| [AGENTS.md](AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위, **출하 루프 · PR 증거 · 테스트 방식** |
 | [CLAUDE.md](CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
 | [.env.example](.env.example) | 환경변수 계약 사본 (D16) | *(색인 안 함)* | 없음 — 정본은 ADR §D16 |
 
@@ -103,6 +105,14 @@ uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
 - 존재하지 않는 `Q` 번호 참조 — `open-questions.md`가 실제로 정의한 집합과 대조
 - 머지되면 의미를 잃는 지시어(`이 PR` 등) — 커밋 해시·날짜·PR 번호로 고정해야 한다
 - 닫히지 않은 코드 펜스 — 열린 펜스가 뒤 본문을 코드로 먹어 위 검사를 무력화하는 것을 막는다
+- **Q 게이트** — 어떤 단계를 막는 Q가 아직 열려 있는데 그 단계의 라우트·CLI 명령·MCP가
+  `src/`에 있으면 실패한다. `plan.md` §7의 *"n단계 전에 Qx"* 문장을 읽어 강제하므로,
+  그 문장을 고치면 검사가 따라온다 — 같은 사실을 두 곳에 적지 않는다.
+  §7에서 절이 사라지거나 파싱되지 않으면 그 자체를 실패로 본다(게이트가 조용히 비는 것을 막는다).
+  **한계:** 경로가 **문자열 리터럴**일 때만 본다. 데코레이터·`add_api_route`·`mount`·`include_router`와
+  라우터 `prefix` 조합까지는 잡지만, 변수나 f-string으로 만든 경로는 못 잡는다.
+  `prefix`는 **같은 파일 안에서만** 합쳐 보므로, 라우터를 여러 모듈로 쪼개면 놓친다 —
+  지금은 `api.py` 하나라 성립하고, 쪼갤 때 이 검사를 함께 넓힌다
 
 `sillok ingest`가 생기면 이 스크립트를 실제 색인 결과 대조로 확장한다 →
 [docs/plan.md](docs/plan.md) §7 5단계·§9. 그 전에 [docs/open-questions.md](docs/open-questions.md) Q6(ingest 결정성)이 답해져야 한다.
