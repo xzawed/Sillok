@@ -42,7 +42,30 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 { "ok": false, "error": { "code": "VALIDATION", "message": "result required" } }
 ```
 
-에러 코드: `VALIDATION` | `NOT_FOUND` | `CONFLICT` | `INTERNAL`
+에러 코드: `VALIDATION` | `UNAUTHORIZED` | `NOT_FOUND` | `CONFLICT` | `INTERNAL`
+
+**성공이든 실패든 본문은 언제나 위 봉투다.** 상태 매핑의 정본은 [adr/0001](../adr/0001-v1-stack-decisions.md) §D21.
+
+| 코드 | HTTP | v1에서 언제 |
+|---|---|---|
+| `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락 |
+| `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
+| `NOT_FOUND` | 404 | 없는 경로. `get_event`의 404 대 빈 결과는 **Q12로 미결** |
+| `CONFLICT` | 409 | **예약. v1은 발신하지 않는다** — 발신 조건이 없다 |
+| `INTERNAL` | 500 | 서버 결함. `message`는 고정 문자열 `internal error` |
+
+`INTERNAL`에 예외 문구·트레이스백·경로를 싣지 않는다. DSN·`SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`가 새는 길이다.
+`에러 메시지를 그대로 돌려준다`는 규칙은 `VALIDATION`에만 해당한다.
+
+FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검증 실패와 없는 경로 둘 다 핸들러로 덮는다.
+표에 없는 상태(405 등)는 표 안의 코드로 접고 **그 코드의 상태**로 나간다 — 405는 `VALIDATION`/422가 된다.
+`/openapi.json`과 슬래시 리다이렉트도 꺼야 한다 — 전자는 봉투 밖 200을, 후자는 핸들러보다 먼저 **빈 본문 307**을 낸다.
+
+**봉투가 닿지 않는 한 곳:** HTTP 자체가 깨져 ASGI 앱에 도달하지 못한 요청은
+서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인.
+앱 밖이라 감쌀 수 없다. 클라이언트는 이 한 가지를 예외로 알고 있어야 한다.
+(큰 헤더 자체는 여기 해당하지 않는다 — 64KB 헤더도 봉투로 응답하는 것을 실측했다.)
+빈 검색 결과는 오류가 아니다 — 200에 `{ "results": [] }`.
 
 ### 검색
 

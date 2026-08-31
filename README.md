@@ -13,7 +13,7 @@ AI는 MCP로 필요한 행 몇 개만 읽는다.
 Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장 위치를 강제하는 지식 원장**이다.
 
 **문서가 곧 구현 계약이다.** 동작이 문서와 어긋나면 코드가 틀린 것으로 본다.
-[docs/plan.md](docs/plan.md) §7의 1–2단계(Compose + 마이그레이션)까지 구현돼 있다.
+[docs/plan.md](docs/plan.md) §7의 1–3단계(Compose · 마이그레이션 · FastAPI 골격)까지 구현돼 있다.
 
 ## 시작점
 
@@ -25,10 +25,10 @@ Sillok은 RAG 플랫폼이 아니라, 위키가 로그가 되지 않게 **저장
 | 경로 | 역할 | `doc_type` | 이 문서가 **정본**으로 소유하는 것 |
 |---|---|---|---|
 | [docs/plan.md](docs/plan.md) | 구현 계약. 진입 문서 | `other` | 작업 순서, v1 완료 조건, 금지 목록 |
-| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 확정 결정 D1–D20 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위) |
+| [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) | 확정 결정 D1–D21 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위, **에러 코드↔HTTP 매핑**) |
 | [docs/spec.md](docs/spec.md) | 문제·목표·비목표·세 층 | `other` | 세 층 구조, 비목표, 은유 |
 | [docs/data-model.md](docs/data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
-| [docs/service-and-mcp.md](docs/service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON |
+| [docs/service-and-mcp.md](docs/service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, **에러 코드 enum** |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
 | [docs/open-questions.md](docs/open-questions.md) | 구현 전 답해야 할 공백 | `other` | 미해결 질문 전체 |
 | [AGENTS.md](AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위 |
@@ -80,12 +80,20 @@ node scripts/check-layout.mjs
 구현된 부분(§7 1–2단계)의 검증은 따로 있다:
 
 ```bash
-docker compose up -d --wait   # db. 5432 는 호스트에 게시하지 않는다 (D16)
-uv run sillok migrate         # D17 러너. 멱등
+docker compose up -d --wait   # db + api. 5432 는 게시하지 않고 8080 만 게시한다 (D16)
+curl -i http://127.0.0.1:8080/v1/nope   # 404 + 공통 봉투. FastAPI 기본 detail 이 아니다
 uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
 ```
 
-호스트에서 DB 에 직접 붙어야 하면 `compose.override.example.yml` 를 복사해 쓴다.
+`api`는 bind 전에 마이그레이션을 돌린다 (D17) — 기동 로그에서 순서가 보인다.
+**업무 라우트는 아직 없다.** `/v1/status` 같은 4단계 경로는 정직하게 404를 돌려준다.
+
+호스트에서 DB 에 직접 붙어야 하면(`uv run pytest`의 DB 검사, `uv run sillok migrate`)
+`compose.override.example.yml` 를 복사해 쓴다.
+
+> 이 머신에서 `docker compose build`가 DNS로 실패하면 Docker Desktop의 프록시를 빌드에 넘긴다:
+> `docker compose build --build-arg HTTP_PROXY=http://http.docker.internal:3128 --build-arg HTTPS_PROXY=http://http.docker.internal:3128 api`
+> 런타임 컨테이너는 프록시가 자동으로 붙지만 빌드 샌드박스는 아니다. 환경 문제이므로 이미지에 굽지 않는다.
 
 - D9 색인 대상(`docs/**`, 루트 `README*`, `adr/**`)에 걸리는 문서 목록과 `doc_type` 분포
 - `AGENTS.md`·`CLAUDE.md`가 **색인되지 않는지** — 색인 0건이 정상인지 버그인지 구분하려면 양방향을 다 봐야 한다
@@ -105,17 +113,18 @@ uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
 - D1–D15: 2026-08-30 확정 · D16–D20: 2026-08-31 확정 → [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)
 - 스택: Python 3.12 · uv · pytest · FastAPI, OpenAI `text-embedding-3-small` (1536), Docker Compose, MCP stdio + HTTP
 - SCAManager 연동: 비범위
-- 구현: **§7 1–2단계 완료** (2026-08-31 실측). 3단계(FastAPI 골격)부터 남았다.
-  5단계 이후는 [docs/open-questions.md](docs/open-questions.md) B·C·D절이 여전히 막는다 — 5단계 전에 Q6·Q7·Q10.
+- 구현: **§7 1–3단계 완료** (2026-08-31 실측). 4단계(`save_event`·`event_stats`·`kb_status`)부터 남았다.
+  [docs/open-questions.md](docs/open-questions.md)가 단계별로 막는다 — **4단계 전에 Q16·Q18·Q21**.
 
 ## 코드 배치
 
 | 경로 | 역할 |
 |---|---|
-| `docker-compose.yml` | D13 스택. 지금은 `db`만 — `api`는 3단계에서 붙는다 |
+| `docker-compose.yml` · `Dockerfile` | D13 스택 — `db` + `api` |
 | `compose.override.example.yml` | 호스트에서 DB에 붙어야 할 때만 복사해 쓰는 오버라이드 (D16) |
 | `migrations/001_extensions.sql` · `002_schema.sql` | D17. DDL 정본은 [docs/data-model.md](docs/data-model.md) |
 | `src/sillok/config.py` | D16 환경변수 계약 |
 | `src/sillok/migrations.py` | D17 러너. **Service 쪽이지 CLI 쪽이 아니다** (D19) |
-| `src/sillok/cli.py` | `sillok migrate`. SQL을 갖지 않는다 |
+| `src/sillok/api.py` | D21 공통 봉투와 D7 게이트. **업무 라우트는 없다** — 4단계 |
+| `src/sillok/cli.py` | `sillok migrate` · `sillok serve`. SQL을 갖지 않는다 |
 | `tests/` | pytest. DB 없으면 DB 검사만 skip |
