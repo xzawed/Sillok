@@ -540,6 +540,9 @@ gh api repos/xzawed/Sillok/readme -H "Accept: application/vnd.github.html+json"
   front matter 를 파일 밖으로 옮긴 것일 뿐이라 버렸다
 - H1 은 **줄 단위로 찾는다.** `<div align="center">` 같은 HTML 블록은 지나가고, 코드 펜스 안의 `# ` 는 제목이 아니다.
   인라인 마크업은 벗기고 텍스트만 쓴다
+- **HTML 블록은 빈 줄에서 끝난다** — `</div>` 를 기다리지 않는다 (CommonMark 6형). 두 README 가 정확히 그 모양이라
+  `<div align="center">` · 빈 줄 · `# Sillok · 실록` 로 이어지고 그 H1 이 제목이다.
+  `</div>` 까지 건너뛰는 구현은 제목을 놓쳐 NULL 을 넣는다 — 추측하지 않도록 여기 적는다
 - `kb_documents.title` 에 길이 상한을 두지 않는다. D25 의 `title` 200자는 `kb_events` 의 것이지 여기가 아니다
 - **`doc_type` enum 에서 `readme` 를 빼지 않는다.** enum 은 [data-model.md](../docs/data-model.md) 가 소유하고,
   ingest 가 루트 README 에 경로 기준으로 그 값을 부여한다. 선언하는 파일이 없어졌을 뿐 값은 살아 있다

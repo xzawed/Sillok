@@ -20,8 +20,9 @@ Current truth lives in Git. What happened lives in Postgres. AI reads a handful 
 
 ## What it is
 
-Sillok is **not** a RAG platform. It is a small, opinionated store that keeps a project's **rules**
-and its **history** in separate places, on purpose — so a wiki never turns into a log.
+Sillok is **not** a RAG platform.
+It is a small, opinionated store that keeps a project's **rules** and its **history**
+in separate places, on purpose — so a wiki never turns into a log.
 
 - **Git** holds current truth: one latest version, written in the present tense.
 - **Postgres** holds the event ledger plus a search index over the Git documents.
@@ -47,8 +48,8 @@ docker compose up -d --wait
 curl -s "http://127.0.0.1:8080/v1/status?project=demo"
 ```
 
-Only `8080` is published. Postgres stays on the internal network,
-so nothing reaches the database except the service itself.
+Only `8080` is published.
+Postgres stays on the internal network, so nothing reaches the database except the service itself.
 
 ```json
 { "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0,
@@ -135,8 +136,8 @@ so an all-unresolved window returns `null` rather than `0`.
 
 Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 
-- **The unit of the invariant is the Service function, not HTTP.** MCP and any human UI
-  must go through the HTTP API; the CLI calls the same functions in-process.
+- **The unit of the invariant is the Service function, not HTTP.**
+  MCP and any human UI must go through the HTTP API; the CLI calls the same functions in-process.
   What is forbidden is a second SQL layer anywhere.
 - **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column
   stays NULL and search will use `tsv` keywords only.
@@ -154,8 +155,8 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 
-**No stubs.** A route that merely responds, parked on a completion criterion,
-would look like progress.
+**No stubs.**
+A route that merely responds, parked on a completion criterion, would look like progress.
 
 Open design questions are tracked in [docs/open-questions.md](docs/open-questions.md),
 and they **block the stages that depend on them** — enforced by a check, not by convention.

@@ -13,7 +13,12 @@ const DOC_TYPES = ['adr', 'api', 'runbook', 'readme', 'schema', 'other']
 const STATUSES = ['current', 'draft', 'superseded', 'stale']
 
 // 검사 3 과 검사 12 가 같은 것을 반대 방향으로 본다. 파서를 두 벌 두면 갈라진다.
-const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---/
+// GitHub 이 front matter 로 **인정하는 것**을 기준으로 잡는다 — 좁게 잡으면 검사 12 가
+// "게이트는 통과하는데 첫 화면에는 표가 뜨는" 변형을 놓친다.
+//   - 여는 울타리 뒤의 공백·탭: micromark 의 fenceOpen 은 `sequenceOpen *spaceOrTab` 다
+//   - 선행 BOM: comrak 의 구분자는 BOM 을 허용한다
+// 반대로 GitHub 도 거부하는 것(빈 첫 줄, 선행 공백, 네 줄표, `...` 닫기)은 여기서도 안 잡는다.
+const FRONT_MATTER = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---/
 // 루트 README* — D9 색인 대상이면서 front matter 를 갖지 **않는** 유일한 부류다 (D29).
 const isRootReadme = (p) => /^README[^/]*$/i.test(p)   // D9 는 확장자·대소문자를 가리지 않는다
 

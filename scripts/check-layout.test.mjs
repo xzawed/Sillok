@@ -300,6 +300,27 @@ const CASES = [
     mentions: ['docs/spec.md : front matter 없음'],
     mutate: dropFM('docs/spec.md'),
   },
+  {
+    // GitHub 의 여는 울타리는 `---` 뒤 공백·탭을 허용한다. 좁게 잡으면 게이트는 통과하는데
+    // 첫 화면에는 표가 뜬다 — 검사 12 가 막으려던 바로 그 상태다.
+    id: '30 여는 울타리 뒤 공백이 붙어도 잡는다',
+    expect: 'fail',
+    mentions: ['README.md : front matter 가 있다'],
+    mutate: prepend('README.md', FM.replace('---\n', '--- \n')),
+  },
+  {
+    id: '31 선행 BOM 이 붙어도 잡는다',
+    expect: 'fail',
+    mentions: ['README.md : front matter 가 있다'],
+    mutate: prepend('README.md', '﻿' + FM),
+  },
+  {
+    // GitHub 도 front matter 로 보지 않는 모양이다. 여기서도 잡으면 안 된다 —
+    // 잡으면 정상 문서의 첫 수평선이 실패가 된다.
+    id: '32 GitHub 이 거부하는 모양은 여기서도 잡지 않는다',
+    expect: 'pass',
+    mutate: prepend('README.md', '\n' + FM.replace('---\n', '----\n')),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
