@@ -64,6 +64,11 @@ Sillok의 이벤트 테이블이 기사 원장이고, Git 문서가 편찬된 �
       UI    — v1은 JSON 현황 API (같은 Service)
 ```
 
+**`DB를 만지는 유일한 문`의 단위는 [2]의 함수이지 HTTP가 아니다 (D19).**
+MCP와 사람용 UI는 HTTP만 호출한다. CLI `sillok ingest`는 둘 중 어느 쪽도 아니고,
+같은 앱의 [2] 함수를 인프로세스로 호출한다. 금지되는 것은 CLI가 자기 SQL 계층을 갖는 것이다.
+계약 전문은 [service-and-mcp.md](service-and-mcp.md), 결정은 [adr/0001](../adr/0001-v1-stack-decisions.md) §D19.
+
 Plugin은 특정 IDE 포장이다. v1에서 만들지 않는다.
 
 n8n은 색인·배치 보조로 쓸 수 있으나 v1에서는 만들지 않는다. AI 질의의 본체가 아니다.

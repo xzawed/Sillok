@@ -51,7 +51,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 동작이 명세와 다르면 코드가 틀린 것으로 본다.
 
-## 확정 전제 (2026-08-30)
+## 확정 전제 (2026-08-30 · D16–D20은 2026-08-31)
 
 > 정본: [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md) — 값이 다르면 정본이 이긴다.
 
@@ -63,4 +63,9 @@ DECIDED: get_file = workspace path
 DECIDED: MCP = stdio + HTTP, same Service process
 DECIDED: ingest CLI; docs/** + root README* + adr/**
 DECIDED: no web UI in v1 (JSON status API only)
+DECIDED: python 3.12 + uv + pytest
+DECIDED: env = DATABASE_URL + SILLOK_{HOST,PORT,WORKSPACE,BEARER_TOKEN} + OPENAI_API_KEY
+DECIDED: migrations = versioned raw .sql, idempotent, applied on serve startup before bind
+DECIDED: sillok ingest calls Service functions in-process; the CLI owns no SQL
+DECIDED: POST /v1/ingest = same function over HTTP; operator entry point is the CLI
 ```

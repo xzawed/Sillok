@@ -17,6 +17,19 @@ PostgreSQL 16+ , 확장: `vector`, `pg_trgm`.
 
 문자셋: UTF-8. 검색 구성: 우선 `simple` (한국어·식별자 혼용).
 
+## 확장
+
+**테이블보다 먼저 실행한다.** `vector` 없이 `vector(1536)` 컬럼을 만들 수 없다.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+```
+
+이미지에 확장 파일이 들어 있어도(`pgvector/pgvector:pg16` 등) `CREATE EXTENSION`은 DB마다 따로 필요하다.
+적용 수단은 D17 — 버전 붙인 raw `.sql`을 `sillok serve` 기동 시 bind 전에 멱등 적용한다.
+`001`이 확장, `002`가 아래 스키마다. **마이그레이션 파일은 이 문서의 SQL을 실행할 뿐 두 번째 스키마 정의가 아니다.**
+
 ## 문서 헤더
 
 Git 현재 문서의 인덱스 헤더. 원문은 Git.
