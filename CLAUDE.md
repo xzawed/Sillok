@@ -4,8 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 이 저장소의 성격
 
-**코드가 아직 없다.** 이 저장소는 Sillok 구현을 위한 명세 묶음이고, 문서 자체가 계약이다.
-빌드·테스트·린트 명령이 존재하지 않는 것은 정상이다.
+**문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
+[docs/plan.md](docs/plan.md) §7의 **1–2단계(Compose + 마이그레이션)까지 구현돼 있고 3단계부터는 아직 없다.**
+있는 것: `docker-compose.yml`(db만), `migrations/*.sql`, `src/sillok/`(config·migrations 러너·CLI `migrate`), `tests/`.
+없는 것: FastAPI 골격, MCP, ingest, 검색 — 순서대로 붙인다.
 
 저장소 지도는 [README.md](README.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -145,10 +147,13 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 ## 검증 명령
 
 ```bash
-node scripts/check-layout.mjs
+node scripts/check-layout.mjs          # 문서 게이트
+docker compose up -d --wait            # db (5432 미게시 — compose.override.example.yml 참조)
+uv run sillok migrate                  # D17 러너. 멱등이라 여러 번 돌려도 된다
+uv run pytest -q                       # DB 없으면 DB 검사만 skip 되고 나머지는 돈다
 ```
 
-코드가 없으므로 빌드·테스트는 없지만 **이 검사는 있다.** 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
+문서 게이트다. 문서를 옮기거나 링크를 고친 뒤 반드시 돌린다.
 D9 색인 대상 목록, 색인되면 안 되는 파일, front matter taxonomy, 링크 해석, 진입점 도달성, 구 파일명 잔존,
 존재하지 않는 `Q` 번호 참조, 머지 후 의미를 잃는 지시어(`이 PR` 등), 닫히지 않은 코드 펜스를
 검사하고 실패 시 종료 코드 1.

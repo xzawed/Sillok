@@ -1,0 +1,38 @@
+# Sillok 로컬 스택 (D13: Postgres + Service 두 개)
+#
+# 정본: adr/0001-v1-stack-decisions.md — 값이 다르면 정본이 이긴다.
+# 작업 순서: docs/plan.md §7. 지금은 1단계이므로 db 만 있다.
+#   api 서비스는 3단계(FastAPI 골격)에서 이 파일에 추가한다.
+#
+# 5432 를 호스트에 게시하지 않는다 (D16). 디버깅으로 호스트에서 붙어야 하면
+# compose.override.example.yml 를 compose.override.yml 로 복사해서 쓴다.
+
+services:
+  db:
+    # 확장 파일이 들어 있는 이미지를 쓴다. 이미지가 있어도 DB 마다
+    # CREATE EXTENSION 은 따로 필요하다 — migrations/001_extensions.sql (D17).
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sillok}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sillok}
+      POSTGRES_DB: ${POSTGRES_DB:-sillok}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      # --wait 가 이 검사를 본다. pg_isready 만으로는 초기화 중인 DB 도 통과하므로
+      # 실제 접속까지 확인한다.
+      # $$ 로 이스케이프해서 Compose 가 아니라 컨테이너 셸이 풀게 한다.
+      # 그래야 environment: 를 오버라이드로 바꿔도 검사가 같은 값을 따라간다.
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+          && psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c 'SELECT 1' >/dev/null
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  db_data:
