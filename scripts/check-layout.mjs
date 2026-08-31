@@ -315,6 +315,61 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
   }
 }
 
+// 10. 산문에 박힌 테스트 수치.
+//     2026-08-31 감사: 잘못된 주장 9건이 **전부 숫자**였고 행위 주장은 하나도 틀리지 않았다.
+//     숫자는 검사가 늘 때마다 낡는데 아무도 다시 세지 않는다 — 이번 세션에서만 세 번 고쳤다.
+//     이력으로 인용하려면 백틱 안에 넣는다. 코드 스팬·펜스는 검사 8과 같은 이유로 제외한다.
+const NUMBER_CLAIMS = [
+  [/\d+\s*(tests?\s*)?passed/, 'N passed'],
+  [/\d+\s*(tests?\s*)?skipped/, 'N skipped'],
+  [/skip\s*0\b/, 'skip 0'],
+  // 단위를 **필수**로 둔다. 선택으로 두면 "단계 2 통과", "2026-08-31 통과", "Q26 통과" 까지 잡는다.
+  // 대신 단위 없는 "114 통과" 는 빠져나간다 — 이건 부분 문자열 목록이지 증명이 아니다 (AGENTS).
+  [/\d+\s*(개|건|종|tests?)\s*통과/, 'N종 통과'],
+  [/주입\s*\d+\s*종/, '주입 N종'],
+]
+for (const p of md) {
+  const { prose } = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  for (const [pattern, label] of NUMBER_CLAIMS) {
+    const hit = pattern.exec(prose)
+    if (hit) {
+      fail(
+        `${p} : 산문에 테스트 수치 "${hit[0].trim()}" (${label}) — 검사가 늘면 낡는다. ` +
+          '규칙만 적거나, 이력이면 백틱 안에 넣는다.'
+      )
+    }
+  }
+}
+
+// 11. 폐기된 문구.
+//     감사에서 3위 부류였던 "수리 미전파" — 정본을 고치고 사본에 옛 문장을 남기는 것이다.
+//     검사 6(구 파일명)과 같은 방식이다. 문구를 바꿔 고쳤으면 옛 문구를 여기 등록한다.
+const RETIRED = [
+  ['같은 구조다', 'D6 유추 (ingest 는 별도 프로세스다)'],
+  ['업무 라우트는 아직 없다', '4단계에서 라우트가 생겼다'],
+  ['업무 라우트가 없으므로', '4단계에서 라우트가 생겼다'],
+  // "--wait" 까지 포함해야 한다. "고친 후 다시 돌린다" 같은 정상 문장을 잡으면 안 된다.
+  ['--wait 후 다시 돌린다', '거짓 skip 사유 (그 명령은 5432 를 게시하지 않는다)'],
+  ['이 오버라이드가 필요 없어진다', 'sillok ingest 가 아직 없다'],
+  ['-p no:warnings', '증거 명령은 pytest -q 로 통일했다'],
+]
+const textish = all.filter(
+  (p) =>
+    !p.startsWith('scripts/') && // 목록 자체를 들고 있는 파일
+    /\.(md|py|yml|yaml|toml|example|sql)$|(^|\/)Dockerfile$/.test(p)
+)
+for (const p of textish) {
+  // 문서에서는 폐기된 문구를 **인용**할 수 있어야 한다 — 왜 폐기했는지 적으려면 그 말을 써야 한다.
+  // 검사 8·10 과 같은 규칙으로 코드 스팬 **과 코드 블록**을 제외한다.
+  // 즉 펜스 안에 넣으면 잡히지 않는다. 옛 설정을 예시로 보여 주려면 그렇게 한다.
+  // 코드 파일(.py 등)은 마크다운이 아니므로 그대로 본다.
+  const raw = readFileSync(join(ROOT, p), 'utf8')
+  const s = p.endsWith('.md') ? stripCode(raw).prose : raw
+  for (const [phrase, why] of RETIRED) {
+    if (s.includes(phrase)) fail(`${p} : 폐기된 문구 "${phrase}" — ${why}`)
+  }
+}
+
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)

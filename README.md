@@ -74,8 +74,9 @@ Sillok의 색인 대상은 `docs/**`, 루트 `README*`, `adr/**`다 (D9).
 ## 검증
 
 ```bash
-node scripts/check-layout.mjs        # 검사
-node scripts/check-layout.test.mjs   # 검사가 실제로 무는지 (고장 주입)
+node scripts/evidence.mjs            # PR 증거 4종을 한 번에. 하나라도 못 돌리면 실패한다
+node scripts/check-layout.mjs        # 문서 게이트만
+node scripts/check-layout.test.mjs   # 그 게이트가 실제로 무는지 (고장 주입 + 메타)
 ```
 
 두 번째는 저장소를 임시 디렉토리로 **복사한 뒤 복사본에** 고장을 주입하므로 작업 트리를 건드리지 않는다.
@@ -122,6 +123,8 @@ docker compose --profile test run --rm test   # skip 없이 전부. 5432 는 닫
 - 존재하지 않는 `Q` 번호 참조 — `open-questions.md`가 실제로 정의한 집합과 대조
 - 머지되면 의미를 잃는 지시어(`이 PR` 등) — 커밋 해시·날짜·PR 번호로 고정해야 한다
 - 닫히지 않은 코드 펜스 — 열린 펜스가 뒤 본문을 코드로 먹어 위 검사를 무력화하는 것을 막는다
+- **산문에 박힌 테스트 수치** — 검사가 늘면 낡는다. 이력으로 인용하려면 백틱 안에 넣는다
+- **폐기된 문구** — 정본을 고치고 사본에 옛 문장을 남기는 것을 막는다. 구 파일명 검사와 같은 방식이다
 - **Q 게이트** — 어떤 단계를 막는 Q가 아직 열려 있는데 그 단계의 라우트·CLI 명령·MCP가
   `src/`에 있으면 실패한다. `plan.md` §7의 *"n단계 전에 Qx"* 문장을 읽어 강제하므로,
   그 문장을 고치면 검사가 따라온다 — 같은 사실을 두 곳에 적지 않는다.

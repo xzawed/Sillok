@@ -206,6 +206,100 @@ const CASES = [
     mutate: (dir) =>
       edit(dir, 'docs/plan.md', (s) => s.replace(', 5단계 전에 Q6·Q7·Q10', '')),
   },
+
+  // --- 검사 10: 산문에 박힌 테스트 수치 ---
+  {
+    id: '21 산문 속 "N passed"',
+    expect: 'fail',
+    mentions: ['테스트 수치', 'passed'],
+    mutate: append('docs/spec.md', '\n검사 결과는 42 passed 였다.\n'),
+  },
+  {
+    id: '22 산문 속 "skip 0"',
+    expect: 'fail',
+    mentions: ['테스트 수치'],
+    mutate: append('docs/spec.md', '\n머지 근거는 skip 0 이었다.\n'),
+  },
+  {
+    id: '23 백틱 안 수치는 이력이므로 잡지 않는다',
+    expect: 'pass',
+    mutate: append('docs/spec.md', '\n당시 수치는 `42 passed, 7 skipped` 였다.\n'),
+  },
+  {
+    id: '23b 산문 속 "N skipped" (passed 없이)',
+    expect: 'fail',
+    mentions: ['테스트 수치', 'skipped'],
+    mutate: append('docs/spec.md', '\n그때는 7 skipped 였다.\n'),
+  },
+  {
+    id: '23c 산문 속 "N종 통과"',
+    expect: 'fail',
+    mentions: ['테스트 수치'],
+    mutate: append('docs/spec.md', '\n검사는 26종 통과했다.\n'),
+  },
+  {
+    id: '23d 숫자 없는 "통과" 는 잡지 않는다',
+    expect: 'pass',
+    mutate: append('docs/spec.md', '\n배치 검증 통과가 전제다.\n'),
+  },
+  {
+    // 단위를 선택으로 두면 이런 정상 문장이 전부 붉은불이 된다.
+    id: '23e 단위 없는 "단계 2 통과" · 날짜 · Q번호는 잡지 않는다',
+    expect: 'pass',
+    mutate: append(
+      'docs/spec.md',
+      '\n단계 2 통과가 조건이다. 2026-08-31 통과였고 Q26 통과로 적었다.\n'
+    ),
+  },
+
+  // --- 검사 11: 폐기된 문구 ---
+  {
+    id: '24 폐기 문구가 문서에 되살아나면 운다',
+    expect: 'fail',
+    mentions: ['폐기된 문구', '같은 구조다'],
+    mutate: append('docs/spec.md', '\n예전에는 같은 구조다 라고 적었다.\n'),
+  },
+  {
+    id: '25 폐기 문구가 코드 주석에 되살아나도 운다',
+    expect: 'fail',
+    mentions: ['폐기된 문구'],
+    mutate: write('src/sillok/_probe.py', '# 업무 라우트는 아직 없다\n'),
+  },
+  {
+    id: '26 문서에서 백틱으로 인용하는 것은 허용한다',
+    expect: 'pass',
+    // 왜 폐기했는지 적으려면 그 말을 써야 한다.
+    mutate: append('docs/spec.md', '\n예전 문구 `같은 구조다` 는 쓰지 않는다.\n'),
+  },
+]
+
+// 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
+// 검사를 끄고 같은 고장을 주입했을 때 통과해야 한다. 여전히 실패하면
+// 그 케이스는 다른 검사에 걸려 "엉뚱한 이유로" 붉은불이 켜졌던 것이다.
+const CHECKER = 'scripts/check-layout.mjs'
+const META = [
+  {
+    id: 'M1 검사 9(Q 게이트)를 끄면 라우트 주입이 통과한다',
+    disable: (s) => s.replace('for (const hit of found) {', 'for (const hit of []) {'),
+    inject: write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n'),
+  },
+  {
+    id: 'M2 검사 10(수치)을 끄면 수치 주입이 통과한다',
+    disable: (s) =>
+      s.replace('for (const [pattern, label] of NUMBER_CLAIMS) {', 'for (const [pattern, label] of []) {'),
+    inject: append('docs/spec.md', '\n검사 결과는 42 passed 였다.\n'),
+  },
+  {
+    id: 'M3 검사 11(폐기 문구)을 끄면 폐기 문구가 통과한다',
+    disable: (s) =>
+      s.replace('for (const [phrase, why] of RETIRED) {', 'for (const [phrase, why] of []) {'),
+    inject: append('docs/spec.md', '\n예전에는 같은 구조다 라고 적었다.\n'),
+  },
+  {
+    id: 'M4 검사 8(지시어)을 끄면 지시어 주입이 통과한다',
+    disable: (s) => s.replace('for (const d of DEICTIC) {', 'for (const d of []) {'),
+    inject: append('docs/spec.md', '\n이 PR은 그것을 고쳤다.\n'),
+  },
 ]
 
 let failures = 0
@@ -252,9 +346,33 @@ for (const c of CASES) {
   }
 }
 
+for (const m of META) {
+  const dir = copyRepo()
+  try {
+    // 검사를 끄는 것 자체가 실패하면(문구가 바뀌었으면) 조용히 넘어가면 안 된다.
+    edit(dir, CHECKER, m.disable)
+    m.inject(dir)
+    const { code, out } = run(dir)
+    const ok = code === 0
+    if (!ok) failures++
+    console.log(`${ok ? 'OK  ' : 'BAD '} ${m.id}`)
+    if (!ok) {
+      console.log('       검사를 껐는데도 실패한다 — 그 케이스는 다른 검사에 걸리고 있었다.')
+      for (const line of out.split('\n').filter((l) => l.trim().startsWith('-')).slice(0, 3)) {
+        console.log('       ' + line.trim())
+      }
+    }
+  } catch (e) {
+    failures++
+    console.log(`BAD  ${m.id}  검사를 끄지 못했다: ${e.message}`)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 console.log(
   failures === 0
-    ? `\n고장 주입 ${CASES.length}종 전부 기대와 일치`
+    ? `\n고장 주입 ${CASES.length}종 + 메타 ${META.length}종 전부 기대와 일치`
     : `\n불일치 ${failures}건`
 )
 process.exit(failures === 0 ? 0 : 1)
