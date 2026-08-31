@@ -34,6 +34,9 @@ function run(dir) {
     const out = execFileSync('node', [join(dir, 'scripts', 'check-layout.mjs')], {
       cwd: dir,
       encoding: 'utf8',
+      // stderr 를 명시하지 않으면 execFileSync 는 자식의 stderr 를 **부모에게도 흘린다.**
+      // 주입한 고장이 전부 화면에 쏟아져 정작 OK/BAD 줄이 묻힌다. 잡기만 하고 흘리지 않는다.
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
     return { code: 0, out }
   } catch (e) {
