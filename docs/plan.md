@@ -143,13 +143,15 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 
-A절(Q1–Q5)은 2026-08-31에 **D16–D20으로 마감됐다.** 1–2단계를 이제 검증할 수 있다.
-남은 공백은 단계별로 걸린다 — 5단계 전에 Q6·Q7·Q10, 6단계 전에 Q8·Q9, 7단계 전에 Q19·Q20이 필요하다.
+A절(Q1–Q5)은 **D16–D20으로**, Q11은 **D21로** 마감됐다 (2026-08-31). 1–3단계를 이제 검증할 수 있다.
+남은 공백은 단계별로 걸린다 — **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
+6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17이 필요하다.
 [open-questions.md](open-questions.md)를 참조하고, 답이 없는 항목을 추측으로 채우지 않는다.
 
 1. Compose: Postgres + pgvector. `5432`는 호스트에 게시하지 않는다 (D16)
 2. 마이그레이션 — `001` 확장 → `002` 스키마, 전부 멱등 ([data-model.md](data-model.md) DDL, D17)
-3. FastAPI 골격, 공통 `{ok, data|error}`
+3. FastAPI 골격, 공통 `{ok, data|error}`. 상태 매핑과 기본 응답 덮기는 D21.
+   `serve`는 bind 전에 마이그레이션을 돌린다 (D17). 업무 라우트는 아직 붙이지 않는다
 4. `save_event` / `event_stats` / `kb_status` (임베딩 없이도 동작)
 5. ingest: 경로 스캔, 해시, 청크, tsv. 키 있으면 임베딩
 6. `search_docs` / `search_events` (키 없으면 키워드만)

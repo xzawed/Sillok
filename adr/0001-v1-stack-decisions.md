@@ -1,14 +1,14 @@
 ---
-title: v1 확정 결정 D1–D20
+title: v1 확정 결정 D1–D21
 doc_type: adr
 status: current
 module: null
 ---
 
-# ADR 0001 — v1 확정 결정 D1–D20
+# ADR 0001 — v1 확정 결정 D1–D21
 
 상위: [docs/plan.md](../docs/plan.md) · [README](../README.md)
-상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D20 **2026-08-31 확정** (부트스트랩 공백 마감)
+상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D21 **2026-08-31 확정** (부트스트랩 공백과 HTTP 에러 표면)
 
 이 파일은 **모든 확정값의 정본**이다. 확정값이 다른 문서와 어긋나면 이 파일이 이긴다.
 
@@ -135,6 +135,86 @@ Q24는 D1–D15의 선택지 목록이 유실돼 *왜 다른 안을 버렸는가
 | D19 | CLI가 `POST /v1/ingest`의 HTTP 클라이언트 | CLI가 Postgres에 직접 접속 | 인프로세스로 Service 함수 호출 | **B는 불변식 위반** — 데이터 접근 계층이 둘이 되고 검증·쓰기가 복제된다. A는 색인 때마다 serve가 떠 있어야 하고 스캔+임베딩이 단일 긴 요청이 되어 타임아웃·진행률 문제를 부른다 |
 | D20 | CLI만 남기고 엔드포인트 삭제 | HTTP가 진입점, CLI는 래퍼 | 같은 함수의 두 앞면 | A는 엔드포인트 소유자인 `service-and-mcp.md`를 틀리게 만들고 n8n webhook 확장을 막는다. B는 D19를 A로 되돌린다 |
 
+## D21 — HTTP 어댑터의 에러 표면 (2026-08-31 확정)
+
+[open-questions.md](../docs/open-questions.md) Q11을 마감한다. 3단계(FastAPI 골격)의 공통 응답이 여기에 걸려 있었다.
+
+| ID | 선택 | 결정 내용 | 닫은 질문 |
+|---|---|---|---|
+| D21 | A | 코드↔상태 매핑을 고정하고, 응답 본문은 **언제나** 공통 봉투다. `UNAUTHORIZED`를 코드에 추가한다 | Q11 |
+
+| `error.code` | HTTP | 비고 |
+|---|---|---|
+| `VALIDATION` | 422 | FastAPI의 요청 모델 실패와 같은 부류다. v1에서 400과 나누지 않는다 |
+| `UNAUTHORIZED` | 401 | **새 코드.** D7 게이트 전용. 권한 모델이 없으므로 403은 쓰지 않는다 |
+| `NOT_FOUND` | 404 | 3단계에서는 **없는 경로**에만 쓴다. `get_event`의 404 대 빈 결과는 Q12로 남는다 |
+| `CONFLICT` | 409 | **예약. v1은 발신하지 않는다** — 아래 참조 |
+| `INTERNAL` | 500 | 서버 결함. 클라이언트 입력 문제가 아니다 |
+
+**상태코드는 어댑터의 것이고 애플리케이션 신호는 `ok:false`다.** D19가 정한 대로 단위는 Service 함수이고,
+MCP를 통해 오는 모델은 함수 결과를 본다. 상태코드는 `curl`·나중의 n8n 같은 HTTP 클라이언트를 위한 것이다.
+
+**전부 200으로 돌리지 않는다.** [plan.md](../docs/plan.md) §9의 판정 명령이 `curl -sf`이고,
+모든 본문이 200이면 그 `-f`가 영원히 걸리지 않는다. 이미 적힌 검증을 무력화하는 선택은 택하지 않는다.
+
+빈 검색 결과는 오류가 아니다. `{ "results": [] }` 그대로 200이다.
+
+### FastAPI 기본 응답은 봉투를 깬다
+
+FastAPI는 요청 검증 실패에 `{"detail": [...]}`를, 없는 경로에 `{"detail": "Not Found"}`를 돌려준다.
+둘 다 [service-and-mcp.md](../docs/service-and-mcp.md)가 소유한 공통 응답 계약 위반이다. 핸들러로 덮는다.
+
+```text
+fastapi.exceptions.RequestValidationError   -> VALIDATION / 422
+starlette.exceptions.HTTPException          -> 상태에 맞는 코드
+Exception                                    -> INTERNAL / 500
+```
+
+`starlette` 쪽을 등록해야 한다. `fastapi.HTTPException`만 등록하면 프레임워크 내부에서 나는 것이 잡히지 않는다.
+같은 이유로 기본 `fastapi.security.HTTPBearer`를 그대로 쓰지 않는다 — 그것도 `{"detail": ...}`를 돌려준다.
+
+### `CONFLICT`에 v1 발신자가 없다
+
+Q11이 이미 `발생 조건조차 없다`고 적었고, 실제로 없다.
+
+| 표면 | 왜 CONFLICT가 아닌가 |
+|---|---|
+| `POST /v1/events` | `id`가 `bigserial`이고 payload에 유일성이 없다. 여기서 유일성을 발명하면 **Q18을 추측으로 닫는 것**이다 |
+| `POST /v1/docs/proposals` | D3대로 쓰지 않는다. 충돌할 대상이 없다 |
+| ingest의 `UNIQUE (project, repo, path)` | 재색인은 청크를 지우고 다시 넣는 upsert다 |
+| 동시 ingest | **Q10이 열려 있다.** 경쟁 상황의 UniqueViolation은 명시된 발신 조건이 아니라 `INTERNAL`이다 |
+
+**코드는 예약으로 남기고 매핑만 정한다.** 아무도 만들지 않는 코드를 지우는 것은 계약 변경이고,
+쓰이는 것처럼 보이려고 발신 조건을 발명하는 것은 더 나쁘다.
+
+### `INTERNAL`의 본문은 고정 문자열이다
+
+```json
+{ "ok": false, "error": { "code": "INTERNAL", "message": "internal error" } }
+```
+
+예외 문구·트레이스백·경로를 실어 보내지 않는다. `psycopg` 예외는 DSN을 품는 일이 잦고,
+그 교훈은 이미 러너의 `redact_dsn`에 있다. `SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`도 마찬가지다.
+서버 로그에 남기고 클라이언트에는 고정 문구만 준다.
+
+`save_event`의 `에러 메시지를 그대로 돌려줌`은 **`VALIDATION`에 대한 것**이지 `INTERNAL`이 아니다.
+
+### D21 선택지
+
+| ID | A | B | C | 버린 이유 |
+|---|---|---|---|---|
+| D21 매핑 | 코드별 상태 + 봉투 | 전부 200, 봉투만 | 상태만, 봉투 없음 | B는 plan §9의 `curl -sf`를 무력화하고 전송 성공과 처리 실패를 섞는다. C는 공통 응답 계약 자체를 버린다 |
+| D21 인증 | `UNAUTHORIZED` 추가 | `VALIDATION`으로 통합 | 3단계에서 게이트 생략 | B는 모델에게 *인자가 틀렸다*고 말해 재시도를 유도한다 — 틀린 의미를 강제한다. C는 D7이 이미 정한 것을 미룬다 |
+| D21 VALIDATION | 422 | 400 | 400/422 분리 | B·C는 FastAPI 자신의 요청 검증 실패와 부류가 갈라져 클라이언트가 두 형태를 구분해야 한다 |
+
+### D21이 닫지 않는 것
+
+- **Q12** `get_event`의 404 대 빈 결과, 프로젝트 경계 검사. D21은 *없는 경로*의 404만 정했다
+- **Q13** 페이지네이션과 목록·타임라인 엔드포인트
+- **Q16 · Q18 · Q21** 4단계(`save_event`·`event_stats`)가 필요로 하는 것들
+- **Q17** MCP 입력 스키마와 마운트 경로. D7 게이트가 Streamable HTTP에 어떻게 걸리는지는 그때 확정한다
+- **Q10** 동시 실행. 경쟁 UniqueViolation을 `INTERNAL`로 둔다는 것 외에는 정하지 않았다
+
 ### D16–D20이 닫지 않는 것
 
 - **Q20** `project` → workspace 경로 매핑. D16은 workspace 루트 **하나**의 이름만 정했다
@@ -179,5 +259,5 @@ Q24는 D1–D15의 선택지 목록이 유실돼 *왜 다른 안을 버렸는가
 
 ## 미기록
 
-D21 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
-2026-08-31 기준 남은 것은 B절(색인·검색 결정성) · C절(API 계약) · D절(무결성·보안)과 Q24·Q25다.
+D22 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
+2026-08-31 기준 남은 것은 B절(색인·검색 결정성) · C절의 Q12–Q17 · D절(무결성·보안)과 Q24·Q25다.
