@@ -9,7 +9,9 @@ module: null
 
 상위: [plan.md](plan.md) · [README](../README.md)
 
-버전: 0.1 · 날짜: 2026-08-30 · 상태: 설계 확정 / 구현 전
+버전: 0.1 · 날짜: 2026-08-30 · 상태: 설계 확정
+
+진행 상태는 여기서 관리하지 않는다 — [plan.md](plan.md) §7과 §9가 소유한다.
 
 > 이 문서는 배경이다. 값이 [plan.md](plan.md)나
 > [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)와 다르면 그 둘이 이긴다.
@@ -91,12 +93,10 @@ n8n은 색인·배치 보조로 쓸 수 있으나 v1에서는 만들지 않는�
 
 ## 성공 조건 (v1)
 
-1. 필드 없는 이벤트가 저장되지 않는다.
-2. 이력 본문을 Git 문서에 이어 붙이는 경로가 없다.
-3. `search_docs` / `search_events` / `event_stats`가 같은 프로젝트에서 동작한다.
-4. 사람용 건수를 `GET /v1/status`가 Service와 같은 데이터로 돌려준다.
-   목록·타임라인 엔드포인트는 아직 없다 → [open-questions.md](open-questions.md) Q13.
-5. 질의 로그에 hit_count=0 이 남는다.
+> 정본: [plan.md](plan.md) §9 — 값이 다르면 정본이 이긴다.
+
+여기에 목록을 복제하지 않는다.
+목록·타임라인 엔드포인트가 없다는 사실은 [open-questions.md](open-questions.md) Q13이 소유한다.
 
 ## 1차 산출물
 
