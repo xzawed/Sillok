@@ -207,6 +207,10 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
         'Q 게이트가 조용히 비어 있게 된다.'
     )
   }
+  // 문장을 통째로 바꾸거나 지우면 위 검사는 0 === 0 으로 통과한다. 그것도 막는다.
+  if (gates.size === 0) {
+    fail(`${planPath} §7 : "n단계 전에 Qx" 문장을 하나도 찾지 못했다. Q 게이트가 비어 있다.`)
+  }
 
   // 해결된 Q. "**Q11. ..." 로 시작하는 덩어리 안에 "해결 →" 가 있으면 닫힌 것이다.
   const resolved = new Set()
@@ -218,6 +222,7 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
 
   // 단계별 표면. 정본은 plan.md §5 와 docs/service-and-mcp.md 다.
   // 긴 접두사부터 본다 — /v1/events/{id}(7단계 get_event)가 /v1/events(4단계)보다 먼저다.
+  // GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다. 여기서 단계를 발명하지 않는다.
   const SURFACE = [
     ['/v1/search/docs', 6],
     ['/v1/search/events', 6],
@@ -228,13 +233,24 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
     ['/v1/ingest', 5],
     ['/v1/status', 4],
     ['/v1/files', 7],
-    ['/v1/docs', 7],
   ]
   const CLI_STEP = { ingest: 5 }
+  const TRACKED_STEPS = [...new Set([...SURFACE.map((s) => s[1]), ...Object.values(CLI_STEP), 8])]
 
   const stepOf = (path) => {
     for (const [prefix, step] of SURFACE) if (path.startsWith(prefix)) return step
     return null
+  }
+
+  // 우리가 표면을 추적하는 단계에 게이트 문장이 없으면, 그 단계는 무방비인데 조용히 통과한다.
+  // Q 가 다 풀려도 §7 의 절을 지우지 않는다 — open-questions 가 항목을 지우지 않는 것과 같은 이유다.
+  for (const step of TRACKED_STEPS.toSorted((a, b) => a - b)) {
+    if (!gates.has(step)) {
+      fail(
+        `${planPath} §7 : ${step}단계 게이트 문장이 없다. ` +
+          'Q 가 해결됐더라도 절을 지우지 말고 남긴다 (해결 표시는 open-questions.md 가 한다).'
+      )
+    }
   }
 
   const py = all.filter((p) => p.startsWith('src/') && p.endsWith('.py'))
@@ -246,13 +262,37 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
       .split('\n')
       .filter((line) => !/^\s*#/.test(line))
       .join('\n')
-    for (const m of s.matchAll(/@\w+\.(?:get|post|put|patch|delete)\(\s*["']([^"']+)["']/g)) {
-      const step = stepOf(m[1])
-      if (step) found.push({ step, what: `라우트 ${m[1]}`, file: p })
+
+    // 라우터에 붙은 prefix 를 모은다. FastAPI 의 기본 형태가
+    //   router = APIRouter(prefix="/v1");  @router.get("/status")
+    // 라서, 데코레이터의 경로만 보면 4단계 라우트가 그대로 통과한다.
+    // 파일 안의 모든 prefix 를 상대 경로에 붙여 본다 — 어느 라우터인지 정확히 몰라도
+    // 막는 쪽으로 틀리는 것이 낫다.
+    const prefixes = ['']
+    for (const m of s.matchAll(/prefix\s*=\s*["']([^"']*)["']/g)) prefixes.push(m[1])
+    for (const m of s.matchAll(/\.mount\(\s*["']([^"']*)["']/g)) prefixes.push(m[1])
+
+    const flag = (rawPath, what) => {
+      for (const prefix of prefixes) {
+        const step = stepOf(prefix + rawPath)
+        if (step) {
+          found.push({ step, what: `${what} ${prefix}${rawPath}`, file: p })
+          return
+        }
+      }
     }
+
+    // 데코레이터: @app.get("/x") / @router.post(path="/x")
+    for (const m of s.matchAll(
+      /@\w+\.(?:get|post|put|patch|delete)\(\s*(?:path\s*=\s*)?["']([^"']+)["']/g
+    )) {
+      flag(m[1], '라우트')
+    }
+    // 명시 등록: app.add_api_route("/x", ...)
+    for (const m of s.matchAll(/add_api_route\(\s*["']([^"']+)["']/g)) flag(m[1], '라우트')
+    // 마운트·include_router 의 첫 인자가 경로인 경우
     for (const m of s.matchAll(/\.(?:mount|include_router)\(\s*["']([^"']+)["']/g)) {
-      const step = stepOf(m[1])
-      if (step) found.push({ step, what: `마운트 ${m[1]}`, file: p })
+      flag(m[1], '마운트')
     }
     for (const m of s.matchAll(/add_parser\(\s*["']([^"']+)["']/g)) {
       const step = CLI_STEP[m[1]]
