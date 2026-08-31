@@ -112,6 +112,37 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md)의 필수 6개 필드. 하나라도 없으면 `VALIDATION`.
 
+```json
+{
+  "project": "sillok",
+  "kind": "failure",
+  "title": "배포 후 커넥션 풀 고갈",
+  "summary": "…",
+  "occurred_at": "2026-08-31T09:00:00Z",
+  "result": "failure",
+  "module": "auth",
+  "root_cause": "pool exhausted",
+  "resolution": "…",
+  "severity": "high",
+  "resolved_at": "2026-08-31T10:00:00Z",
+  "related_doc_path": "docs/runbook.md",
+  "source": "agent",
+  "payload": {},
+  "created_by": "claude"
+}
+```
+
+응답 `data`: `{ "id": 1 }`.
+
+검증 세부는 D25다:
+
+- `occurred_at`·`resolved_at`은 **오프셋이 있어야 한다**(`Z` 또는 `±HH:MM`). 오프셋 없는 값과 날짜만 있는 값은 `VALIDATION`
+- `resolved_at < occurred_at`이면 `VALIDATION`
+- `title` 200자 초과, `summary` 2000자 초과는 `VALIDATION`
+- `project`는 앞뒤 공백을 제거한 뒤 비어 있거나 64자 초과이거나 공백·슬래시·NUL을 포함하면 `VALIDATION`. 대소문자는 구분한다
+- `source`를 생략하면 `agent`다
+- **멱등이 아니다 (D24).** 같은 요청을 두 번 보내면 행이 둘 생긴다. 재시도는 통계를 부풀린다
+
 `POST /v1/docs/proposals`
 
 현재 진실 패치 제안. v1 기본 가정: Git에 직접 쓰지 않고 diff/본문을 반환한다.
@@ -126,17 +157,42 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
   "by_kind": { "failure": 7, "success": 4, "incident": 1 },
   "by_result": { "failure": 6, "success": 5, "partial": 1 },
   "by_module": { "auth": 4, "billing": 2 },
-  "repeat_causes": [{ "root_cause": "pool exhausted", "count": 3 }]
+  "repeat_causes": [{ "module": "auth", "root_cause": "pool exhausted", "count": 3 }],
+  "avg_resolution_seconds": 3600
 }
 ```
 
-벡터를 쓰지 않는다.
+벡터를 쓰지 않는다. 규칙은 D23이다:
+
+- `repeat_causes`는 `module`까지 묶는다 — Skill의 결정 트리가 `project+module+root_cause`로 세기 때문이다.
+  `root_cause`만 묶으면 `?module=` 없이 부른 결과가 그 트리와 어긋난다. `project`는 질의 파라미터이므로 항목에 넣지 않는다
+- `root_cause`가 없는 행은 제외. **2회 이상만**, `count` 내림차순(동수면 `root_cause` 오름차순), **최대 12개**
+- `module`이 없는 반복도 `"module": null`로 나간다. `by_module`이 NULL 키를 못 만드는 것과 다르다 — 여기는 필드다
+- `by_module`은 `module`이 없는 행의 키를 넣지 않는다. 그 행들은 `total`에 남아 있으므로 `sum(by_module) <= total`이다. 0인 키도 넣지 않는다
+- `avg_resolution_seconds`는 정수 초 또는 `null`. `resolved_at`이 없는 행은 평균에서 빠지고, 전부 미해결이면 `0`이 아니라 `null`이다
 
 ### 상태
 
 `GET /v1/status?project=`
 
 문서 수, 청크 수, 이벤트 수, 마지막 ingest, 최근 hit_count=0 질의 수.
+
+```json
+{
+  "documents": 0,
+  "chunks": 0,
+  "events": 0,
+  "last_ingest_at": null,
+  "zero_hit_queries": 0
+}
+```
+
+`last_ingest_at`은 `kb_ingest_runs`의 마지막 `finished_at`이고 5단계 전까지 `null`이다.
+`zero_hit_queries`는 `kb_query_logs`의 `hit_count = 0` 건수이고 9단계 전까지 `0`이다.
+**둘 다 빈 값이 정상이지 스텁이 아니다.**
+
+모르는 `project`도 같은 0을 돌려준다. `NOT_FOUND`가 아니다 — 404 대 빈 결과 규칙은 Q12로 열려 있고 그건 `get_event`의 문제다.
+목록·타임라인은 여기 없다 (Q13).
 
 ### 색인
 

@@ -143,7 +143,8 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 
-A절(Q1–Q5)은 **D16–D20으로**, Q11은 **D21로** 마감됐다 (2026-08-31). 1–3단계를 이제 검증할 수 있다.
+A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**로 마감됐다 (2026-08-31).
+1–4단계를 이제 검증할 수 있다.
 남은 공백은 단계별로 걸린다 — **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
 6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17이 필요하다.
 [open-questions.md](open-questions.md)를 참조하고, 답이 없는 항목을 추측으로 채우지 않는다.
@@ -179,7 +180,9 @@ A절(Q1–Q5)은 **D16–D20으로**, Q11은 **D21로** 마감됐다 (2026-08-31
 - [x] Compose로 DB가 뜬다 — 2026-08-31 실측. `pgvector/pgvector:pg16` healthy,
       `001`·`002` 적용 후 확장 `vector 0.8.2`·`pg_trgm 1.6`, 테이블 5개,
       `kb_chunks.embedding`·`kb_events.embedding` 모두 `vector(1536)`
-- [ ] 필수 필드 없는 `save_event`가 `VALIDATION`으로 거절된다
+- [x] 필수 필드 없는 `save_event`가 `VALIDATION`으로 거절된다 — 2026-08-31 실측.
+      `POST /v1/events {}` → 422 `{"code":"VALIDATION","message":"missing required field: project, kind, …"}`.
+      오프셋 없는 `occurred_at`도 같은 코드로 거절된다 (D25)
 - [ ] ingest가 `docs/**`, 루트 `README*`, `adr/**`만 먹는다
 - [ ] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다
 - [ ] `get_file`이 workspace의 해당 path를 돌려준다
@@ -199,9 +202,10 @@ curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
 uv run pytest -q
 ```
 
-> **지금은 가운데 두 줄이 돌지 않는다.** `sillok ingest`는 5단계, `/v1/status`는 4단계에서 생긴다.
-> 오늘 돌릴 수 있는 것은 1·2·5번째 줄뿐이고, 5번째는 커밋된 구성에서 `71 passed, 19 skipped`가 정상이다 (Q26).
-> 이 블록은 **목표**이지 현재 상태가 아니다.
+> **지금은 3번째 줄이 돌지 않는다.** `sillok ingest`는 5단계에서 생긴다.
+> `/v1/status`는 4단계에서 생겼으므로 4번째 줄은 돈다.
+> 5번째 줄은 호스트에서 DB 검사가 skip된 채로 돈다 — 전부 돌리려면 D22의 `--profile test`다.
+> 이 블록은 **v1 목표**이지 현재 상태가 아니다.
 
 `sillok ingest`는 `serve`가 떠 있지 않아도 도는 것이 D19의 요점이다.
 위 명령이 `exec api`를 쓰는 것은 Compose 안에서 워크스페이스와 DSN이 이미 맞춰져 있기 때문이지, HTTP를 타서가 아니다.

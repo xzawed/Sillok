@@ -54,7 +54,7 @@ AI가 프로젝트 운영 중 생성·정리한 글을 어디에 둘지 이 파�
 
 - `project` (문자열)
 - `kind` : `success` | `failure` | `incident` | `decision`
-- `title` (짧은 한 줄)
+- `title` (짧은 한 줄, **200자 초과 금지**)
 - `summary` (200~400자 권장, 2000자 초과 금지)
 - `occurred_at` (ISO-8601)
 - `result` : `success` | `failure` | `partial` | `unknown`

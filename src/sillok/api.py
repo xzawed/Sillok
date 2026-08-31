@@ -1,17 +1,21 @@
-"""FastAPI 골격과 공통 응답 (plan.md §7 3단계, D21).
+"""FastAPI 어댑터 (plan.md §7 3–4단계, D21·D23–D25).
 
-**업무 라우트는 여기 없다.** `save_event`·`event_stats`·`kb_status`는 4단계이고,
-그 전에 Q16·Q18·Q21이 답해져야 한다. 뜨기만 하는 스텁을 §9의 판정 대상 경로에
-올려 두면 통과한 것처럼 보이므로 만들지 않는다.
+**여기에는 SQL이 없다.** 라우트는 인자를 읽어 `service.py`의 함수를 부를 뿐이다 (D19).
+`api.py`가 직접 DB를 만지기 시작하면 데이터 접근 계층이 둘이 된다.
 
-지금 이 앱이 하는 일은 하나다: **무엇이 오든 공통 봉투로 답한다.**
-FastAPI 기본 응답 `{"detail": ...}`은 service-and-mcp.md 계약 위반이므로 전부 덮는다.
+무엇이 오든 공통 봉투로 답한다 — FastAPI 기본 응답 `{"detail": ...}`은
+service-and-mcp.md 계약 위반이므로 전부 덮는다.
+
+붙어 있는 업무 라우트는 4단계의 셋뿐이다. 검색·ingest·`get_file`·MCP는 아직 없고,
+그 경로들은 정직하게 404다 — 뜨기만 하는 스텁을 §9 판정 대상에 올리지 않는다.
 """
 
 from __future__ import annotations
 
 import logging
 import secrets
+from datetime import datetime
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -20,6 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from . import service
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -191,4 +196,34 @@ def create_app(config: Config | None = None) -> FastAPI:
         log.exception("처리되지 않은 예외: %s %s", request.method, request.url.path)
         return error(ErrorCode.INTERNAL, INTERNAL_MESSAGE)
 
+    @app.exception_handler(service.ValidationFailed)
+    async def _service_validation(_: Request, exc: service.ValidationFailed) -> JSONResponse:
+        # D21: VALIDATION 만 메시지를 그대로 돌려준다. 클라이언트가 고쳐야 하는 것이라서다.
+        return error(ErrorCode.VALIDATION, str(exc))
+
+    _mount_v1(app, cfg)
     return app
+
+
+def _since(raw: str | None) -> datetime | None:
+    if raw is None:
+        return None
+    return service.parse_timestamp(raw, "since")
+
+
+def _mount_v1(app: FastAPI, cfg: Config) -> None:
+    """4단계 라우트 (plan §7). 여기서 SQL 을 쓰지 않는다 — service 함수만 부른다."""
+
+    @app.post("/v1/events")
+    async def save_event(body: dict[str, Any]) -> JSONResponse:
+        return ok(service.save_event(cfg.database_url, body))
+
+    @app.get("/v1/stats/events")
+    async def event_stats(
+        project: str, module: str | None = None, since: str | None = None
+    ) -> JSONResponse:
+        return ok(service.event_stats(cfg.database_url, project, module, _since(since)))
+
+    @app.get("/v1/status")
+    async def kb_status(project: str) -> JSONResponse:
+        return ok(service.kb_status(cfg.database_url, project))
