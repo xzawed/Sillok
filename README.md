@@ -79,13 +79,18 @@ node scripts/check-layout.mjs
 
 이 저장소가 자기 색인 계약을 지키는지 검사한다. 코드와 무관한 **문서 게이트**다.
 
-구현된 부분(§7 1–2단계)의 검증은 따로 있다:
+구현된 부분(§7 1–3단계)의 검증은 따로 있다:
 
 ```bash
 docker compose up -d --wait   # db + api. 5432 는 게시하지 않고 8080 만 게시한다 (D16)
 curl -i http://127.0.0.1:8080/v1/nope   # 404 + 공통 봉투. FastAPI 기본 detail 이 아니다
 uv run pytest -q              # DB 가 없으면 DB 검사만 skip 된다
 ```
+
+**커밋된 구성에서는 `71 passed, 19 skipped`가 정상이다.** DB 검사 19개는 호스트에서 `5432`에 닿아야 도는데
+D16이 그 포트를 게시하지 않기 때문이다. `skip 0`을 보았다면 오버라이드가 켜져 있다는 뜻이지
+더 나은 결과가 아니다. 이 19개를 커밋된 구성에서 돌릴 방법은 아직 없다 →
+[docs/open-questions.md](docs/open-questions.md) Q26.
 
 `api`는 bind 전에 마이그레이션을 돌린다 (D17) — 기동 로그에서 순서가 보인다.
 **업무 라우트는 아직 없다.** `/v1/status` 같은 4단계 경로는 정직하게 404를 돌려준다.
