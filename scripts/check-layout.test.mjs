@@ -242,6 +242,15 @@ const CASES = [
     expect: 'pass',
     mutate: append('docs/spec.md', '\n배치 검증 통과가 전제다.\n'),
   },
+  {
+    // 단위를 선택으로 두면 이런 정상 문장이 전부 붉은불이 된다.
+    id: '23e 단위 없는 "단계 2 통과" · 날짜 · Q번호는 잡지 않는다',
+    expect: 'pass',
+    mutate: append(
+      'docs/spec.md',
+      '\n단계 2 통과가 조건이다. 2026-08-31 통과였고 Q26 통과로 적었다.\n'
+    ),
+  },
 
   // --- 검사 11: 폐기된 문구 ---
   {
