@@ -1,14 +1,14 @@
 ---
-title: v1 확정 결정 D1–D22
+title: v1 확정 결정 D1–D25
 doc_type: adr
 status: current
 module: null
 ---
 
-# ADR 0001 — v1 확정 결정 D1–D22
+# ADR 0001 — v1 확정 결정 D1–D25
 
 상위: [docs/plan.md](../docs/plan.md) · [README](../README.md)
-상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D22 **2026-08-31 확정** (부트스트랩 공백, HTTP 에러 표면, 테스트 실행 경로)
+상태: D1–D15 **2026-08-30 확정** (묶음 추천 수용) · D16–D25 **2026-08-31 확정** (부트스트랩, HTTP 에러 표면, 테스트 경로, 4단계 계약)
 
 이 파일은 **모든 확정값의 정본**이다. 확정값이 다른 문서와 어긋나면 이 파일이 이긴다.
 
@@ -259,6 +259,111 @@ D17이 `세 번째 컨테이너 없음`으로 마이그레이션 전용 컨테�
 - 5단계 ingest 검사는 workspace 파일이 필요한데 `test` 이미지에는 `docs/`·`adr/`가 없다. 그때 더한다
 - **Q20 · Q10 · Q6–Q9 · Q12–Q19 · Q21 · Q23–Q25**는 그대로 열려 있다
 
+## D23–D25 — 4단계(`save_event` · `event_stats` · `kb_status`) (2026-08-31 확정)
+
+[open-questions.md](../docs/open-questions.md) Q16·Q18·Q21을 마감한다. 4단계 라우트를 막던 것들이다.
+
+| ID | 선택 | 결정 내용 | 닫은 질문 |
+|---|---|---|---|
+| D23 | B | `repeat_causes`는 `module`까지 묶고, 2회 이상만, 최대 12개. `avg_resolution_seconds` 추가 | Q16 |
+| D24 | C | **`save_event`는 멱등이 아니다.** 재시도는 행을 하나 더 넣는다 | Q18 |
+| D25 | A | 레지스트리 없음. 검증은 서비스에서. DDL에 CHECK를 넣지 않는다 | Q21 |
+
+### D23 `event_stats` 응답
+
+```json
+{
+  "total": 12,
+  "by_kind": { "failure": 7, "success": 4, "incident": 1 },
+  "by_result": { "failure": 6, "success": 5, "partial": 1 },
+  "by_module": { "auth": 4, "billing": 2 },
+  "repeat_causes": [{ "module": "auth", "root_cause": "pool exhausted", "count": 3 }],
+  "avg_resolution_seconds": 3600
+}
+```
+
+**`repeat_causes`에 `module`이 들어간다.** Skill의 결정 트리가 `project+module+root_cause`로 반복을 세는데
+(`SKILL.md` 5번), 응답이 `root_cause`만 묶으면 `?module=` 없이 부른 결과가 그 트리와 어긋난다 —
+`auth`의 `pool exhausted`와 `billing`의 그것이 한 줄로 합쳐진다. **D11의 승격 제안이 거짓말을 하게 된다.**
+`project`는 질의 파라미터이므로 항목에 넣지 않는다.
+
+- `root_cause IS NULL`은 제외한다. 원인이 아니다
+- `HAVING count >= 2` — Skill의 *2회 이상*이 그대로 임계값이다
+- `ORDER BY count DESC LIMIT 12` — 상한이 없으면 distinct 원인 전부가 나가 토큰 불변식을 깬다. `12`는 검색 최대치와 같은 값이다
+- `by_module`은 `module IS NULL`인 행의 키를 **넣지 않는다.** JSON 키는 null일 수 없고 `"null"`은 실제 모듈명과 충돌한다.
+  그 행들은 `total`에 그대로 있으므로 `sum(by_module) <= total`이 신호다. 0인 키도 넣지 않는다
+- `avg_resolution_seconds`는 정수 초 또는 `null`. `resolved_at`이 NULL인 행은 `AVG`에서 빠지므로
+  미해결 건이 평균을 0으로 끌지 않는다. **전부 미해결이면 `0`이 아니라 `null`이다**
+
+벡터는 쓰지 않는다.
+
+### D24 `save_event`는 멱등이 아니다
+
+재시도는 행을 하나 더 넣는다. UNIQUE도, `CONFLICT`도, `003`도 없다.
+
+**필수 필드로 만든 내용 해시로 접는 안(B)을 버린 이유:** 같은 `project+module+root_cause`가 반복되는 것이
+바로 `repeat_causes`다. 그 행들을 하나로 합치면 **D11이 탐지하려는 대상 자체가 사라진다.**
+"중복 제거"처럼 보이지만 실제로는 통계를 파괴한다.
+
+- `id`는 `bigserial`이고 payload에 유일성이 없다. 이 결정은 그 사실을 **확정**하는 것이지 발견하는 것이 아니다
+- D21의 `CONFLICT`는 예약 그대로다. v1은 여전히 발신하지 않는다
+- **대가는 남는다.** HTTP 재시도 한 번이 `total`과 `repeat_causes`를 부풀린다.
+  Q18이 지적한 해가 해소된 것이 아니라 **받아들여진 것**이다. 문서에 그렇게 적는다
+
+### D25 검증 세부
+
+**`project`** — 레지스트리를 두지 않는다. D5는 문자열이고, `project`→경로 매핑(Q20)은 7단계에서 필요하다.
+지금 레지스트리를 만들면 7단계를 4단계로 끌어오는 것이다.
+
+```text
+앞뒤 공백 제거 → 빈 값이면 VALIDATION
+64자 초과 VALIDATION · 공백/슬래시/역슬래시/NUL 포함 VALIDATION
+그 외에는 그대로 저장한다 (대소문자 구분)
+```
+
+케이스 폴딩을 하지 않는다. `sillok`과 `Sillok`이 다른 프로젝트가 되는 것은 못생겼지만,
+슬러그 알파벳을 지금 발명하는 것이 더 나쁘다.
+
+**시각** — `occurred_at`·`resolved_at`은 `timestamptz`다. **오프셋 없는 문자열을 거절한다**(`VALIDATION`).
+`Z` 또는 `±HH:MM`이 있어야 하고 날짜만 있는 값도 거절한다. 드라이버가 접속 TimeZone으로 해석하게 두면
+Compose에서 우연히 UTC가 되는 것이지 계약이 아니다.
+
+**`resolved_at >= occurred_at`** — 서비스에서 검사하고 `VALIDATION`으로 거절한다.
+CHECK로 걸면 Postgres 예외가 되고 D21이 그것을 `INTERNAL 500`으로 접는다 — 클라이언트 입력 문제인데 서버 결함으로 보고된다.
+
+**`title` 상한 200자** — **새 사실이다.** 지금까지 어디에도 없었다. `summary` 2000자와 같은 자리에 적는다.
+
+**DDL에 CHECK를 넣지 않는다.** enum은 서비스에만 둔다. Skill의 값이 바뀔 때 마이그레이션이 되지 않게 하려는 것이다.
+넣기로 한다면 `002`를 고치면 안 된다 — 이미 적용된 `CREATE TABLE IF NOT EXISTS`는 제약을 추가하지 않는다.
+그리고 Postgres에는 `ADD CONSTRAINT IF NOT EXISTS`가 없으므로 D17의 멱등을 지키려면 카탈로그를 직접 본다:
+
+```sql
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'kb_events_kind_check') THEN
+    ALTER TABLE kb_events ADD CONSTRAINT kb_events_kind_check
+      CHECK (kind IN ('success','failure','incident','decision'));
+  END IF;
+END $$;
+```
+
+`DROP CONSTRAINT IF EXISTS` 후 재추가는 매 기동마다 배타 락과 재검증을 건다. 쓰지 않는다.
+
+### D23–D25 선택지
+
+| ID | A | B | C | 버린 이유 |
+|---|---|---|---|---|
+| D23 | 예시 JSON 그대로 | `module`+임계값+`avg_resolution_seconds` | Skill 3종 키를 JSON 키로 | A는 `?module=` 없이 부르면 Skill 트리와 어긋나고 `AVG`가 죽은 근거로 남는다. C는 `project`를 매 행에 복제한다 |
+| D24 | 클라이언트 `idempotency_key` + 재생 | 필수 필드 내용 해시 | 중복을 받아들인다 | **B는 D11을 파괴한다.** A는 `003`이 필요하고 MCP 모델이 안정된 키를 만들어야 효과가 있다 |
+| D25 | 서비스 검증만 | 서비스 + DDL CHECK | 프로젝트 레지스트리 + FK | B는 CHECK 위반이 `INTERNAL`로 새고 enum 변경이 마이그레이션이 된다. C는 Q20이 열린 채 7단계를 끌어온다 |
+
+### D23–D25가 닫지 않는 것
+
+- **Q13** 목록·타임라인·페이지네이션. `GET /v1/events` 컬렉션을 만들지 않는다
+- **Q14** 이벤트 수정 경로
+- **Q12** `get_event`의 404 대 빈 결과, 프로젝트 경계 — 7단계
+- **Q22 · Q23 · Q25** `repo` 의미, front matter 규칙, Skill 사본 노후
+- D24는 재시도 부풀림을 **해결하지 않고 받아들인다**
+
 ### D16–D20이 닫지 않는 것
 
 - **Q20** `project` → workspace 경로 매핑. D16은 workspace 루트 **하나**의 이름만 정했다
@@ -303,6 +408,6 @@ D17이 `세 번째 컨테이너 없음`으로 마이그레이션 전용 컨테�
 
 ## 미기록
 
-D23 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
-2026-08-31 기준 남은 것은 B절(색인·검색 결정성) · C절의 Q12–Q17 · D절(무결성·보안)과 Q24·Q25다.
+D26 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
+2026-08-31 기준 남은 것은 B절(색인·검색 결정성) · C절의 Q12–Q15·Q17 · D절의 Q19·Q20·Q22·Q23과 Q24·Q25다.
 E절(검증 경로)은 Q26 하나였고 D22로 닫혔다.
