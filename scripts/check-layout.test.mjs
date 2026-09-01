@@ -214,8 +214,14 @@ const CASES = [
   {
     id: '18 Q 를 닫으면 같은 라우트가 통과한다',
     expect: 'pass',
+    // Q 넷을 닫는 것은 곧 단계가 하나 느는 것이다. 검사 14 가 세 문서의 "1–N" 을
+    // Q 게이트에서 유도하므로, 문장을 그대로 두면 이 케이스는 검사 9 가 아니라 검사 14 로 운다.
+    // 주입은 **일관된 세계**여야 한다 — 실제로 7단계를 열 때 하는 일을 그대로 한다.
     mutate: (dir) => {
       write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n')(dir)
+      for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
+        edit(dir, f, (t) => t.replaceAll('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다'))
+      }
       edit(dir, 'docs/open-questions.md', (s) => {
         for (const q of [12, 15, 19, 20]) {
           s = s.replace(new RegExp(`(\\*\\*Q${q}\\.[^\\n]*)`), '$1 — **해결 → D99**')
@@ -324,11 +330,13 @@ const CASES = [
   {
     // 단계가 하나 늘 때 세 문서 중 하나만 고치면 게이트가 초록인 채로 옛 단계를 말한다.
     // 실측으로 한 번 났다 — plan 과 CLAUDE 는 1–5, open-questions 는 1–6 이었다.
+    // **1–5 로 주입하지 않는다.** 그 문자열은 RETIRED 에도 있어 검사 11 이 함께 운다 —
+    // 검사 14 를 통째로 지워도 붉은불이 유지되고, 그러면 이 케이스는 아무것도 증명하지 않는다.
     id: '27b 단계 주장이 세 문서에서 어긋나면 운다',
     expect: 'fail',
     mentions: ['단계 주장이 어긋난다', 'docs/plan.md'],
     mutate: (dir) =>
-      edit(dir, 'CLAUDE.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '1–5단계를 이제 검증할 수 있다')),
+      edit(dir, 'CLAUDE.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다')),
   },
   {
     id: '27c 그 문장이 사라져도 운다',
@@ -336,6 +344,31 @@ const CASES = [
     mentions: ['문장이 없다'],
     mutate: (dir) =>
       edit(dir, 'docs/open-questions.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '')),
+  },
+  {
+    // 가장 흔한 실수는 하나만 고치는 것이 아니라 **셋을 한 번에 틀리게 고치는 것**이다.
+    // 일치만 보는 검사는 여기서 초록불을 준다. Q 게이트에서 N 을 유도하는 이유다.
+    id: '27d 셋이 사이좋게 틀린 단계를 말해도 운다',
+    expect: 'fail',
+    mentions: ['Q 게이트로는 1–6단계다', '7단계를 막는 Q'],
+    mutate: (dir) => {
+      for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
+        edit(dir, f, (s) => s.replaceAll('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다'))
+      }
+    },
+  },
+  {
+    // 첫 개만 보면 위만 고치고 아래를 잊는 길이 열린다. 한 파일 안의 불일치도 결함이다.
+    id: '27e 한 파일 안에서 두 벌이 갈리면 운다',
+    expect: 'fail',
+    mentions: ['한 파일 안에서 단계 주장이 갈린다'],
+    mutate: append('docs/plan.md', NL + '옛 문장: 1–4단계를 이제 검증할 수 있다.' + NL),
+  },
+  {
+    // 펜스 안의 인용은 주장이 아니다. 빼지 않으면 예시 하나가 N 을 정한다.
+    id: '27f 코드 펜스 안의 옛 문장은 주장으로 세지 않는다',
+    expect: 'pass',
+    mutate: append('CLAUDE.md', NL + F3 + 'text' + NL + '1–4단계를 이제 검증할 수 있다' + NL + F3 + NL),
   },
   {
     id: '26 문서에서 백틱으로 인용하는 것은 허용한다',
@@ -425,6 +458,12 @@ const META = [
     id: 'M5 검사 12(루트 README front matter)를 끄면 주입이 통과한다',
     disable: (s) => s.replace('for (const p of readmes) {', 'for (const p of []) {'),
     inject: prepend('README.md', FM),
+  },
+  {
+    id: 'M7 검사 14(단계 주장)를 끄면 어긋난 단계가 통과한다',
+    disable: (s) => s.replace('for (const p of STAGE_CLAIM_FILES) {', 'for (const p of []) {'),
+    inject: (dir) =>
+      edit(dir, 'CLAUDE.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다')),
   },
   {
     // 앞의 줄바꿈이 **필수**다. 같은 문자열이 검사 2 안에도 들여쓰기된 채 있고

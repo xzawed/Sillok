@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Sillok 저장소 배치 검증.
 // 이 레포가 자기 색인 계약(D9: docs/**, 루트 README*, adr/**)을 지키는지 검사한다.
-// sillok ingest 가 생기기 전까지 "색인 0건이 정상인지 버그인지" 구분하는 유일한 수단이다.
+// "색인 0건이 정상인지 버그인지" 를 가르는 기준선이다 — 여기가 **기대**다.
+// ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
@@ -196,6 +197,9 @@ for (const p of md) {
   }
 }
 
+// 검사 14 가 쓸 값. Q 게이트가 이미 아는 것에서 유도한다 — 사실을 두 번 적지 않는다.
+let verifiableThrough = null
+
 // 9. Q 게이트 — 단계를 막는 질문이 열려 있는데 그 단계의 표면이 코드에 있는가.
 //    plan.md §7 이 "n단계 전에 Qx·Qy" 를 소유한다. 여기서는 그 문장을 읽어 강제만 한다.
 //    문장을 고치면 검사가 따라온다 — 사실을 두 곳에 적지 않기 위해서다.
@@ -269,6 +273,16 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
       )
     }
   }
+
+  // "1–N단계를 이제 검증할 수 있다" 의 N 은 여기서 나온다.
+  // **막힌 가장 이른 단계 바로 앞**이 N 이다 — 7단계가 막혀 있으면 8단계 Q 가 다 풀려도 1–6 이다.
+  // 뒤 단계만 열리는 것은 "검증할 수 있다" 가 아니라 순서를 건너뛴 것이다 (§7 의 순서는 계약이다).
+  const blockedSteps = [...gates.keys()]
+    .filter((step) => gates.get(step).some((q) => !resolved.has(q)))
+    .toSorted((a, b) => a - b)
+  // 막힌 단계가 하나도 없으면 유도하지 않는다. 그때 그 문장은 더 이상 Q 에 대한 주장이 아니고
+  // 여기서 답을 발명하면 (마지막 게이트 단계? 10단계?) 검사가 조용히 틀린 값을 강요한다.
+  if (blockedSteps.length) verifiableThrough = blockedSteps[0] - 1
 
   const py = all.filter((p) => p.startsWith('src/') && p.endsWith('.py'))
   const found = [] // { step, what, file }
@@ -439,24 +453,54 @@ for (const p of trgmish) {
   }
 }
 
-// 14. "1–N단계를 이제 검증할 수 있다" 가 세 곳에서 같은 N 을 말하는가.
-//     순차 머지가 남기는 부류다 — 단계가 하나 늘 때 세 문서 중 하나만 고치면
-//     게이트는 초록인 채로 방문자 문서가 옛 단계를 말한다. 실측으로 한 번 났다:
+// 14. "1–N단계를 이제 검증할 수 있다" — 세 곳이 같은 N 을 말하고, 그 N 이 Q 게이트와 맞는가.
+//     순차 머지가 남기는 부류다: 단계가 하나 늘 때 세 문서 중 하나만 고치면
+//     게이트는 초록인 채로 방문자 문서가 옛 단계를 말한다. 실측으로 한 번 났다 —
 //     plan 과 CLAUDE 는 1–5, open-questions 는 1–6 이었다.
-//     N 이 맞는지는 여기서 보지 않는다 — 셋이 어긋나는 것만 본다. 값의 정본은 plan.md §7 이다.
-const STAGE_CLAIM = /1–(\d+)단계를 이제 검증할 수 있다/
+//
+//     **셋의 일치만 보는 것으로는 부족하다.** 단계가 늘 때는 셋을 한 번에 훑어 고치므로
+//     셋이 같이 틀린 N 을 말하는 쪽이 오히려 흔하고, 그때 일치 검사는 초록불을 준다.
+//     그래서 N 을 Q 게이트에서 **유도해** 맞춰 본다 (verifiableThrough). 사실은 한 곳에만 있다:
+//     어떤 Q 가 어느 단계를 막는지는 plan.md §7 이, 그 Q 가 닫혔는지는 open-questions.md 가 소유한다.
+//     이 검사는 그 둘에서 나오는 값을 세 문서의 문장과 대조할 뿐 자기 답을 갖지 않는다.
+const STAGE_CLAIM = /1[–-](\d+)단계를 이제 검증할 수 있다/g
+const STAGE_CLAIM_FILES = ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']
 const stageClaims = []
-for (const p of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
-  const m = readFileSync(join(ROOT, p), 'utf8').match(STAGE_CLAIM)
-  if (!m) fail(`${p} : "1–N단계를 이제 검증할 수 있다" 문장이 없다 — 셋이 함께 움직여야 한다.`)
-  else stageClaims.push([p, m[1]])
+for (const p of STAGE_CLAIM_FILES) {
+  // 펜스·코드 스팬은 검사 8·10·11 과 같은 이유로 뺀다 — 예시로 옛 문장을 보여 줄 수 있어야 한다.
+  // 빼지 않으면 인용 하나가 N 을 정하고, 산문의 진짜 주장이 가려진다.
+  const { prose } = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  // 한 파일에 두 벌이 있을 수 있다. 첫 개만 보면 위만 고치고 아래를 잊는 길이 열린다.
+  const claims = [...prose.matchAll(STAGE_CLAIM)].map((m) => Number(m[1]))
+  if (!claims.length) {
+    fail(`${p} : "1–N단계를 이제 검증할 수 있다" 문장이 없다 — 셋이 함께 움직여야 한다.`)
+    continue
+  }
+  const distinct = [...new Set(claims)]
+  if (distinct.length > 1) {
+    fail(`${p} : 한 파일 안에서 단계 주장이 갈린다 — ${distinct.map((n) => '1–' + n).join(', ')}`)
+    continue
+  }
+  stageClaims.push([p, distinct[0]])
 }
-if (stageClaims.length === 3 && new Set(stageClaims.map((s) => s[1])).size !== 1) {
+if (
+  stageClaims.length === STAGE_CLAIM_FILES.length &&
+  new Set(stageClaims.map((s) => s[1])).size !== 1
+) {
   fail(
     '단계 주장이 어긋난다 — ' +
       stageClaims.map(([p, n]) => `${p}=1–${n}`).join(', ') +
       ' (정본은 docs/plan.md §7)'
   )
+}
+// 셋이 같아도 그 값이 틀릴 수 있다. Q 게이트가 유도한 값과 맞춘다.
+for (const [p, n] of stageClaims) {
+  if (verifiableThrough !== null && n !== verifiableThrough) {
+    fail(
+      `${p} : 1–${n}단계라고 하는데 Q 게이트로는 1–${verifiableThrough}단계다 ` +
+        `(${verifiableThrough + 1}단계를 막는 Q 가 아직 열려 있다). 문장이 아니라 Q 를 먼저 본다.`
+    )
+  }
 }
 
 console.log(`색인 대상 ${indexed.length}개`)
