@@ -204,7 +204,8 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.exception_handler(service.IngestLocked)
     async def _ingest_locked(_: Request, exc: service.IngestLocked) -> JSONResponse:
-        # D32 가 만든 CONFLICT 의 유일한 발신자다. 이 핸들러가 없으면 포괄 예외에 걸려
+        # D32 가 만든 CONFLICT 발신자다 (D38 의 base_hash 불일치가 둘째다).
+        # 이 핸들러가 없으면 포괄 예외에 걸려
         # 락 거절이 409 가 아니라 500 으로 나간다. 문구는 고정이다.
         return error(ErrorCode.CONFLICT, service.LOCKED_MESSAGE)
 

@@ -23,6 +23,14 @@ const SKIP = new Set(['.git', '.venv', 'venv', 'node_modules', '__pycache__', '.
 const NL = String.fromCharCode(10)   // 백슬래시 리터럴을 앵커로 쓰지 않기 위한 상수
 const F3 = '`'.repeat(3)
 const F4 = '`'.repeat(4)
+// 지금 저장소가 말하는 단계. 박아 두면 단계가 늘 때마다 여기가 낡아 주입이 헛돈다
+// (실제로 D35–D38 때 그렇게 됐다). 값이 아니라 **다르게 만드는 것**이 주입의 요점이다.
+const STAGE_NOW = Number(
+  /1–(\d+)단계를 이제 검증할 수 있다/.exec(readFileSync(join(ROOT, 'docs/plan.md'), 'utf8'))[1]
+)
+const claim = (n) => `1–${n}단계를 이제 검증할 수 있다`
+const CLAIM_NOW = claim(STAGE_NOW)
+const CLAIM_OFF = claim(STAGE_NOW + 1)   // 어긋난 주장. RETIRED 와 겹치지 않는 쪽으로 고른다
 
 function copyRepo() {
   const dest = mkdtempSync(join(tmpdir(), 'sillok-layout-'))
@@ -122,10 +130,22 @@ const CASES = [
     // 케이스는 **아직 막혀 있는** 단계의 표면을 써야 한다.
     // 4단계(Q16·Q18·Q21)가 D23–D25로 닫히면서 /v1/status 는 더 이상 막히지 않는다.
     // 게이트가 문서를 따라간다는 증거이기도 하다.
-    id: '09 7단계 라우트',
+    // 7단계(Q12·Q15·Q19·Q20)가 D35–D38 로 닫히면서 이 라우트는 더 이상 막히지 않는다.
+    // 케이스 10·11 과 같은 형태로 바꾼다 — Q 를 다시 열어 게이트가 문서를 따라가는지 본다.
+    id: '09 Q19 를 다시 열면 7단계 라우트가 막힌다',
     expect: 'fail',
-    mentions: ['7단계', 'Q12', 'Q15', 'Q19', 'Q20'],
-    mutate: write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n'),
+    mentions: ['7단계', 'Q19', '/v1/files'],
+    mutate: (dir) => {
+      // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
+      edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
+      write('src/sillok/_probe.py', '@app.get("/v1/files")' + NL + 'def s(): pass' + NL)(dir)
+    },
+  },
+  {
+    // 반대 방향. 닫힌 단계의 표면은 통과해야 한다 (10b · 11b 와 같은 이유).
+    id: '09b 7단계 라우트는 이제 통과한다',
+    expect: 'pass',
+    mutate: write('src/sillok/_probe.py', '@app.get("/v1/files")' + NL + 'def s(): pass' + NL),
   },
   {
     // 6단계(Q8·Q9)가 D33–D34 로 닫히면서 검색 라우트는 더 이상 막히지 않는다.
@@ -175,33 +195,49 @@ const CASES = [
   {
     id: '13 APIRouter(prefix) + 상대 경로',
     expect: 'fail',
-    mentions: ['7단계', '/v1/files'],
-    mutate: write(
-      'src/sillok/_probe.py',
-      'router = APIRouter(prefix="/v1")\n\n@router.get("/files")\ndef s(): pass\n'
-    ),
+    mentions: ['7단계', 'Q19', '/v1/files'],
+    mutate: (dir) => {
+      // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
+      edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
+      write(
+        'src/sillok/_probe.py',
+        'router = APIRouter(prefix="/v1")' + NL + NL + '@router.get("/files")' + NL + 'def s(): pass' + NL
+      )(dir)
+    },
   },
   {
     // /v1/search/* 는 6단계라 이제 안 막힌다. 같은 문법을 아직 막힌 단계로 옮긴다.
     id: '14 include_router(prefix=) + 상대 경로',
     expect: 'fail',
-    mentions: ['7단계', '/v1/docs/proposals'],
-    mutate: write(
-      'src/sillok/_probe.py',
-      'app.include_router(r, prefix="/v1")' + NL + NL + '@r.post("/docs/proposals")' + NL + 'def s(): pass' + NL
-    ),
+    mentions: ['7단계', 'Q19', '/v1/docs/proposals'],
+    mutate: (dir) => {
+      // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
+      edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
+      write(
+        'src/sillok/_probe.py',
+        'app.include_router(r, prefix="/v1")' + NL + NL + '@r.post("/docs/proposals")' + NL + 'def s(): pass' + NL
+      )(dir)
+    },
   },
   {
     id: '15 path= 키워드 인자',
     expect: 'fail',
-    mentions: ['7단계', '/v1/events/'],
-    mutate: write('src/sillok/_probe.py', '@app.get(path="/v1/events/1")' + NL + 'def s(): pass' + NL),
+    mentions: ['7단계', 'Q19', '/v1/events/'],
+    mutate: (dir) => {
+      // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
+      edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
+      write('src/sillok/_probe.py', '@app.get(path="/v1/events/1")' + NL + 'def s(): pass' + NL)(dir)
+    },
   },
   {
     id: '16 add_api_route',
     expect: 'fail',
-    mentions: ['7단계', '/v1/files'],
-    mutate: write('src/sillok/_probe.py', 'app.add_api_route("/v1/files", h)\n'),
+    mentions: ['7단계', 'Q19', '/v1/files'],
+    mutate: (dir) => {
+      // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
+      edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
+      write('src/sillok/_probe.py', 'app.add_api_route("/v1/files", h)' + NL)(dir)
+    },
   },
   {
     id: '17 주석에만 있는 경로는 잡지 않는다',
@@ -210,25 +246,6 @@ const CASES = [
       'src/sillok/_probe.py',
       '# 7단계에서 @app.get("/v1/files") 를 붙인다\nX = "/v1/ingest"\n'
     ),
-  },
-  {
-    id: '18 Q 를 닫으면 같은 라우트가 통과한다',
-    expect: 'pass',
-    // Q 넷을 닫는 것은 곧 단계가 하나 느는 것이다. 검사 14 가 세 문서의 "1–N" 을
-    // Q 게이트에서 유도하므로, 문장을 그대로 두면 이 케이스는 검사 9 가 아니라 검사 14 로 운다.
-    // 주입은 **일관된 세계**여야 한다 — 실제로 7단계를 열 때 하는 일을 그대로 한다.
-    mutate: (dir) => {
-      write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n')(dir)
-      for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
-        edit(dir, f, (t) => t.replaceAll('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다'))
-      }
-      edit(dir, 'docs/open-questions.md', (s) => {
-        for (const q of [12, 15, 19, 20]) {
-          s = s.replace(new RegExp(`(\\*\\*Q${q}\\.[^\\n]*)`), '$1 — **해결 → D99**')
-        }
-        return s
-      })
-    },
   },
   {
     id: '19 §7 게이트 문장을 통째로 지우면 운다',
@@ -336,24 +353,24 @@ const CASES = [
     expect: 'fail',
     mentions: ['단계 주장이 어긋난다', 'docs/plan.md'],
     mutate: (dir) =>
-      edit(dir, 'CLAUDE.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다')),
+      edit(dir, 'CLAUDE.md', (s) => s.replace(CLAIM_NOW, CLAIM_OFF)),
   },
   {
     id: '27c 그 문장이 사라져도 운다',
     expect: 'fail',
     mentions: ['문장이 없다'],
     mutate: (dir) =>
-      edit(dir, 'docs/open-questions.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '')),
+      edit(dir, 'docs/open-questions.md', (s) => s.replace(CLAIM_NOW, '')),
   },
   {
     // 가장 흔한 실수는 하나만 고치는 것이 아니라 **셋을 한 번에 틀리게 고치는 것**이다.
     // 일치만 보는 검사는 여기서 초록불을 준다. Q 게이트에서 N 을 유도하는 이유다.
     id: '27d 셋이 사이좋게 틀린 단계를 말해도 운다',
     expect: 'fail',
-    mentions: ['Q 게이트로는 1–6단계다', '7단계를 막는 Q'],
+    mentions: [`Q 게이트로는 1–${STAGE_NOW}단계다`, `${STAGE_NOW + 1}단계를 막는 Q`],
     mutate: (dir) => {
       for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
-        edit(dir, f, (s) => s.replaceAll('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다'))
+        edit(dir, f, (s) => s.replaceAll(CLAIM_NOW, CLAIM_OFF))
       }
     },
   },
@@ -412,6 +429,13 @@ const CASES = [
         )
       )
     },
+  },
+  {
+    // 세 문서 밖의 네 번째 파일이 옛 단계를 말하는 부류. 필수는 셋이지만 검사는 셋에서 끝나지 않는다.
+    id: '27k 세 문서 밖에서 옛 단계를 말해도 운다',
+    expect: 'fail',
+    mentions: ['docs/spec.md', `Q 게이트로는 1–${STAGE_NOW}단계다`],
+    mutate: append('docs/spec.md', NL + '옛 문장: ' + claim(4) + '.' + NL),
   },
   {
     // 펜스 안의 인용은 주장이 아니다. 빼지 않으면 예시 하나가 N 을 정한다.
@@ -512,7 +536,7 @@ const META = [
     id: 'M7 검사 14(단계 주장)를 끄면 어긋난 단계가 통과한다',
     disable: (s) => s.replace('for (const p of STAGE_CLAIM_FILES) {', 'for (const p of []) {'),
     inject: (dir) =>
-      edit(dir, 'CLAUDE.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '1–7단계를 이제 검증할 수 있다')),
+      edit(dir, 'CLAUDE.md', (s) => s.replace(CLAIM_NOW, CLAIM_OFF)),
   },
   {
     // 앞의 줄바꿈이 **필수**다. 같은 문자열이 검사 2 안에도 들여쓰기된 채 있고

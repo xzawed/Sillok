@@ -50,8 +50,8 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 |---|---|---|
 | `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락 |
 | `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
-| `NOT_FOUND` | 404 | 없는 경로. `get_event`의 404 대 빈 결과는 **Q12로 미결** |
-| `CONFLICT` | 409 | 같은 project 의 ingest 가 이미 돌고 있다 (D32). v1의 유일한 발신자이고 `message`는 고정 문구 `ingest already running for this project` |
+| `NOT_FOUND` | 404 | **하나를 지목한 조회**에 답이 없을 때. 집합 질의는 404가 아니라 빈 결과다 (D35) |
+| `CONFLICT` | 409 | 발신자가 **둘**이다. ① 같은 project 의 ingest 가 이미 돌고 있다 (D32) — `message`는 고정 문구 `ingest already running for this project`. ② `save_doc` 의 `base_hash` 가 현재 내용과 다르다 (D38). **①의 고정 문구를 ②에 쓰지 않는다** |
 | `INTERNAL` | 500 | 서버 결함. `message`는 고정 문자열 `internal error` |
 
 `INTERNAL`에 예외 문구·트레이스백·경로를 싣지 않는다. DSN·`SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`가 새는 길이다.
@@ -126,8 +126,12 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 ### 단건
 
 - `GET /v1/docs?project=&path=` — 인덱스 메타 + 원문이 있으면 excerpt 또는 저장본 없음(Git을 열라는 힌트)
-- `GET /v1/events/{id}`
-- `GET /v1/files?project=&path=` — 설정된 workspace에서 원문 읽기 (D4 확정)
+- `GET /v1/events/{id}?project=` — `project`는 **필수**다. 없으면 `VALIDATION`,
+  행의 `project`와 다르면 `NOT_FOUND`다. 없는 id와 남의 id는 같은 응답이다 (D35)
+- `GET /v1/files?project=&path=&offset=` — 설정된 workspace에서 원문 읽기 (D4 확정).
+  **`kb_documents`에 행이 있는 경로만 연다** — 색인이 곧 허용 목록이다 (D36).
+  응답은 파일이 아니라 **4000자 창**이고 `offset`·`next_offset`·`total_bytes`는 바이트다.
+  `project`는 경로 성분이 아니다. 한 인스턴스는 한 workspace를 섬긴다 (D37)
 
 ### 저장
 
@@ -162,13 +166,28 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 - `occurred_at`·`resolved_at`은 **오프셋이 있어야 한다**(`Z` 또는 `±HH:MM`). 오프셋 없는 값과 날짜만 있는 값은 `VALIDATION`
 - `resolved_at < occurred_at`이면 `VALIDATION`
 - `title` 200자 초과, `summary` 2000자 초과는 `VALIDATION`
-- `project`는 앞뒤 공백을 제거한 뒤 비어 있거나 64자 초과이거나 공백·슬래시·NUL을 포함하면 `VALIDATION`. 대소문자는 구분한다
+- `project`는 앞뒤 공백을 제거한 뒤 비어 있거나 64자 초과이거나 공백·슬래시·**역슬래시**·NUL을
+  포함하면 `VALIDATION`. 대소문자는 구분한다
 - `source`를 생략하면 `agent`다
 - **멱등이 아니다 (D24).** 같은 요청을 두 번 보내면 행이 둘 생긴다. 재시도는 통계를 부풀린다
 
 `POST /v1/docs/proposals`
 
-현재 진실 패치 제안. v1 기본 가정: Git에 직접 쓰지 않고 diff/본문을 반환한다.
+현재 진실 패치 제안. v1 기본 가정: Git에 직접 쓰지 않고 diff/본문을 반환한다 (D3·D38).
+
+```json
+{ "project": "sillok", "path": "docs/plan.md", "body": "…전체 새 본문…", "base_hash": "sha256:…" }
+```
+
+```json
+{ "proposal": { "project": "sillok", "path": "docs/plan.md",
+                "exists": true, "diff": "--- a/docs/plan.md\n+++ b/…", "body": "…" } }
+```
+
+- `path`는 `get_file`과 같은 판정을 받는다 — `kb_documents`에 행이 있어야 한다. 없으면 404
+- `body`는 **문서 전체**다. 부분 패치를 받지 않는다
+- `base_hash`가 있고 현재 내용 해시와 다르면 `CONFLICT` 409. 없으면 검사하지 않는다
+- **새 문서 제안은 v1 비범위다** — 색인된 경로만 고칠 수 있다
 
 ### 통계
 
@@ -219,7 +238,8 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 **둘을 이 응답만으로 구분하지 못한다.** 그 구분은 `kb_ingest_runs.status`·`error`가 한다.
 **둘 다 빈 값이 정상이지 스텁이 아니다.**
 
-모르는 `project`도 같은 0을 돌려준다. `NOT_FOUND`가 아니다 — 404 대 빈 결과 규칙은 Q12로 열려 있고 그건 `get_event`의 문제다.
+모르는 `project`도 같은 0을 돌려준다. `NOT_FOUND`가 아니다 — 통계는 집합을 묻는 질의이고,
+집합을 물으면 빈 집합이 답이다 (D35). 지목한 조회만 404를 낸다.
 목록·타임라인은 여기 없다 (Q13).
 
 ### 색인
