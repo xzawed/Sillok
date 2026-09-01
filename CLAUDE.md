@@ -5,14 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 이 저장소의 성격
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
-[docs/plan.md](docs/plan.md) §7의 **1–5단계까지 구현돼 있고 6단계부터는 아직 없다.**
+[docs/plan.md](docs/plan.md) §7의 **1–6단계까지 구현돼 있고 7단계부터는 아직 없다.**
 (진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
-`src/sillok/`(config · migrations 러너 · api · ingest 규칙 · CLI `migrate`/`serve`/`ingest`), `tests/`.
-**업무 라우트는 넷이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` ·
-`POST /v1/ingest`(5단계, MCP 에는 노출하지 않는다).
-검색·`get_file`·`save_doc`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
-없는 것: 8개 도구의 실제 구현, MCP, 검색 — 순서대로 붙인다.
+`src/sillok/`(config · migrations 러너 · api · ingest·search 규칙 · CLI `migrate`/`serve`/`ingest`), `tests/`.
+**업무 라우트는 여섯이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` ·
+`POST /v1/ingest`(5단계, MCP 에는 노출하지 않는다) · `POST /v1/search/docs` · `POST /v1/search/events`.
+`get_file`·`save_doc`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
+없는 것: MCP 도구 표면, `get_file`·`save_doc` — 순서대로 붙인다.
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).

@@ -1369,13 +1369,25 @@ score(row) = Σ over lists  1 / (RRF_K + rank_in_that_list(row))
 RRF_K = 60
 ```
 
-- **두 순위는 각각 완결된 정렬 위에서 매긴다.** 정렬이 총순서가 아니면 순위가 실행마다 다르고,
-  그 순위가 곧 점수다.
-  - 키워드: `ORDER BY ts_rank(c.tsv, tq, 1) DESC, d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx`
-  - 벡터: `ORDER BY c.embedding <=> q ASC, d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx`
-    (코사인 거리이므로 오름차순이 가까운 것이다)
-- **순위 값은 그 정렬 위의 `rank()` 다.** 동점은 같은 순위를 갖고, 타이브레이크는 순위가 아니라
-  `LIMIT` 이 자를 대상만 정한다. 정렬 키의 알파벳 순서가 점수로 새는 것을 이 한 줄이 막는다.
+- **`rank()` 는 점수 식만 본다. 타이브레이크 키는 `LIMIT` 이 자를 대상만 정한다.**
+  둘을 한 `ORDER BY` 에 넣으면 `rank()` 가 `row_number()` 와 같아져 **동점이 사라지고
+  정렬 키의 알파벳 순서가 그대로 점수가 된다** — 이 결정이 막으려는 바로 그것이다.
+  그래서 두 절을 나눈다.
+
+  ```sql
+  -- 키워드 팔
+  rank() OVER (ORDER BY ts_rank(c.tsv, tq, 1) DESC)        -- 점수가 되는 순위
+  ORDER BY ts_rank(c.tsv, tq, 1) DESC,
+           d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx   -- 풀에 들어갈 60행을 고른다
+  -- 벡터 팔 (코사인 거리이므로 오름차순이 가까운 것이다)
+  rank() OVER (ORDER BY c.embedding <=> q ASC)
+  ORDER BY c.embedding <=> q ASC,
+           d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx
+  ```
+
+  풀을 고르는 정렬은 여전히 **총순서**여야 한다 — 아니면 어느 60행이 들어오는지가 실행마다 다르다.
+- **이벤트는 목록이 하나뿐이라 이 구분이 필요 없다.** 점수가 그 목록 순위의 단조 재표기이므로
+  타이브레이크가 점수에 섞여도 다른 목록을 덮을 일이 없다. §7 의 정렬을 그대로 쓴다.
 - **벡터 순위는 `WHERE c.embedding IS NOT NULL` 을 먼저 건다.** 최적화가 아니라 정확성이다 —
   위 실측의 80행이 그 증거다. **부분 임베딩은 정상 상태이므로**(D31) 이것은 오늘의 임시 방편이 아니라 영구 규칙이다.
 - **벡터가 없는 청크는 "꼴찌"가 아니라 "그 목록에 없다".** RRF 는 없는 목록의 항을 더하지 않는다 —

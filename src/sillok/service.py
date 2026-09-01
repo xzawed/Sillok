@@ -19,6 +19,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from . import ingest as ingest_rules
+from . import search
 from . import migrations
 
 # 정본: docs/skills/sillok-storage/SKILL.md · docs/service-and-mcp.md
@@ -616,3 +617,247 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
         "chunks_pending": pending,
         "skipped": skipped,
     }
+
+
+# --- 6단계 검색 (D33 · D34) --------------------------------------------------
+
+# 사전 이름은 상수 하나에서 나온다. 색인과 질의가 다른 구성을 보면 히트가 0 인데 오류가 아니다.
+TS_CONFIG = "simple"
+# 이벤트 tsv 의 입력식. DDL 의 생성식과 같은 것이어야 한다 (D34 §2).
+EVENT_TSV_INPUT_SQL = (
+    "coalesce(title, '')      || ' ' || coalesce(summary, '')    || ' ' || "
+    "coalesce(root_cause, '') || ' ' || coalesce(resolution, '')"
+)
+HEADLINE_OPTS = 'StartSel="",StopSel="",MaxWords=60,MinWords=25,MaxFragments=1'
+
+
+def _top_k(raw: object) -> int:
+    """기본 8, 최대 12. 범위 밖은 거절한다 — 조용히 12 로 접지 않는다 (D33 §6 · D25 선례)."""
+    if raw is None:
+        return search.TOP_K_DEFAULT
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValidationFailed("top_k must be an integer")
+    if not 1 <= raw <= search.TOP_K_MAX:
+        raise ValidationFailed(f"top_k must be between 1 and {search.TOP_K_MAX}")
+    return raw
+
+
+def _optional_text(body: dict[str, Any], field: str) -> str | None:
+    """필드가 없거나 null 이면 거르지 않는다 (D33 §1)."""
+    raw = body.get(field)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValidationFailed(f"{field} must be a string")
+    value = raw.strip()
+    return value or None
+
+
+def _doc_filters(body: dict[str, Any], project: str) -> tuple[str, dict[str, Any]]:
+    """필터는 **두 팔의 WHERE** 에 건다. 병합 뒤에 거르면 걸러질 행이 후보 칸을 먹는다."""
+    where = ["d.project = %(project)s"]
+    params: dict[str, Any] = {"project": project}
+    for field in ("module", "doc_type", "status"):
+        value = _optional_text(body, field)
+        if value is not None:
+            where.append(f"d.{field} = %({field})s")
+            params[field] = value
+    return " AND ".join(where), params
+
+
+def _keyword_arm(cur, where: str, params: dict[str, Any], query: str) -> list[search.Ranked]:
+    """정렬이 총순서가 아니면 순위가 실행마다 다르고, 그 순위가 곧 점수다 (D33 §2)."""
+    rows = cur.execute(
+        f"""
+        SELECT c.id, d.repo, d.path, c.chunk_idx, d.id AS document_id,
+               -- rank() 는 점수 식만 본다. 타이브레이크를 여기 넣으면 rank() 가
+               -- row_number() 와 같아져 알파벳 순서가 그대로 점수가 된다 (D33 §2).
+               rank() OVER (ORDER BY ts_rank(c.tsv, tq.q, 1) DESC) AS rk
+        FROM kb_chunks c
+        JOIN kb_documents d ON d.id = c.document_id,
+             plainto_tsquery('{TS_CONFIG}', %(query)s) AS tq(q)
+        WHERE {where} AND c.tsv @@ tq.q
+        -- 풀에 들어갈 60행을 고르는 정렬은 총순서여야 한다.
+        ORDER BY ts_rank(c.tsv, tq.q, 1) DESC,
+                 d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx
+        LIMIT {search.CANDIDATE_POOL}
+        """,
+        {**params, "query": query},
+    ).fetchall()
+    return [
+        search.Ranked((r["repo"], r["path"], r["chunk_idx"]), r["document_id"], r["rk"], dict(r))
+        for r in rows
+    ]
+
+
+def _vector_arm(cur, where: str, params: dict[str, Any], vector: str) -> list[search.Ranked]:
+    """`IS NOT NULL` 을 **먼저** 건다 (D33 §2).
+
+    최적화가 아니라 정확성이다 — 안 걸면 벡터가 하나도 없는 색인에서도 상위 행이 나온다.
+    부분 임베딩은 정상 상태이므로(D31) 이것은 임시 방편이 아니라 영구 규칙이다.
+    """
+    rows = cur.execute(
+        f"""
+        SELECT c.id, d.repo, d.path, c.chunk_idx, d.id AS document_id,
+               rank() OVER (ORDER BY c.embedding <=> %(v)s::vector ASC) AS rk
+        FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
+        WHERE {where} AND c.embedding IS NOT NULL
+        ORDER BY c.embedding <=> %(v)s::vector ASC,
+                 d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx
+        LIMIT {search.CANDIDATE_POOL}
+        """,
+        {**params, "v": vector},
+    ).fetchall()
+    return [
+        search.Ranked((r["repo"], r["path"], r["chunk_idx"]), r["document_id"], r["rk"], dict(r))
+        for r in rows
+    ]
+
+
+def search_docs(dsn: str, body: dict[str, Any], api_key: str = "") -> dict[str, Any]:
+    """문서 검색 (D33). 빈 결과는 오류가 아니다 — 200 에 `{"results": []}` 다 (D21)."""
+    if not isinstance(body, dict):
+        raise ValidationFailed("body must be an object")
+    project = normalize_project(body.get("project"))
+    # search_docs 에서 query 는 필수다 — 질의 말고 신호가 없어 필터만으로는
+    # "관련 문서 전부" 가 되고 그것은 설계 위반이다 (D33 §6).
+    raw_query = body.get("query")
+    if not isinstance(raw_query, str) or not raw_query.strip():
+        raise ValidationFailed("query required")
+    query = raw_query.strip()
+    top_k = _top_k(body.get("top_k"))
+    where, params = _doc_filters(body, project)
+
+    # 질의 임베딩 실패는 INTERNAL 이다. 키워드 결과로 갈음하지 않는다 —
+    # 갈음하면 고장이 D2 의 정상 상태와 같은 모양으로 200 에 나간다 (D33 §4).
+    vector = vector_literal(_embed([query], api_key)[0]) if api_key else None
+
+    with connect(dsn) as conn, conn.cursor() as cur:
+        keyword = _keyword_arm(cur, where, params, query)
+        vectors = _vector_arm(cur, where, params, vector) if vector is not None else []
+        # 키워드 항을 먼저 더한다 (D33 §5).
+        picked = search.order_and_cut(search.rrf(keyword, vectors), top_k)
+        matched = {r.key for r in keyword}
+        results = _decorate(cur, picked, query, matched)
+
+    return {"results": results}
+
+
+def _decorate(cur, picked: list[dict], query: str, matched: set) -> list[dict[str, Any]]:
+    """`excerpt` 는 `LIMIT` 뒤에만 만든다. 후보 풀에 걸면 원문을 그만큼 다시 파싱한다.
+
+    **한 질의로 모아 온다.** 행마다 부르면 최대 열두 번이고, `WHERE c.id = ANY(…)` 는
+    순서를 보존하지 않으므로 병합 순서대로 다시 늘어놓는다 (D33 §9).
+    """
+    if not picked:
+        return []
+
+    ids = [row["id"] for row in picked]
+    # 키워드로 걸리지 않은 행에는 ts_headline 을 쓰지 않는다 — 매칭이 없으면
+    # 출력 길이가 통제되지 않는다 (실측: 2자짜리 발췌). 그 행은 앞머리를 쓴다.
+    keyword_ids = [
+        row["id"] for row in picked if (row["repo"], row["path"], row["chunk_idx"]) in matched
+    ]
+    rows = cur.execute(
+        f"""
+        SELECT c.id, c.heading_path, d.commit_sha, d.status,
+               CASE WHEN c.id = ANY(%(hit)s)
+                    THEN ts_headline('{TS_CONFIG}', {EMBED_INPUT_SQL},
+                           plainto_tsquery('{TS_CONFIG}', %(query)s), %(opts)s)
+                    -- 상한보다 한 글자 더 가져온다. 그래야 clip_excerpt 가 잘렸는지 알고
+                    -- 말줄임표를 붙인다 — left(…, 800) 이면 절단과 짧은 청크가 같아 보인다.
+                    ELSE left(c.content, %(n)s)
+               END AS excerpt
+        FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
+        WHERE c.id = ANY(%(ids)s)
+        """,
+        {
+            "ids": ids,
+            "hit": keyword_ids,
+            "query": query,
+            "opts": HEADLINE_OPTS,
+            "n": search.EXCERPT_MAX + 1,
+        },
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
+
+    return [
+        {
+            "path": row["path"],
+            "heading_path": by_id[row["id"]]["heading_path"],
+            "excerpt": search.clip_excerpt(by_id[row["id"]]["excerpt"]),
+            "commit_sha": by_id[row["id"]]["commit_sha"],
+            "status": by_id[row["id"]]["status"],
+            "score": row["score"],
+        }
+        for row in picked
+    ]
+
+
+def _event_search_filters(body: dict[str, Any], project: str) -> tuple[str, dict[str, Any]]:
+    """필터가 먼저다 (D34 §3). 남은 집합에 키워드를 건다.
+
+    **4단계의 `_event_filters` 와 이름이 겹치면 안 된다.** 파이썬은 나중 정의로 덮으므로
+    `event_stats` 가 조용히 다른 함수를 부르게 된다 — 실제로 한 번 그렇게 났고,
+    기존 4단계 검사가 잡았다. 이름을 나누는 것이 이 파일에서 지키는 방식이다.
+    """
+    where = ["project = %(project)s"]
+    params: dict[str, Any] = {"project": project}
+    for field in ("kind", "module"):
+        value = _optional_text(body, field)
+        if value is not None:
+            where.append(f"{field} = %({field})s")
+            params[field] = value
+    for field, op in (("since", ">="), ("until", "<")):
+        raw = body.get(field)
+        if raw is not None:
+            params[field] = parse_timestamp(raw, field)
+            where.append(f"occurred_at {op} %({field})s")
+    return " AND ".join(where), params
+
+
+def search_events(dsn: str, body: dict[str, Any]) -> dict[str, Any]:
+    """이벤트 검색 (D33 · D34). **v1 은 이벤트를 임베딩하지 않는다** — 키워드만이다."""
+    if not isinstance(body, dict):
+        raise ValidationFailed("body must be an object")
+    project = normalize_project(body.get("project"))
+    top_k = _top_k(body.get("top_k"))
+    # search_events 에서 query 는 선택이다 — 필터만으로도 완결된 요청이 된다 (D33 §6).
+    raw_query = body.get("query")
+    if raw_query is not None and not isinstance(raw_query, str):
+        raise ValidationFailed("query must be a string")
+    query = (raw_query or "").strip() or None
+    where, params = _event_search_filters(body, project)
+
+    fields = "id, title, summary, kind, result, module, occurred_at"
+    with connect(dsn) as conn, conn.cursor() as cur:
+        if query is None:
+            rows = cur.execute(
+                f"SELECT {fields}, NULL::float8 AS score FROM kb_events"
+                f" WHERE {where} ORDER BY occurred_at DESC, id DESC LIMIT %(top_k)s",
+                {**params, "top_k": top_k},
+            ).fetchall()
+        else:
+            rows = cur.execute(
+                f"""
+                SELECT {fields},
+                       rank() OVER (ORDER BY ts_rank(tsv, tq.q, 1) DESC,
+                                    occurred_at DESC, id DESC) AS rk
+                FROM kb_events, websearch_to_tsquery('{TS_CONFIG}', %(query)s) AS tq(q)
+                WHERE {where} AND tsv @@ tq.q
+                ORDER BY rk
+                LIMIT %(top_k)s
+                """,
+                {**params, "query": query, "top_k": top_k},
+            ).fetchall()
+
+    results = []
+    for row in rows:
+        item = {k: row[k] for k in fields.split(", ")}
+        item["occurred_at"] = item["occurred_at"].isoformat()
+        # 목록이 하나뿐이라 RRF 는 그 순위의 단조 재표기다 (D33 §7).
+        item["score"] = (
+            None if query is None else round(1.0 / (search.RRF_K + row["rk"]), search.SCORE_DIGITS)
+        )
+        results.append(item)
+    return {"results": results}

@@ -212,11 +212,9 @@ def test_http_exception_5xx_does_not_leak_detail():
 @pytest.mark.parametrize(
     "path",
     [
-        # 6~8단계. Q8·Q9 / Q12·Q15·Q19·Q20 / Q17 이 아직 열려 있다.
-        # /v1/ingest 는 5단계라 여기서 빠졌다 — D30–D32 가 Q6·Q7·Q10 을 닫았다.
+        # 7~8단계. Q12·Q15·Q19·Q20 / Q17 이 아직 열려 있다.
+        # /v1/ingest 는 5단계, /v1/search/* 는 6단계라 여기서 빠졌다.
         "/v1/events/1",
-        "/v1/search/docs",
-        "/v1/search/events",
         "/v1/files",
         "/v1/docs",
         "/v1/docs/proposals",

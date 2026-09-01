@@ -190,7 +190,9 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
       이 저장소를 대상으로 돌아 게이트의 색인 목록과 **같은 파일을 먹었고**,
       두 번째 run 은 아무것도 바꾸지 않았다(해시가 유일한 변경 판정이다).
       대조는 `scripts/check-index-parity.mjs` 가 매번 한다 — 파일 수를 여기 적지 않는다. 문서가 자라면 낡는다
-- [ ] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다
+- [x] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다 — 2026-09-01 실측.
+      키가 없어 벡터 팔은 비어 있고 그것이 D2 의 정상 상태다. RRF 는 한 목록 위에서
+      그 순위의 단조 재표기이므로 순서는 키워드 순서와 같다
 - [ ] `get_file`이 workspace의 해당 path를 돌려준다
 - [ ] `save_doc`이 Git을 변경하지 않는다
 - [ ] MCP 도구 8개가 Service와 동일 동작

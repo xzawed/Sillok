@@ -6,8 +6,9 @@
 무엇이 오든 공통 봉투로 답한다 — FastAPI 기본 응답 `{"detail": ...}`은
 service-and-mcp.md 계약 위반이므로 전부 덮는다.
 
-붙어 있는 업무 라우트는 4단계의 셋과 5단계의 ingest 다. 검색·`get_file`·MCP는 아직 없고,
-그 경로들은 정직하게 404다 — 뜨기만 하는 스텁을 §9 판정 대상에 올리지 않는다.
+붙어 있는 업무 라우트는 4단계의 셋, 5단계의 ingest, 6단계의 검색 둘이다.
+`get_file`·`save_doc`·MCP는 아직 없고 그 경로들은 정직하게 404다 —
+뜨기만 하는 스텁을 §9 판정 대상에 올리지 않는다.
 """
 
 from __future__ import annotations
@@ -233,6 +234,17 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
     @app.get("/v1/status")
     async def kb_status(project: str) -> JSONResponse:
         return ok(service.kb_status(cfg.database_url, project))
+
+    @app.post("/v1/search/docs")
+    async def search_docs(body: dict[str, Any]) -> JSONResponse:
+        # 빈 결과는 오류가 아니다 — 200 에 {"results": []} 다 (D21).
+        # 모델이 채울 문장을 여기서 넣지 않는다.
+        return ok(service.search_docs(cfg.database_url, body, cfg.openai_api_key))
+
+    @app.post("/v1/search/events")
+    async def search_events(body: dict[str, Any]) -> JSONResponse:
+        # v1 은 이벤트를 임베딩하지 않는다 (D34) — 키가 필요 없다.
+        return ok(service.search_events(cfg.database_url, body))
 
     @app.post("/v1/ingest")
     async def run_ingest(body: dict[str, Any]) -> JSONResponse:
