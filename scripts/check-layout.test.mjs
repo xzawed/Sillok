@@ -137,6 +137,10 @@ const CASES = [
     // 5단계(Q6·Q7·Q10)가 D30–D32 로 닫히면서 ingest 는 더 이상 막히지 않는다.
     // CLI_STEP 에는 ingest 하나뿐이라 이제 그 분기가 막는 단계가 없다 —
     // 그래서 **Q 를 다시 열어** 분기가 살아 있는지 본다. 게이트가 문서를 따라간다는 증거다.
+    // 메타 케이스를 두지 않는다. 5단계가 구현되면서 src 에 /v1/ingest 가 생겼으므로
+    // Q6 를 다시 열면 CLI 분기를 꺼도 HTTP 분기가 문다 — 분리가 성립하지 않는다.
+    // 대신 아래 mentions 의 `CLI ingest` 가 그 자리를 잠근다: 분기가 죽으면 그 문구가 없어
+    // 이 케이스가 BAD 로 떨어진다.
     id: '11 Q6 를 다시 열면 CLI ingest 가 막힌다',
     expect: 'fail',
     mentions: ['5단계', 'Q6', 'CLI ingest'],
@@ -388,16 +392,6 @@ const META = [
     id: 'M6 검사 3(front matter 필수)을 끄면 docs 문서의 결손이 통과한다',
     disable: (s) => s.replace('\nfor (const p of indexed) {', '\nfor (const p of []) {'),
     inject: dropFM('docs/spec.md'),
-  },
-  {
-    // 케이스 11 은 Q 를 다시 열어 CLI 분기를 깨운다. 그 분기를 끄면 통과해야 한다 —
-    // 통과하지 않으면 케이스 11 이 다른 검사 때문에 붉은불이었다는 뜻이다.
-    id: 'M7 검사 9 의 CLI 분기를 끄면 Q6 재개방 주입이 통과한다',
-    disable: (s) => s.replace('const step = CLI_STEP[m[1]]', 'const step = undefined'),
-    inject: (dir) => {
-      edit(dir, 'docs/open-questions.md', (s) => s.replace(' — **해결 → D30**', ''))
-      write('src/sillok/_probe.py', 'sub.add_parser("ingest")' + NL)(dir)
-    },
   },
 ]
 

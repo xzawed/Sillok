@@ -1,7 +1,8 @@
 """sillok CLI.
 
-지금은 `migrate`(D17)와 `serve`(D8·3단계)다. `ingest` 는 5단계에서 붙는다.
-미리 만들지 않는다 — 동작하지 않는 명령이 있으면 계약이 구현된 것처럼 보인다.
+`migrate`(D17) · `serve`(D8·3단계) · `ingest`(D8·5단계) 셋이다.
+Q6·Q7·Q10 이 D30–D32 로 닫히기 전까지 `ingest` 는 만들지 않았다 —
+동작하지 않는 명령이 있으면 계약이 구현된 것처럼 보인다.
 
 **CLI 는 SQL 을 갖지 않는다 (D19).** 여기서 하는 일은 인자를 읽고
 sillok.migrations 의 러너를 부르는 것뿐이다.
@@ -40,6 +41,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # --skip-migrate 는 D17("bind 전에 적용")을 끄는 스위치라 계약 밖이었다.
     serve.add_argument("--host", default=None, help="기본값: SILLOK_HOST")
     serve.add_argument("--port", type=int, default=None, help="기본값: SILLOK_PORT")
+
+    ingest = sub.add_parser("ingest", help="D9 경로를 색인한다 (D8·D30–D32)")
+    # D19 가 정한 인자만 둔다. --paths·--since·--commit-sha 를 만들지 않는다 —
+    # 부분 목록에서는 삭제 판정이 성립하지 않는다 (D30).
+    ingest.add_argument("--project", required=True, help="색인 대상 project (D5)")
+    ingest.add_argument("--workspace", default=None, help="기본값: SILLOK_WORKSPACE")
     return parser
 
 
@@ -95,6 +102,39 @@ def main(argv: list[str] | None = None) -> int:
 
         uvicorn.run(create_app(cfg), host=host, port=port, log_level="info")
         return 0
+
+    if args.command == "ingest":
+        from . import service
+
+        cfg = config.load()
+        try:
+            run = service.ingest(
+                cfg.database_url,
+                args.project,
+                args.workspace or cfg.workspace,
+                cfg.openai_api_key,
+            )
+        except service.IngestLocked as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        except service.ValidationFailed as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
+        # 러너와 같은 어투다 — 아는 것보다 더 주장하지 않는다.
+        print(
+            f"run {run['run_id']} {run['status']}: "
+            f"본 {run['files_seen']} · 바뀐 {run['files_changed']} · 지운 {run['files_deleted']} · "
+            f"청크 {run['chunks_upserted']} · 임베딩 {run['chunks_embedded']} · "
+            f"남은 벡터 {run['chunks_pending']}"
+        )
+        for item in run["skipped"]:
+            print(f"  건너뜀 {item['path']} ({item['reason']})", file=sys.stderr)
+        if run["status"] != "ok":
+            print(run["error"] or run["status"], file=sys.stderr)
+        # ok 에만 0 이다. partial·failed·락 거절은 1 이고, 셋의 구분은
+        # 종료 코드가 아니라 stderr 문구와 run 행이 한다 (D32).
+        return 0 if run["status"] == "ok" else 1
 
     raise AssertionError(f"처리되지 않은 명령: {args.command}")
 

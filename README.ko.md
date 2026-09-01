@@ -150,7 +150,8 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 | Compose · 마이그레이션 · FastAPI 골격 | 된다 |
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
 | 검색 · `get_file` · `save_doc` | **아직이다 — 그 경로는 정직하게 404다** |
-| 색인(`sillok ingest` CLI) · MCP 도구 | **아직이다 — 명령과 도구 표면 자체가 없다** |
+| 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다 |
+| MCP 도구 | **아직이다 — 도구 표면 자체가 없다** |
 
 > 진행 상태의 정본은 [docs/plan.md](docs/plan.md) §7·§9입니다.
 

@@ -151,7 +151,8 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 | Compose, migrations, FastAPI skeleton | Working |
 | `POST /v1/events`, `GET /v1/stats/events`, `GET /v1/status` | Working |
 | Search, `get_file`, `save_doc` | **Not yet — those routes honestly return 404** |
-| Indexing (`sillok ingest` CLI), MCP tools | **Not yet — the command and the tool surface do not exist** |
+| Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL |
+| MCP tools | **Not yet — the tool surface does not exist** |
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 

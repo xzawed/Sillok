@@ -6,7 +6,7 @@
 무엇이 오든 공통 봉투로 답한다 — FastAPI 기본 응답 `{"detail": ...}`은
 service-and-mcp.md 계약 위반이므로 전부 덮는다.
 
-붙어 있는 업무 라우트는 4단계의 셋뿐이다. 검색·ingest·`get_file`·MCP는 아직 없고,
+붙어 있는 업무 라우트는 4단계의 셋과 5단계의 ingest 다. 검색·`get_file`·MCP는 아직 없고,
 그 경로들은 정직하게 404다 — 뜨기만 하는 스텁을 §9 판정 대상에 올리지 않는다.
 """
 
@@ -201,6 +201,12 @@ def create_app(config: Config | None = None) -> FastAPI:
         # D21: VALIDATION 만 메시지를 그대로 돌려준다. 클라이언트가 고쳐야 하는 것이라서다.
         return error(ErrorCode.VALIDATION, str(exc))
 
+    @app.exception_handler(service.IngestLocked)
+    async def _ingest_locked(_: Request, exc: service.IngestLocked) -> JSONResponse:
+        # D32 가 만든 CONFLICT 의 유일한 발신자다. 이 핸들러가 없으면 포괄 예외에 걸려
+        # 락 거절이 409 가 아니라 500 으로 나간다. 문구는 고정이다.
+        return error(ErrorCode.CONFLICT, service.LOCKED_MESSAGE)
+
     _mount_v1(app, cfg)
     return app
 
@@ -227,3 +233,17 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
     @app.get("/v1/status")
     async def kb_status(project: str) -> JSONResponse:
         return ok(service.kb_status(cfg.database_url, project))
+
+    @app.post("/v1/ingest")
+    async def run_ingest(body: dict[str, Any]) -> JSONResponse:
+        # 운영자 진입점은 CLI 다 (D20). 여기는 같은 Service 함수의 HTTP 얼굴이고
+        # 인자까지 같다 — 변경 파일 목록을 받지 않는다 (D30).
+        # run 행이 생긴 모든 경우에 ok: true 다. 이 라우트의 ok: false 는 락 거절 하나뿐이다.
+        return ok(
+            service.ingest(
+                cfg.database_url,
+                body.get("project"),
+                body.get("workspace") or cfg.workspace,
+                cfg.openai_api_key,
+            )
+        )
