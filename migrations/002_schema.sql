@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS kb_ingest_runs (
   files_changed    int,
   chunks_upserted  int,
   status           text NOT NULL DEFAULT 'running',
+  -- running | ok | partial | failed  (D32)
   error            text
 );
 

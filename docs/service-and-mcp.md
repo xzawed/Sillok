@@ -23,7 +23,7 @@ MCP와 사람용 UI는 이 HTTP API만 호출한다.
 >
 > **D6과 혼동하지 않는다.** D6은 프로세스 동일성이다 — MCP는 `serve`와 같은 프로세스의 다른 앞면이다.
 > `ingest`는 **별도 프로세스이고 같은 코드의 함수를 쓴다.** 공유되는 것은 데이터 접근 계층 하나뿐이지 프로세스가 아니다.
-> `serve`와 `ingest`가 각자 DB 세션을 여는 문제는 [open-questions.md](open-questions.md) Q10으로 남는다.
+> `serve`와 `ingest`가 각자 DB 세션을 여는 문제는 **D32가 세션 advisory 락으로 닫았다** — 같은 project 는 직렬화된다.
 
 로컬 Compose 기본: Service `http://127.0.0.1:8080`.  
 인증: 로컬 무인증. HTTP를 외부에 열 때만 `Authorization: Bearer <token>`.
@@ -51,7 +51,7 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 | `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락 |
 | `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
 | `NOT_FOUND` | 404 | 없는 경로. `get_event`의 404 대 빈 결과는 **Q12로 미결** |
-| `CONFLICT` | 409 | **예약. v1은 발신하지 않는다** — 발신 조건이 없다 |
+| `CONFLICT` | 409 | 같은 project 의 ingest 가 이미 돌고 있다 (D32). v1의 유일한 발신자이고 `message`는 고정 문구 `ingest already running for this project` |
 | `INTERNAL` | 500 | 서버 결함. `message`는 고정 문자열 `internal error` |
 
 `INTERNAL`에 예외 문구·트레이스백·경로를 싣지 않는다. DSN·`SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`가 새는 길이다.
@@ -83,6 +83,10 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 ```
 
 응답 `data.results[]`: `path`, `heading_path`, `excerpt`, `commit_sha`, `status`, `score`
+
+`heading_path`는 그 청크가 속한 절까지의 제목을 상위부터 ` > `로 이은 문자열이다 (D30).
+첫 제목 앞 서두는 `null`이고, 레벨을 건너뛴 문서는 빈 칸을 채우지 않는다. 길이 상한은 없다.
+`commit_sha`는 D30에 따라 **v1 내내 빈 문자열**이다 — 필드는 계약이고 값이 생기면 채우는 자리다.
 
 `POST /v1/search/events`
 
@@ -175,7 +179,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 `GET /v1/status?project=`
 
-문서 수, 청크 수, 이벤트 수, 마지막 ingest, 최근 hit_count=0 질의 수.
+문서 수, 청크 수, 이벤트 수, 마지막 ingest, 최근 hit_count=0 질의 수, 벡터가 빈 청크 수.
 
 ```json
 {
@@ -183,12 +187,17 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
   "chunks": 0,
   "events": 0,
   "last_ingest_at": null,
-  "zero_hit_queries": 0
+  "zero_hit_queries": 0,
+  "chunks_without_embedding": 0
 }
 ```
 
-`last_ingest_at`은 `kb_ingest_runs`의 마지막 `finished_at`이고 5단계 전까지 `null`이다.
+`last_ingest_at`은 `status`가 `ok`나 `partial`인 run 의 마지막 `finished_at`이다 (D32).
+실패한 run 은 세지 않는다 — 세면 실패가 마지막 색인으로 보고된다. 5단계 전까지 `null`이다.
 `zero_hit_queries`는 `kb_query_logs`의 `hit_count = 0` 건수이고 9단계 전까지 `0`이다.
+`chunks_without_embedding`은 `embedding IS NULL`인 청크 수다 (D31). 이벤트는 세지 않는다.
+`chunks`와 같으면 키 없이 색인했다는 뜻이고, 0이 아닌데 키가 있으면 임베딩이 실패했다는 뜻이다 —
+**둘을 이 응답만으로 구분하지 못한다.** 그 구분은 `kb_ingest_runs.status`·`error`가 한다.
 **둘 다 빈 값이 정상이지 스텁이 아니다.**
 
 모르는 `project`도 같은 0을 돌려준다. `NOT_FOUND`가 아니다 — 404 대 빈 결과 규칙은 Q12로 열려 있고 그건 `get_event`의 문제다.
@@ -198,7 +207,28 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 `POST /v1/ingest`
 
-변경 파일 목록 또는 repo 경로. 해시 비교 후 변경분만 임베딩.
+요청은 CLI 인자와 같다 — `project` 필수, `workspace` 선택. **변경 파일 목록을 받지 않는다** (D30).
+부분 목록에서는 "목록에 없다"가 *안 바뀌었다*인지 *사라졌다*인지 구분되지 않아 삭제 판정이 성립하지 않는다.
+
+```json
+{ "project": "sillok", "workspace": "/workspace" }
+```
+
+해시 비교 후 변경분만 다시 쪼개고, **벡터가 빈 청크를 임베딩한다** (D31).
+
+```json
+{ "ok": true, "data": {
+  "run_id": 7, "project": "sillok", "status": "ok", "commit_sha": "",
+  "files_seen": 10, "files_changed": 3, "files_deleted": 0, "chunks_upserted": 41,
+  "chunks_embedded": 0, "chunks_pending": 151,
+  "skipped": [{ "path": "docs/skills/sillok-storage/example.json", "reason": "not-md" }]
+} }
+```
+
+`status`는 `ok` | `partial` | `failed` 중 하나다 (D32). **`partial`도 봉투는 `ok: true`다** —
+요청이 처리되지 못한 것이 아니라 일부만 채워진 것이다. `status`를 안 읽는 클라이언트는 그것을 놓친다.
+락을 얻지 못하면 본문 대신 `CONFLICT` 409다.
+`skipped[]`의 `reason`은 `not-md`와 `symlink` 둘뿐이고 **응답에만 있다** — 컬럼으로 만들지 않는다.
 
 **운영자 진입점은 이 엔드포인트가 아니라 CLI `sillok ingest`다 (D8·D20).**
 여기는 이미 떠 있는 api에 같은 Service 함수를 태우는 HTTP 얼굴이고, MCP에는 노출하지 않는다.

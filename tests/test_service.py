@@ -130,14 +130,18 @@ def db():
             conn.rollback()
 
 
+def _wipe(db, project):
+    for table in ("kb_events", "kb_ingest_runs"):
+        db.execute(f"DELETE FROM {table} WHERE project = %s", (project,))
+    db.commit()
+
+
 @pytest.fixture
 def clean_project(db):
     """이 파일이 쓰는 project 의 잔여 행을 지운 상태로 시작하고, 끝나면 지운다."""
-    db.execute("DELETE FROM kb_events WHERE project = %s", ("t_step4",))
-    db.commit()
+    _wipe(db, "t_step4")
     yield "t_step4"
-    db.execute("DELETE FROM kb_events WHERE project = %s", ("t_step4",))
-    db.commit()
+    _wipe(db, "t_step4")
 
 
 @needs_db
@@ -242,6 +246,39 @@ def test_status_counts_and_nulls(clean_project):
     assert status["chunks"] == 0
     assert status["last_ingest_at"] is None
     assert status["zero_hit_queries"] == 0
+    # D31. 청크가 없으면 0 이다. 이 값이 chunks 와 같아지는 것이 "키 없이 색인했다" 는 신호다.
+    assert status["chunks_without_embedding"] == 0
+
+
+@needs_db
+def test_status_keys_are_the_whole_contract(clean_project):
+    """service-and-mcp.md 의 상태 응답이 이 여섯 키다. 늘거나 줄면 사본이 낡는다."""
+    assert set(service.kb_status(DSN, clean_project)) == {
+        "documents",
+        "chunks",
+        "events",
+        "last_ingest_at",
+        "zero_hit_queries",
+        "chunks_without_embedding",
+    }
+
+
+def _add_run(db, project, status):
+    """kb_status 는 자기 연결로 읽는다. 커밋하지 않으면 보이지 않는다."""
+    db.execute(
+        "INSERT INTO kb_ingest_runs (project, finished_at, status) VALUES (%s, now(), %s)",
+        (project, status),
+    )
+    db.commit()
+
+
+@needs_db
+def test_status_ignores_failed_ingest_runs(db, clean_project):
+    """D32. 실패한 run 을 세면 실패가 마지막 색인으로 보고된다."""
+    _add_run(db, clean_project, "failed")
+    assert service.kb_status(DSN, clean_project)["last_ingest_at"] is None
+    _add_run(db, clean_project, "ok")
+    assert service.kb_status(DSN, clean_project)["last_ingest_at"] is not None
 
 
 @needs_db

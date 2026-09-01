@@ -52,8 +52,8 @@ curl -s "http://127.0.0.1:8080/v1/status?project=demo"
 Postgres는 내부 네트워크에 남으므로 Service 말고는 DB에 닿지 않습니다.
 
 ```json
-{ "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0,
-                        "last_ingest_at": null, "zero_hit_queries": 0 } }
+{ "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0, "last_ingest_at": null,
+                        "zero_hit_queries": 0, "chunks_without_embedding": 0 } }
 ```
 
 ### 이벤트는 채워 주지 않고 거절한다

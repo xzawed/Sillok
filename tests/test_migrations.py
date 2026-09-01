@@ -29,7 +29,7 @@ TABLES = [
 def test_discover_orders_by_version():
     found = migrations.discover()
     assert [m.version for m in found] == sorted(m.version for m in found)
-    assert [m.name for m in found] == ["001_extensions.sql", "002_schema.sql"]
+    assert [m.name for m in found] == ["001_extensions.sql", "002_schema.sql", "003_ingest_counters.sql"]
 
 
 def test_extensions_run_before_schema():
@@ -124,7 +124,7 @@ def conn():
 
 @needs_db
 def test_apply_returns_what_it_applied(applied):
-    assert [m.name for m in applied] == ["001_extensions.sql", "002_schema.sql"]
+    assert [m.name for m in applied] == ["001_extensions.sql", "002_schema.sql", "003_ingest_counters.sql"]
 
 
 @needs_db
@@ -279,3 +279,20 @@ def test_hnsw_is_absent_in_v1(applied, conn):
         """
     ).fetchall()
     assert rows == []
+
+
+@needs_db
+def test_ingest_run_counters_are_separate(applied, conn):
+    """D30. 삭제를 files_changed 에 접으면 가장 파괴적인 동작이 원장에서 사라진다.
+
+    003 이 더한 컬럼이다. 이 검사가 없으면 test 이미지의 구운 migrations/ 가
+    낡아도 아무도 비명을 지르지 않는다 — D28 이 예고한 부류이고 실제로 한 번 났다.
+    """
+    rows = conn.execute(
+        """
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'kb_ingest_runs'
+          AND column_name IN ('files_seen', 'files_changed', 'files_deleted')
+        """
+    ).fetchall()
+    assert sorted(r[0] for r in rows) == ["files_changed", "files_deleted", "files_seen"]

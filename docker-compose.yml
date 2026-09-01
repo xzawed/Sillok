@@ -107,6 +107,9 @@ services:
       # .venv 는 이미지에 남는다. 의존성을 바꾸면 다시 빌드해야 하고 그때는 ImportError 로 시끄럽게 죽는다.
       - ./src:/app/src:ro
       - ./tests:/app/tests:ro
+      # D28 가 예고한 자리다 — "SQL 만 더하는 변경"이 오면 구운 migrations/ 가 조용히 낡는다.
+      # 003 을 더한 뒤 실측하니 이미지 안에는 001·002 뿐이었고 검사는 그대로 통과했다.
+      - ./migrations:/app/migrations:ro
 
 volumes:
   db_data:

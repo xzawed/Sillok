@@ -72,7 +72,7 @@ CREATE TABLE kb_chunks (
 );
 ```
 
-권장 청크: 헤딩 우선, 본문 800~1200자, overlap 120~200자.  
+청크 경계의 정본은 **D30**이다 — 헤딩 우선, 블록 채우기로 소프트 상한 1200자, 하드 상한 4000자, overlap 없음.  
 파일 단위로 옛 청크를 지우고 다시 넣는다.
 
 ## 이벤트 원장
@@ -119,8 +119,10 @@ CREATE TABLE kb_ingest_runs (
   commit_sha       text,
   files_seen       int,
   files_changed    int,
+  files_deleted    int,        -- D30. 삭제는 files_changed 에 접지 않는다
   chunks_upserted  int,
   status           text NOT NULL DEFAULT 'running',
+  -- running | ok | partial | failed  (D32. CHECK 를 걸지 않는다 — D25)
   error            text
 );
 

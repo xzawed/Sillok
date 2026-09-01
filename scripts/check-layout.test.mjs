@@ -20,6 +20,7 @@ import { execFileSync } from 'node:child_process'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SKIP = new Set(['.git', '.venv', 'venv', 'node_modules', '__pycache__', '.pytest_cache'])
+const NL = String.fromCharCode(10)   // 백슬래시 리터럴을 앵커로 쓰지 않기 위한 상수
 const F3 = '`'.repeat(3)
 const F4 = '`'.repeat(4)
 
@@ -133,10 +134,23 @@ const CASES = [
     mutate: write('src/sillok/_probe.py', '@app.post("/v1/search/docs")\ndef s(): pass\n'),
   },
   {
-    id: '11 5단계 CLI ingest',
+    // 5단계(Q6·Q7·Q10)가 D30–D32 로 닫히면서 ingest 는 더 이상 막히지 않는다.
+    // CLI_STEP 에는 ingest 하나뿐이라 이제 그 분기가 막는 단계가 없다 —
+    // 그래서 **Q 를 다시 열어** 분기가 살아 있는지 본다. 게이트가 문서를 따라간다는 증거다.
+    id: '11 Q6 를 다시 열면 CLI ingest 가 막힌다',
     expect: 'fail',
-    mentions: ['5단계', 'Q6', 'Q7', 'Q10'],
-    mutate: write('src/sillok/_probe.py', 'sub.add_parser("ingest")\n'),
+    mentions: ['5단계', 'Q6'],
+    mutate: (dir) => {
+      edit(dir, 'docs/open-questions.md', (s) => s.replace(' — **해결 → D30**', ''))
+      write('src/sillok/_probe.py', 'sub.add_parser("ingest")' + NL)(dir)
+    },
+  },
+  {
+    // 반대 방향. 닫힌 단계의 표면은 통과해야 한다 —
+    // 안 그러면 게이트가 문서를 따라가는 것이 아니라 그냥 막는 것이다.
+    id: '11b 5단계 CLI ingest 는 이제 통과한다',
+    expect: 'pass',
+    mutate: write('src/sillok/_probe.py', 'sub.add_parser("ingest")' + NL),
   },
   {
     id: '12 8단계 MCP import',
@@ -154,12 +168,13 @@ const CASES = [
     ),
   },
   {
+    // /v1/ingest 는 5단계라 이제 안 막힌다. 같은 문법을 아직 막힌 단계로 옮긴다.
     id: '14 include_router(prefix=) + 상대 경로',
     expect: 'fail',
-    mentions: ['5단계', '/v1/ingest'],
+    mentions: ['6단계', '/v1/search/docs'],
     mutate: write(
       'src/sillok/_probe.py',
-      'app.include_router(r, prefix="/v1")\n\n@r.post("/ingest")\ndef s(): pass\n'
+      'app.include_router(r, prefix="/v1")' + NL + NL + '@r.post("/search/docs")' + NL + 'def s(): pass' + NL
     ),
   },
   {
@@ -270,6 +285,13 @@ const CASES = [
     expect: 'fail',
     mentions: ['폐기된 문구'],
     mutate: write('src/sillok/_probe.py', '# 업무 라우트는 아직 없다\n'),
+  },
+  {
+    // D32 가 CONFLICT 의 첫 발신자를 만들었다. 옛 문구가 어딘가에 되살아나면 계약이 갈라진다.
+    id: '25b D32 가 폐기한 CONFLICT 문구',
+    expect: 'fail',
+    mentions: ['폐기된 문구', 'D32'],
+    mutate: append('docs/spec.md', NL + 'CONFLICT 는 예약. v1은 발신하지 않는다.' + NL),
   },
   {
     id: '26 문서에서 백틱으로 인용하는 것은 허용한다',
