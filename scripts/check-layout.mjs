@@ -199,6 +199,7 @@ for (const p of md) {
 
 // 검사 14 가 쓸 값. Q 게이트가 이미 아는 것에서 유도한다 — 사실을 두 번 적지 않는다.
 let verifiableThrough = null
+let stageReason = ''
 
 // 9. Q 게이트 — 단계를 막는 질문이 열려 있는데 그 단계의 표면이 코드에 있는가.
 //    plan.md §7 이 "n단계 전에 Qx·Qy" 를 소유한다. 여기서는 그 문장을 읽어 강제만 한다.
@@ -276,13 +277,34 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
 
   // "1–N단계를 이제 검증할 수 있다" 의 N 은 여기서 나온다.
   // **막힌 가장 이른 단계 바로 앞**이 N 이다 — 7단계가 막혀 있으면 8단계 Q 가 다 풀려도 1–6 이다.
-  // 뒤 단계만 열리는 것은 "검증할 수 있다" 가 아니라 순서를 건너뛴 것이다 (§7 의 순서는 계약이다).
+  // "Q 가 다 풀린 단계의 **개수**" 가 아니다: 1–N 은 1부터 이어지는 구간이지 세는 값이 아니고,
+  // 뒤 단계만 열리는 것은 §7 이 금지하는 건너뛰기다.
   const blockedSteps = [...gates.keys()]
     .filter((step) => gates.get(step).some((q) => !resolved.has(q)))
     .toSorted((a, b) => a - b)
-  // 막힌 단계가 하나도 없으면 유도하지 않는다. 그때 그 문장은 더 이상 Q 에 대한 주장이 아니고
-  // 여기서 답을 발명하면 (마지막 게이트 단계? 10단계?) 검사가 조용히 틀린 값을 강요한다.
-  if (blockedSteps.length) verifiableThrough = blockedSteps[0] - 1
+
+  // 막힌 단계가 없을 때는 §7 목록의 **마지막 단계**가 N 이다.
+  // 여기서 유도를 멈추면(예전 코드) 마지막 Q 가 닫히는 순간 검사의 절반이 조용히 은퇴하고
+  // "셋이 사이좋게 틀림" 이 다시 통과한다 — 그것이 이 검사의 존재 이유였다.
+  // gates 의 최대값(8)을 쓰면 안 된다. Q 가 걸린 적 없는 9·10단계가 영원히 빠진다.
+  const h7 = plan.indexOf('## 7.')
+  const h8 = plan.indexOf('## 8.')
+  const section7 = h7 >= 0 && h8 > h7 ? plan.slice(h7, h8) : ''
+  const stepNos = [...section7.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]))
+  const lastStep = stepNos.length ? Math.max(...stepNos) : 0
+  // 1..last 로 이어지지 않으면 목록을 잘못 읽은 것이다. 조용히 넘기면 N 이 틀린 채 강요된다.
+  if (!lastStep || new Set(stepNos).size !== lastStep) {
+    fail(
+      `${planPath} §7 : 번호 목록을 읽지 못했다 (${stepNos.join(',') || '없음'}). ` +
+        '검사 14 가 쓸 마지막 단계를 정할 수 없다.'
+    )
+  } else if (blockedSteps.length) {
+    verifiableThrough = blockedSteps[0] - 1
+    stageReason = `${blockedSteps[0]}단계를 막는 Q 가 아직 열려 있다`
+  } else {
+    verifiableThrough = lastStep
+    stageReason = '§7 을 막는 Q 가 하나도 남지 않았다'
+  }
 
   const py = all.filter((p) => p.startsWith('src/') && p.endsWith('.py'))
   const found = [] // { step, what, file }
@@ -498,7 +520,7 @@ for (const [p, n] of stageClaims) {
   if (verifiableThrough !== null && n !== verifiableThrough) {
     fail(
       `${p} : 1–${n}단계라고 하는데 Q 게이트로는 1–${verifiableThrough}단계다 ` +
-        `(${verifiableThrough + 1}단계를 막는 Q 가 아직 열려 있다). 문장이 아니라 Q 를 먼저 본다.`
+        `(${stageReason}). 문장이 아니라 Q 를 먼저 본다.`
     )
   }
 }

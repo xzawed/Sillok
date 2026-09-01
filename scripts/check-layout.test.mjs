@@ -365,6 +365,28 @@ const CASES = [
     mutate: append('docs/plan.md', NL + '옛 문장: 1–4단계를 이제 검증할 수 있다.' + NL),
   },
   {
+    // 마지막 Q 가 닫히는 날 유도가 멈추면(예전 코드) 검사의 절반이 조용히 은퇴하고
+    // "셋이 사이좋게 틀림" 이 다시 통과한다. Q17 이 닫히는 순간 — v1 이 끝나기 전이다.
+    id: '27g Q 가 다 풀리면 마지막 단계까지 올려야 한다',
+    expect: 'fail',
+    mentions: ['Q 게이트로는 1–10단계다', '막는 Q 가 하나도 남지 않았다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/open-questions.md', (t) =>
+        t.replace(/^(\*\*Q\d+\.[^\n]*)$/gm, (line) =>
+          line.includes('해결 →') ? line : line + ' — **해결 → D99**'
+        )
+      ),
+  },
+  {
+    // 마지막 단계를 §7 의 번호 목록에서 읽는다. 목록을 못 읽으면 N 을 정할 수 없는데
+    // 조용히 넘기면 틀린 N 이 강요된다 — 파싱 실패 자체를 결함으로 본다 (Q 게이트와 같은 규칙).
+    id: '27h §7 번호 목록이 어긋나면 운다',
+    expect: 'fail',
+    mentions: ['번호 목록을 읽지 못했다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/plan.md', (t) => t.replace(NL + '9. `kb_query_logs` 기록', NL + '11. `kb_query_logs` 기록')),
+  },
+  {
     // 펜스 안의 인용은 주장이 아니다. 빼지 않으면 예시 하나가 N 을 정한다.
     id: '27f 코드 펜스 안의 옛 문장은 주장으로 세지 않는다',
     expect: 'pass',
