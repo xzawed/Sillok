@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 [docs/plan.md](docs/plan.md) §7의 **1–5단계까지 구현돼 있고 6단계부터는 아직 없다.**
 (진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
-`src/sillok/`(config · migrations 러너 · api 골격 · CLI `migrate`/`serve`), `tests/`.
+`src/sillok/`(config · migrations 러너 · api · ingest 규칙 · CLI `migrate`/`serve`/`ingest`), `tests/`.
 **업무 라우트는 넷이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` ·
 `POST /v1/ingest`(5단계, MCP 에는 노출하지 않는다).
 검색·`get_file`·`save_doc`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.

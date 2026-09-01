@@ -219,7 +219,7 @@ docker compose build \
 | `migrations/` | 버전 붙인 raw SQL. 서버가 bind하기 전에 적용된다 |
 | `src/sillok/service.py` | DB를 만지는 유일한 문. 검증은 DDL 제약이 아니라 여기 있다 |
 | `src/sillok/api.py` | HTTP 어댑터 — 공통 봉투와 Bearer 게이트. SQL을 갖지 않는다 |
-| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` |
+| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` |
 | `scripts/` | 문서 게이트, 그 게이트의 고장 주입, 증거 수집기 |
 | `tests/` | pytest |
 

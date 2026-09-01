@@ -52,7 +52,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 node scripts/evidence.mjs
 ```
 
-네 가지를 한 번에 돌리고 PR 본문에 붙일 블록을 낸다. **하나라도 못 돌리면 실패한다** —
+위 목록을 한 번에 돌리고 PR 본문에 붙일 블록을 낸다. **하나라도 못 돌리면 실패한다** —
 손으로 따로 돌리면 빠뜨린 것을 아무도 알아채지 못한다(실제로 그렇게 여러 PR이 증거를 덜 싣고 머지됐다).
 
 - `check-layout.mjs` — 문서 게이트. 무는지까지 보려면 `check-layout.test.mjs`

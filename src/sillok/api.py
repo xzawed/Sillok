@@ -218,7 +218,7 @@ def _since(raw: str | None) -> datetime | None:
 
 
 def _mount_v1(app: FastAPI, cfg: Config) -> None:
-    """4단계 라우트 (plan §7). 여기서 SQL 을 쓰지 않는다 — service 함수만 부른다."""
+    """4단계 셋과 5단계 ingest (plan §7). 여기서 SQL 을 쓰지 않는다 — service 함수만 부른다."""
 
     @app.post("/v1/events")
     async def save_event(body: dict[str, Any]) -> JSONResponse:

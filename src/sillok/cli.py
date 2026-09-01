@@ -5,7 +5,7 @@ Q6·Q7·Q10 이 D30–D32 로 닫히기 전까지 `ingest` 는 만들지 않았�
 동작하지 않는 명령이 있으면 계약이 구현된 것처럼 보인다.
 
 **CLI 는 SQL 을 갖지 않는다 (D19).** 여기서 하는 일은 인자를 읽고
-sillok.migrations 의 러너를 부르는 것뿐이다.
+sillok.migrations 의 러너나 sillok.service 의 함수를 부르는 것뿐이다.
 """
 
 from __future__ import annotations

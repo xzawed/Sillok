@@ -219,7 +219,7 @@ It is an environment problem, so it is never baked into the image.
 | `migrations/` | Versioned raw SQL, applied before the server binds |
 | `src/sillok/service.py` | The only door to the database. Validation lives here, not in DDL constraints |
 | `src/sillok/api.py` | The HTTP adapter — the common envelope and the bearer gate. Holds no SQL |
-| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` |
+| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` |
 | `scripts/` | Documentation gate, its fault-injection harness, evidence collector |
 | `tests/` | pytest |
 

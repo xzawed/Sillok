@@ -70,6 +70,12 @@ try {
   process.exit(1)
 }
 
+if (!mine.length) {
+  console.error('색인 목록 불일치')
+  console.error('  ingest 가 아무것도 돌려주지 않았다 — 마운트나 프로브가 깨졌다')
+  process.exit(1)
+}
+
 const onlyGate = gate.filter((p) => !mine.includes(p))
 const onlyIngest = mine.filter((p) => !gate.includes(p))
 

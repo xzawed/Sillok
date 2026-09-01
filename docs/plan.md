@@ -145,7 +145,7 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 
 A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**로 마감됐다 (2026-08-31).
-1–4단계를 이제 검증할 수 있다.
+1–5단계를 이제 검증할 수 있다.
 **B절의 Q6·Q7·Q10은 D30–D32로 마감됐다** (2026-09-01) — 5단계 계약이 이제 있다.
 남은 공백은 단계별로 걸린다 — **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
 6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17이 필요하다.
@@ -186,8 +186,9 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
       `POST /v1/events {}` → 422 `{"code":"VALIDATION","message":"missing required field: project, kind, …"}`.
       오프셋 없는 `occurred_at`도 같은 코드로 거절된다 (D25)
 - [x] ingest가 `docs/**`, 루트 `README*`, `adr/**`만 먹는다 — 2026-09-01 실측.
-      이 저장소를 대상으로 `run ok: 본 10 · 바뀐 10 · 청크 190`,
-      두 번째 run 은 `바뀐 0`. 게이트의 색인 목록과 대조하는 검사가 `scripts/check-index-parity.mjs` 다
+      이 저장소를 대상으로 돌아 게이트의 색인 목록과 **같은 파일을 먹었고**,
+      두 번째 run 은 아무것도 바꾸지 않았다(해시가 유일한 변경 판정이다).
+      대조는 `scripts/check-index-parity.mjs` 가 매번 한다 — 파일 수를 여기 적지 않는다. 문서가 자라면 낡는다
 - [ ] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다
 - [ ] `get_file`이 workspace의 해당 path를 돌려준다
 - [ ] `save_doc`이 Git을 변경하지 않는다
