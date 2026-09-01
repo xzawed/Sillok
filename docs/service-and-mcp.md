@@ -84,9 +84,20 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 응답 `data.results[]`: `path`, `heading_path`, `excerpt`, `commit_sha`, `status`, `score`
 
+**`query`는 필수다.** 없거나 공백뿐이면 `VALIDATION`이다 (D33) — 문서 검색에는 질의 말고 신호가 없어
+필터만으로는 "관련 문서 전부"가 되고 그것은 설계 위반이다. `search_events`는 반대다.
+
 `heading_path`는 그 청크가 속한 절까지의 제목을 상위부터 ` > `로 이은 문자열이다 (D30).
 첫 제목 앞 서두는 `null`이고, 레벨을 건너뛴 문서는 빈 칸을 채우지 않는다. 길이 상한은 없다.
 `commit_sha`는 D30에 따라 **v1 내내 빈 문자열**이다 — 필드는 계약이고 값이 생기면 채우는 자리다.
+
+`score`는 두 순위를 RRF(`k=60`)로 합친 값이고 **이 응답 안에서만** 비교된다 (D33).
+질의 사이에도 project 사이에도 비교되지 않는다 — `results`가 이미 그 순서로 정렬돼 있다.
+`excerpt`는 `tsv` 생성식과 같은 텍스트에 `ts_headline`을 걸어 만들고 800자에서 자른다.
+잘렸으면 끝에 `…` 한 글자가 붙는다.
+
+**한 문서는 최대 2행을 차지하므로 `top_k`보다 적게 올 수 있다** (D33).
+여덟을 요청해 다섯이 오는 것은 정상이고, 결과가 없어서가 아니다.
 
 `POST /v1/search/events`
 
@@ -103,6 +114,14 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 ```
 
 응답 `data.results[]`: `id`, `title`, `summary`, `kind`, `result`, `module`, `occurred_at`, `score`
+
+**이벤트 검색은 키워드만이다** — v1은 이벤트를 임베딩하지 않는다 (D34).
+키워드는 `title`·`summary`·`root_cause`·`resolution` 네 필드를 이은 `tsv`에 건다.
+**뒤의 둘로 걸린 히트는 응답만 보고 설명할 수 없다** — 그 두 필드가 응답에 없다.
+원문은 `get_event`(7단계)에서 본다.
+**`query`는 선택이다.** 없거나 공백뿐이면 필터 집합이 그대로 결과이고 `score`는 `null`이다 (D33).
+순서는 `occurred_at DESC, id DESC`다. `query`가 있으면 `ts_rank` 순이고 같은 두 키가 타이브레이크다.
+`query`에 값이 있는데 렉심이 하나도 나오지 않으면 결과는 0건이다 — 필터 집합을 돌려주지 않는다.
 
 ### 단건
 

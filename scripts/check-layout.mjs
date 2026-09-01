@@ -375,6 +375,10 @@ const RETIRED = [
   ['해시 비교 후 변경분만 임베딩', 'D31 이 백필을 마지막 패스로 정했다'],
   ['예약. v1은 발신하지 않는다', 'D32 가 CONFLICT 의 첫 발신자를 만들었다'],
   ['권장 청크: 헤딩 우선', 'D30 이 청크 경계를 계약으로 정했다'],
+  ['가능하면 RRF로 합친다', 'D33 이 병합을 계약으로 정했다'],
+  ['병합 방식 미정', 'D33 이 Q8 을 닫았다'],
+  ['남은 집합에 벡터/키워드', 'D34: v1 이벤트는 키워드만이다'],
+  ['나중에 만들어도 된다', 'HNSW 를 만들지 않는 결정은 D33 이 소유한다'],
 ]
 const textish = all.filter(
   (p) =>
@@ -402,6 +406,30 @@ if (readmes.length === 0) fail('루트 README* 가 색인 대상에 없다. D9 �
 for (const p of readmes) {
   if (FRONT_MATTER.test(readFileSync(join(ROOT, p), 'utf8'))) {
     fail(`${p} : front matter 가 있다 — GitHub 이 최상단에 표로 렌더한다 (D29). 지운다.`)
+  }
+}
+
+// 13. pg_trgm 을 쓰지 않는가 (D34).
+//     확장은 선언돼 있지만 v1 은 쓰지 않기로 정했다 — `%` 는 기본 임계값에서 인덱스를 타고
+//     전량을 recheck 로 버려 0건을 돌려주고, `%>` 는 경계를 SQL 이 아니라 세션 GUC 가 정한다.
+//     **쓰지 않기로 한 선언은 검사가 없으면 다음 사람이 조용히 쓴다.**
+//     인덱스가 실제로 들어올 자리는 migrations/ 다 — 거기를 안 보면 이 검사가 헛돈다.
+//     스키마에 trgm 인덱스가 0개라는 것은 DB 검사가 따로 본다. 여기는 소스 쪽이다.
+const TRGM = [
+  ['gin_trgm_ops', 'trgm 인덱스 연산자 클래스'],
+  ['gist_trgm_ops', 'trgm 인덱스 연산자 클래스'],
+  ['similarity(', 'trgm 유사도 함수'],
+  ['word_similarity(', 'trgm 유사도 함수'],
+  ['pg_trgm.', 'trgm GUC'],
+]
+const trgmish = all.filter(
+  (p) => (p.startsWith('src/') && p.endsWith('.py')) || (p.startsWith('migrations/') && p.endsWith('.sql'))
+)
+for (const p of trgmish) {
+  const body = readFileSync(join(ROOT, p), 'utf8')
+  for (const [needle, what] of TRGM) {
+    // 001 은 확장을 설치하는 파일이다. 설치 자체는 D34 가 남기기로 한 것이라 세지 않는다.
+    if (body.includes(needle)) fail(`${p} : ${what} "${needle}" — pg_trgm 은 v1 미사용이다 (D34)`)
   }
 }
 

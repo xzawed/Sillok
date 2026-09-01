@@ -97,9 +97,14 @@ CREATE TABLE kb_events (
   source            text NOT NULL DEFAULT 'agent',
   related_doc_path  text,
   payload           jsonb NOT NULL DEFAULT '{}'::jsonb,
-  embedding         vector(1536),  -- text-embedding-3-small, summary만
+  embedding         vector(1536),  -- text-embedding-3-small, summary만. v1 은 채우지 않는다 (D34)
   created_at        timestamptz NOT NULL DEFAULT now(),
-  created_by        text
+  created_by        text,
+  tsv               tsvector GENERATED ALWAYS AS
+                      (to_tsvector('simple',
+                        coalesce(title,'')      || ' ' || coalesce(summary,'')    || ' ' ||
+                        coalesce(root_cause,'') || ' ' || coalesce(resolution,''))) STORED
+  -- D34. 네 필드를 전부 coalesce 로 감싼다 — 하나가 NULL 이면 tsv 가 통째로 NULL 이 된다.
 );
 
 CREATE INDEX kb_events_project_time ON kb_events (project, occurred_at DESC);
@@ -148,16 +153,21 @@ CREATE INDEX kb_chunks_hnsw
 CREATE INDEX kb_chunks_tsv ON kb_chunks USING gin (tsv);
 CREATE INDEX kb_docs_lookup ON kb_documents (project, doc_type, status, module);
 
+CREATE INDEX kb_events_tsv ON kb_events USING gin (tsv);
+
 CREATE INDEX kb_events_hnsw
   ON kb_events USING hnsw (embedding vector_cosine_ops);
 ```
 
-HNSW는 행이 적을 때 이득이 없다. v1에서 나중에 만들어도 된다.
+**v1 은 HNSW 를 만들지 않는다 (D33).** `kb_chunks_hnsw` 는 *행이 적어서* 미룬 것이고,
+`kb_events_hnsw` 는 **채울 값이 없어서**다 — v1 은 이벤트를 임베딩하지 않는다 (D34).
+이유가 다르므로 다르게 적는다. 빈 컬럼에 인덱스가 있으면 벡터 갈래가 있다는 증거로 읽힌다.
 
 ## 검색
 
-문서: 벡터 유사도 + `tsv` 키워드. 가능하면 RRF로 합친다.  
-이벤트: 필터(project, kind, module, 기간)를 먼저 걸고, 남은 집합에 벡터/키워드.
+문서: 벡터 유사도 + `tsv` 키워드를 **RRF(`k=60`)로 합친다.** 정의는 D33 이 소유한다.  
+이벤트: 필터(project, kind, module, 기간)를 먼저 걸고, 남은 집합에 **키워드만** 건다 —
+v1 은 이벤트를 임베딩하지 않는다 (D34).
 
 식별자·에러코드·날짜·건수는 벡터만으로 풀지 않는다.
 
