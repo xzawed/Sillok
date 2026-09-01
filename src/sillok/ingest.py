@@ -211,6 +211,11 @@ def derive_meta(rel_path: str, text: str) -> dict[str, str | None]:
         out["doc_type"] = "other"
     if out["status"] is None:
         out["status"] = "current"
+    if out["title"] is None:
+        # front matter 가 없으면 title 은 D29 의 첫 H1 규칙으로 유도한다 (D30 §7).
+        # 이 저장소에서는 게이트가 먼저 막지만, D5 가 말하는 다른 project 에서는
+        # front matter 가 없는 것이 정상이다.
+        out["title"] = first_h1(text)
     return out
 
 

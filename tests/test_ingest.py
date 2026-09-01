@@ -8,6 +8,8 @@ D22 가 남긴 숙제(`test` 이미지에 `docs/`·`adr/` 가 없다)를 `tmp_pa
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from sillok import ingest
@@ -46,10 +48,18 @@ def test_leading_bom_is_stripped():
 
 
 def test_hash_is_a_function_of_the_body_only():
-    """path·project 를 섞으면 체크아웃 한 번이 전 문서를 변경으로 만든다."""
-    assert ingest.content_hash("x") == ingest.content_hash("x")
+    """path·project 를 섞으면 체크아웃 한 번이 전 문서를 변경으로 만든다.
+
+    알려진 값을 못 박는다. 같은 입력이 같은 값을 낸다는 것만 보면
+    해시를 상수로 바꿔도 이 검사가 초록으로 남는다.
+    """
+    known = "0b46e6c5da8bebfeae63a03e8ff0b3f1d0f8cf7d2ef1e37f9f8a6a3d2f0a5b09"
+    assert ingest.content_hash("가나다\n") == hashlib.sha256("가나다\n".encode()).hexdigest()
     assert len(ingest.content_hash("x")) == 64
     assert ingest.content_hash("x").islower()
+    # 본문이 다르면 값이 다르다.
+    assert ingest.content_hash("a") != ingest.content_hash("b")
+    assert known != ingest.content_hash("a")  # 상수가 아니다
 
 
 def test_nothing_else_is_normalized():
@@ -74,11 +84,15 @@ def test_scan_takes_only_md_inside_the_d9_paths(tmp_path):
     write(tmp_path, "docs/skills/example.json", "{}")
     write(tmp_path, "src/x.md", FM)        # D9 경로 밖
     write(tmp_path, "notes.md", "# T\n")   # 루트지만 README 가 아니다
+    write(tmp_path, "docs/UPPER.MD", FM)   # 대소문자를 접지 않는다
 
     files, skipped = ingest.scan(tmp_path)
     assert [f.path for f in files] == ["README.ko.md", "README.md", "adr/b.md", "docs/a.md"]
     # 제외한 것은 조용히 사라지지 않는다. D9 경로 밖은 애초에 대상이 아니라 보고하지 않는다.
-    assert skipped == [ingest.Skipped("docs/skills/example.json", "not-md")]
+    assert skipped == [
+        ingest.Skipped("docs/UPPER.MD", "not-md"),
+        ingest.Skipped("docs/skills/example.json", "not-md"),
+    ]
 
 
 def test_scan_order_is_utf8_byte_ascending(tmp_path):
@@ -98,9 +112,13 @@ def test_scan_uses_posix_separators(tmp_path):
 
 
 def test_scan_skips_dot_git_and_node_modules(tmp_path):
+    """주입은 **D9 경로 안**이어야 이 규칙을 문다.
+
+    루트의 `.git/` 은 in_index_paths 가 이미 떨어뜨리므로 skip 규칙을 지워도 초록이다.
+    """
     write(tmp_path, "docs/a.md", FM)
-    write(tmp_path, ".git/docs/x.md", FM)
-    write(tmp_path, "node_modules/docs/x.md", FM)
+    write(tmp_path, "docs/.git/x.md", FM)
+    write(tmp_path, "docs/node_modules/x.md", FM)
     files, skipped = ingest.scan(tmp_path)
     assert [f.path for f in files] == ["docs/a.md"]
     assert skipped == []
@@ -242,7 +260,10 @@ def test_hard_limit_splits_a_huge_block_at_line_boundaries():
 
 
 def test_a_single_line_over_the_hard_limit_becomes_its_own_chunk():
-    """문자 단위로 자르는 경로는 만들지 않는다. 규칙에 종점이 있어야 한다."""
+    """문자 단위로 자르는 경로는 만들지 않는다 — 규칙에 종점이 있어야 한다.
+
+    천장이 실제로 있다는 것은 위의 여러 줄 검사가 문다. 이 검사가 잠그는 것은 종점이다.
+    """
     long_line = "w" * (ingest.CHUNK_HARD_LIMIT + 500)
     got = ingest.chunk("# A\n\n" + long_line + "\n")
     assert [c.content for c in got] == [long_line]
@@ -253,3 +274,15 @@ def test_there_is_no_overlap():
     first, second = "a" * 700, "b" * 700
     got = ingest.chunk("# A\n\n" + first + "\n\n" + second + "\n")
     assert [c.content for c in got] == [first, second]
+
+
+def test_missing_front_matter_derives_the_title_from_the_first_h1():
+    """D30 §7. 다른 project 에서는 front matter 가 없는 것이 정상이다.
+
+    이것이 없으면 그 문서들의 title 이 전부 NULL 로 들어간다.
+    """
+    assert ingest.derive_meta("docs/a.md", "# 제목\n\n본문\n")["title"] == "제목"
+    # front matter 가 있으면 그 값이 이긴다 — H1 로 덮어쓰지 않는다.
+    assert ingest.derive_meta("docs/a.md", FM + "# 다른 제목\n\n본문\n")["title"] == "T"
+    # 제목이 하나도 없으면 NULL 이다.
+    assert ingest.derive_meta("docs/a.md", "본문뿐이다\n")["title"] is None
