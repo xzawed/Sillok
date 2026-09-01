@@ -52,8 +52,8 @@ Only `8080` is published.
 Postgres stays on the internal network, so nothing reaches the database except the service itself.
 
 ```json
-{ "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0,
-                        "last_ingest_at": null, "zero_hit_queries": 0 } }
+{ "ok": true, "data": { "documents": 0, "chunks": 0, "events": 0, "last_ingest_at": null,
+                        "zero_hit_queries": 0, "chunks_without_embedding": 0 } }
 ```
 
 ### Events are rejected, not repaired

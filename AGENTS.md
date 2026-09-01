@@ -131,6 +131,6 @@ DECIDED: migrations = versioned raw .sql, idempotent, applied on serve startup b
 DECIDED: sillok ingest calls Service functions in-process; the CLI owns no SQL
 DECIDED: POST /v1/ingest = same function over HTTP; operator entry point is the CLI
 DECIDED: error code -> HTTP: VALIDATION 422, UNAUTHORIZED 401, NOT_FOUND 404,
-         CONFLICT 409 (reserved, never emitted in v1), INTERNAL 500
+         CONFLICT 409 (D32: concurrent ingest on the same project), INTERNAL 500
 DECIDED: body is always the {ok, data|error} envelope; INTERNAL message is a fixed string
 ```

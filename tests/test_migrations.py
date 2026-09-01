@@ -29,7 +29,7 @@ TABLES = [
 def test_discover_orders_by_version():
     found = migrations.discover()
     assert [m.version for m in found] == sorted(m.version for m in found)
-    assert [m.name for m in found] == ["001_extensions.sql", "002_schema.sql"]
+    assert [m.name for m in found] == ["001_extensions.sql", "002_schema.sql", "003_ingest_counters.sql"]
 
 
 def test_extensions_run_before_schema():
@@ -124,7 +124,7 @@ def conn():
 
 @needs_db
 def test_apply_returns_what_it_applied(applied):
-    assert [m.name for m in applied] == ["001_extensions.sql", "002_schema.sql"]
+    assert [m.name for m in applied] == ["001_extensions.sql", "002_schema.sql", "003_ingest_counters.sql"]
 
 
 @needs_db
@@ -279,3 +279,21 @@ def test_hnsw_is_absent_in_v1(applied, conn):
         """
     ).fetchall()
     assert rows == []
+
+
+@needs_db
+def test_ingest_run_counters_are_separate(applied, conn):
+    """D30. 삭제를 files_changed 에 접으면 가장 파괴적인 동작이 원장에서 사라진다.
+
+    003 이 더한 컬럼이다. 이 검사가 무는 것은 "003 이 돌았는데 컬럼이 없다" 하나다 —
+    이미지가 낡아 003 을 못 본 것은 위의 discover·apply 이름 목록이 잡는다.
+    공유 db_data 에 컬럼이 이미 있으면 이 단언만으로는 조용히 통과한다.
+    """
+    rows = conn.execute(
+        """
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'kb_ingest_runs'
+          AND column_name IN ('files_seen', 'files_changed', 'files_deleted')
+        """
+    ).fetchall()
+    assert sorted(r[0] for r in rows) == ["files_changed", "files_deleted", "files_seen"]

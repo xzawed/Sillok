@@ -22,7 +22,7 @@ const STATUSES = ['current', 'draft', 'superseded', 'stale']
 // 둘 다 "게이트는 초록인데 첫 화면에 표가 뜨는" 부류가 아니다 — 빈 것은 표로 그릴 행이 없다.
 const FRONT_MATTER = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---/
 // 루트 README* — D9 색인 대상이면서 front matter 를 갖지 **않는** 유일한 부류다 (D29).
-const isRootReadme = (p) => /^README[^/]*$/i.test(p)   // D9 는 확장자·대소문자를 가리지 않는다
+const isRootReadme = (p) => /^README[^/]*$/i.test(p)   // D9 경로 판정은 확장자·대소문자를 가리지 않는다
 
 // D9 색인 대상. 값을 바꾸려면 adr/0001-v1-stack-decisions.md 를 먼저 고친다.
 const INCLUDE = [
@@ -371,6 +371,10 @@ const RETIRED = [
   ['-p no:warnings', '증거 명령은 pytest -q 로 통일했다'],
   // 코드 스팬은 stripCode 가 지우므로 백틱 없는 조각을 고른다.
   ['front matter 존재와', 'D29 가 루트 README* 를 반대로 뒤집었다 (있으면 실패)'],
+  ['변경 파일 목록 또는 repo 경로', 'D30 이 요청 본문을 CLI 인자와 같게 좁혔다'],
+  ['해시 비교 후 변경분만 임베딩', 'D31 이 백필을 마지막 패스로 정했다'],
+  ['예약. v1은 발신하지 않는다', 'D32 가 CONFLICT 의 첫 발신자를 만들었다'],
+  ['권장 청크: 헤딩 우선', 'D30 이 청크 경계를 계약으로 정했다'],
 ]
 const textish = all.filter(
   (p) =>

@@ -62,15 +62,23 @@ class Event:
     created_by: str | None = None
 
 
-def connect(dsn: str) -> psycopg.Connection:
+def connect(dsn: str, *, autocommit: bool = False) -> psycopg.Connection:
     """psycopg 예외를 그대로 올린다. 감싸는 것은 호출자의 몫이다.
 
     **타임아웃을 반드시 준다.** 없으면 DB 가 닿지 않을 때 요청이 무한히 매달린다 —
     마이그레이션 러너에서 같은 결함을 이미 한 번 고쳤는데(D17 기동 경로) 여기서 되풀이했다.
     실측: 타임아웃 없이 죽은 호스트로 붙으면 한 요청이 130초를 먹었다.
+
+    autocommit 은 D32 가 ingest 를 위해 더한 것이다. 기본값이 꺼짐이라 4단계 세 함수의
+    동작은 바뀌지 않는다. 켜지 않고 파일 단위 커밋을 하려 들면 블록 밖 문장 하나가
+    암묵 트랜잭션을 열어 이후 트랜잭션 블록이 전부 세이브포인트가 된다 —
+    run 전체가 한 트랜잭션이 되는데 **실패가 아니라 통과로 나온다.**
     """
     return psycopg.connect(
-        dsn, row_factory=dict_row, connect_timeout=migrations.CONNECT_TIMEOUT_SECONDS
+        dsn,
+        row_factory=dict_row,
+        connect_timeout=migrations.CONNECT_TIMEOUT_SECONDS,
+        autocommit=autocommit,
     )
 
 
@@ -300,10 +308,15 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
                  WHERE d.project = %(p)s) AS chunks,
               (SELECT count(*) FROM kb_events WHERE project = %(p)s) AS events,
               -- 5단계 전까지 null. 빈 값이 정상이지 스텁이 아니다.
-              (SELECT max(finished_at) FROM kb_ingest_runs WHERE project = %(p)s) AS last_ingest_at,
+              -- 실패한 run 은 세지 않는다 (D32) — 세면 실패가 마지막 색인으로 보고된다.
+              (SELECT max(finished_at) FROM kb_ingest_runs
+                 WHERE project = %(p)s AND status IN ('ok', 'partial')) AS last_ingest_at,
               -- 9단계 전까지 0.
               (SELECT count(*) FROM kb_query_logs
-                 WHERE project = %(p)s AND hit_count = 0) AS zero_hit_queries
+                 WHERE project = %(p)s AND hit_count = 0) AS zero_hit_queries,
+              -- D31. 키 없이 색인한 상태가 오류가 아니라 정상이므로 현황에 드러낸다.
+              (SELECT count(*) FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
+                 WHERE d.project = %(p)s AND c.embedding IS NULL) AS chunks_without_embedding
             """,
             {"p": project},
         )
@@ -316,4 +329,5 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
         "events": row["events"],
         "last_ingest_at": last.isoformat() if last is not None else None,
         "zero_hit_queries": row["zero_hit_queries"],
+        "chunks_without_embedding": row["chunks_without_embedding"],
     }
