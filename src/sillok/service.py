@@ -313,7 +313,7 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
               -- 5단계 전까지 null. 빈 값이 정상이지 스텁이 아니다.
               -- 실패한 run 은 세지 않는다 (D32) — 세면 실패가 마지막 색인으로 보고된다.
               (SELECT max(finished_at) FROM kb_ingest_runs
-                 WHERE project = %(p)s AND status IN ('ok', 'partial')) AS last_ingest_at,
+                 WHERE project = %(p)s AND status = ANY(%(counted)s)) AS last_ingest_at,
               -- 9단계 전까지 0.
               (SELECT count(*) FROM kb_query_logs
                  WHERE project = %(p)s AND hit_count = 0) AS zero_hit_queries,
@@ -321,7 +321,7 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
               (SELECT count(*) FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
                  WHERE d.project = %(p)s AND c.embedding IS NULL) AS chunks_without_embedding
             """,
-            {"p": project},
+            {"p": project, "counted": sorted(INGEST_COUNTED_STATUSES)},
         )
         row = cur.fetchone()
 
@@ -339,6 +339,10 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
 # --- 5단계 ingest (D30 · D31 · D32) -----------------------------------------
 
 INGEST_STATUSES = frozenset({"running", "ok", "partial", "failed"})
+# kb_status 의 last_ingest_at 이 세는 것 (D32). 실패한 run 을 세면 실패가
+# 마지막 색인으로 보고된다. 아무도 읽지 않는 값 집합은 틀려도 드러나지 않으므로
+# 이 둘이 kb_status 의 SQL 과 _finish 의 가드에서 실제로 쓰인다.
+INGEST_COUNTED_STATUSES = frozenset({"ok", "partial"})
 LOCK_NAMESPACE = "sillok:ingest"
 # 고정 문구다. project 값을 넣지 않는다 — 고정이어야 검사가 잠글 수 있다 (D32).
 LOCKED_MESSAGE = "ingest already running for this project"
@@ -504,7 +508,13 @@ def _validate_meta(path: str, meta: dict[str, Any]) -> None:
 def _finish(
     conn: psycopg.Connection, run_id: int, status: str, error: str | None, counters: dict[str, int]
 ) -> None:
-    """카운터는 종료 UPDATE 에서 상태와 같은 트랜잭션에 쓴다. 진행 중에는 NULL 이다 (D32)."""
+    """카운터는 종료 UPDATE 에서 상태와 같은 트랜잭션에 쓴다. 진행 중에는 NULL 이다 (D32).
+
+    값 집합 밖의 상태를 쓰면 여기서 막는다. DDL 에 CHECK 를 넣지 않기로 했으므로(D25)
+    그 자리를 지키는 것은 이 가드뿐이다.
+    """
+    if status not in INGEST_STATUSES:
+        raise IngestFailed(f"unknown ingest status: {status!r}")
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE kb_ingest_runs SET status = %(status)s, error = %(error)s, finished_at = now(),"

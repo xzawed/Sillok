@@ -322,6 +322,22 @@ const CASES = [
     mutate: write('src/sillok/_probe.py', 'SQL = "select similarity(a,b)"' + NL),
   },
   {
+    // 단계가 하나 늘 때 세 문서 중 하나만 고치면 게이트가 초록인 채로 옛 단계를 말한다.
+    // 실측으로 한 번 났다 — plan 과 CLAUDE 는 1–5, open-questions 는 1–6 이었다.
+    id: '27b 단계 주장이 세 문서에서 어긋나면 운다',
+    expect: 'fail',
+    mentions: ['단계 주장이 어긋난다', 'docs/plan.md'],
+    mutate: (dir) =>
+      edit(dir, 'CLAUDE.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '1–5단계를 이제 검증할 수 있다')),
+  },
+  {
+    id: '27c 그 문장이 사라져도 운다',
+    expect: 'fail',
+    mentions: ['문장이 없다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/open-questions.md', (s) => s.replace('1–6단계를 이제 검증할 수 있다', '')),
+  },
+  {
     id: '26 문서에서 백틱으로 인용하는 것은 허용한다',
     expect: 'pass',
     // 왜 폐기했는지 적으려면 그 말을 써야 한다.

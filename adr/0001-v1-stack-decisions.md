@@ -79,6 +79,8 @@ D19가 금지하는 것은 CLI가 자기 SQL 계층을 갖는 것이고, 게시�
 ```text
 migrations/001_extensions.sql   CREATE EXTENSION IF NOT EXISTS vector; pg_trgm
 migrations/002_schema.sql       data-model.md 의 DDL
+migrations/003_ingest_counters.sql  kb_ingest_runs.files_deleted (D30)
+migrations/004_event_tsv.sql        kb_events.tsv + GIN (D34)
 ```
 
 DDL 정본은 [data-model.md](../docs/data-model.md)다. 마이그레이션 파일은 그 SQL을 실행할 뿐 **두 번째 스키마 정의가 아니다.**
@@ -306,7 +308,8 @@ D17이 `세 번째 컨테이너 없음`으로 마이그레이션 전용 컨테�
 
 ### D24 `save_event`는 멱등이 아니다
 
-재시도는 행을 하나 더 넣는다. UNIQUE도, `CONFLICT`도, `003`도 없다.
+재시도는 행을 하나 더 넣는다. `kb_events` 에 UNIQUE 도 없고 이 표면은 `CONFLICT` 를 내지 않는다.
+(D24 시점에는 `003` 도 없었다. 그 번호는 뒤에 D30 이 `files_deleted` 로 가져갔고 이 결정과 무관하다.)
 
 **필수 필드로 만든 내용 해시로 접는 안(B)을 버린 이유:** 같은 `project+module+root_cause`가 반복되는 것이
 바로 `repeat_causes`다. 그 행들을 하나로 합치면 **D11이 탐지하려는 대상 자체가 사라진다.**
@@ -581,8 +584,8 @@ gh api repos/xzawed/Sillok/readme -H "Accept: application/vnd.github.html+json"
   같은 제목의 줄이 둘 나온다. 그때 `path` 를 함께 보여 주는 것으로 충분한지 다시 본다
 - **다른 렌더러는 확인하지 않았다.** `gh api` 와 github.com 웹만 봤다. GitLab·Gitea·로컬 뷰어가 front matter 를
   어떻게 다루는지는 이 결정의 근거가 아니다
-- **ingest 는 아직 없다 (5단계).** 유도 규칙은 계약일 뿐 한 번도 실행된 적이 없다 —
-  5단계가 구현할 때까지 이 결정을 지키는 것은 문서 게이트뿐이다
+- ~~**ingest 는 아직 없다 (5단계)**~~ — 5단계가 구현되면서 유도 규칙이 실제로 돈다.
+  게이트 말고도 `scripts/check-index-parity.mjs` 가 두 목록을 대조한다
 - 두 README 가 갈라지는 것을 막는 검사는 여전히 없다. D27 이 남긴 그대로다
 - **Q22** (`kb_documents.repo` 의 의미) 는 이 결정과 무관하게 열려 있다
 
@@ -1602,9 +1605,9 @@ D 번호가 붙어 있지 않았다 — 지금까지 그것은 결정이 아니�
 
 ### D33이 닫지 않는 것
 
-- **Q9는 그대로 열려 있다.** `kb_events` 에 `tsv` 도 GIN 도 없어 **이벤트에는 키워드 경로가 없다.**
-  이 결정은 이벤트 쪽에 병합 공식·`score` 정의·정렬 타이브레이크(`id`)를 주지만
-  **합칠 두 번째 목록을 주지 않는다.** D33만으로는 6단계를 열지 못한다
+- ~~**Q9 미해결**~~ — **D34 가 같은 자리에서 닫았다.** 이 결정은 이벤트 쪽에
+  병합 공식·`score` 정의·정렬 두 갈래를 주지만 **합칠 목록을 주지 않았다.**
+  D34 의 `004` 가 `kb_events.tsv` 를 만들면서 그 목록이 생겼다 — 둘이 함께 6단계를 열었다
 - **`plainto_tsquery` 의 AND 가 재현율을 얼마나 깎는지 재지 않았다.** `임베딩 백필 경로` 가 0건인 것은
   실측했지만 실사용 질의 분포가 없다. 조사가 붙어 다른 토큰이 되는 손실은 `simple` 구성(D14)의 성질이고
   `kb_chunks` 와 `kb_events` 에 똑같이 걸린다 — **v1 은 그것을 받아들인다.**

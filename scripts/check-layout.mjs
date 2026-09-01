@@ -379,6 +379,12 @@ const RETIRED = [
   ['병합 방식 미정', 'D33 이 Q8 을 닫았다'],
   ['남은 집합에 벡터/키워드', 'D34: v1 이벤트는 키워드만이다'],
   ['나중에 만들어도 된다', 'HNSW 를 만들지 않는 결정은 D33 이 소유한다'],
+  // 순차 머지가 남긴 현재형 거짓말. 게이트가 초록인 채로 방문자 README 가 거짓을 말했다.
+  ['is stage 6 and is not built yet', '6단계는 구현됐다'],
+  ['검색 자체는 6단계이고 아직 없습니다', '6단계는 구현됐다'],
+  ['1–5단계를 이제 검증할 수 있다', '1–6단계다'],
+  ['지금은 그 명령이 없다', 'sillok ingest 는 5단계에서 생겼다'],
+  ['Q9는 그대로 열려 있다', 'D34 가 닫았다'],
 ]
 const textish = all.filter(
   (p) =>
@@ -431,6 +437,26 @@ for (const p of trgmish) {
     // 001 은 확장을 설치하는 파일이다. 설치 자체는 D34 가 남기기로 한 것이라 세지 않는다.
     if (body.includes(needle)) fail(`${p} : ${what} "${needle}" — pg_trgm 은 v1 미사용이다 (D34)`)
   }
+}
+
+// 14. "1–N단계를 이제 검증할 수 있다" 가 세 곳에서 같은 N 을 말하는가.
+//     순차 머지가 남기는 부류다 — 단계가 하나 늘 때 세 문서 중 하나만 고치면
+//     게이트는 초록인 채로 방문자 문서가 옛 단계를 말한다. 실측으로 한 번 났다:
+//     plan 과 CLAUDE 는 1–5, open-questions 는 1–6 이었다.
+//     N 이 맞는지는 여기서 보지 않는다 — 셋이 어긋나는 것만 본다. 값의 정본은 plan.md §7 이다.
+const STAGE_CLAIM = /1–(\d+)단계를 이제 검증할 수 있다/
+const stageClaims = []
+for (const p of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
+  const m = readFileSync(join(ROOT, p), 'utf8').match(STAGE_CLAIM)
+  if (!m) fail(`${p} : "1–N단계를 이제 검증할 수 있다" 문장이 없다 — 셋이 함께 움직여야 한다.`)
+  else stageClaims.push([p, m[1]])
+}
+if (stageClaims.length === 3 && new Set(stageClaims.map((s) => s[1])).size !== 1) {
+  fail(
+    '단계 주장이 어긋난다 — ' +
+      stageClaims.map(([p, n]) => `${p}=1–${n}`).join(', ') +
+      ' (정본은 docs/plan.md §7)'
+  )
 }
 
 console.log(`색인 대상 ${indexed.length}개`)
