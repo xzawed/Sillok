@@ -287,13 +287,19 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
   // 여기서 유도를 멈추면(예전 코드) 마지막 Q 가 닫히는 순간 검사의 절반이 조용히 은퇴하고
   // "셋이 사이좋게 틀림" 이 다시 통과한다 — 그것이 이 검사의 존재 이유였다.
   // gates 의 최대값(8)을 쓰면 안 된다. Q 가 걸린 적 없는 9·10단계가 영원히 빠진다.
-  const h7 = plan.indexOf('## 7.')
-  const h8 = plan.indexOf('## 8.')
-  const section7 = h7 >= 0 && h8 > h7 ? plan.slice(h7, h8) : ''
+  // 제목은 **줄머리에 고정**한다. indexOf 로 찾으면 산문 속의 "## 7." 이나
+  // "### 7." 에도 걸려, 실패하지 않은 채 엉뚱한 구간을 잘라 온다.
+  const h7 = plan.search(/^## 7\./m)
+  const h8 = plan.search(/^## 8\./m)
+  // 펜스·코드 스팬은 뺀다 (검사 8·10·11·14 와 같은 규칙). 예시로 적은 "11. …" 한 줄이
+  // 조용히 N 을 올리면, 아직 열지 않은 단계를 게이트가 요구하게 된다.
+  const section7 = h7 >= 0 && h8 > h7 ? stripCode(plan.slice(h7, h8)).prose : ''
   const stepNos = [...section7.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]))
   const lastStep = stepNos.length ? Math.max(...stepNos) : 0
-  // 1..last 로 이어지지 않으면 목록을 잘못 읽은 것이다. 조용히 넘기면 N 이 틀린 채 강요된다.
-  if (!lastStep || new Set(stepNos).size !== lastStep) {
+  // **1,2,…,last 와 정확히 같아야 한다.** 최대값과 개수만 보면 마지막 항목이
+  // 하나 내려간 경우(10 → 9 가 둘)가 빠져나가고 N 이 조용히 하나 작아진다.
+  const expectedSteps = Array.from({ length: lastStep }, (_, i) => i + 1).join(',')
+  if (!lastStep || stepNos.join(',') !== expectedSteps) {
     fail(
       `${planPath} §7 : 번호 목록을 읽지 못했다 (${stepNos.join(',') || '없음'}). ` +
         '검사 14 가 쓸 마지막 단계를 정할 수 없다.'

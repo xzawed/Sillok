@@ -387,6 +387,33 @@ const CASES = [
       edit(dir, 'docs/plan.md', (t) => t.replace(NL + '9. `kb_query_logs` 기록', NL + '11. `kb_query_logs` 기록')),
   },
   {
+    // 최대값과 개수만 보면 이것이 빠져나간다: 10 이 사라지고 9 가 둘이면
+    // 개수도 최대값도 9 라서 이어져 보이는데, N 이 조용히 하나 작아진다.
+    id: '27i §7 마지막 번호가 하나 내려가도 운다',
+    expect: 'fail',
+    mentions: ['번호 목록을 읽지 못했다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/plan.md', (t) => t.replace(NL + '10. 스모크', NL + '9. 스모크')),
+  },
+  {
+    // lastStep 은 **막힌 단계가 없을 때만** 쓰인다. 펜스만 주입하면 그 가지에 닿지 못하고
+    // stripCode 를 빼도 초록이다 — 실측으로 확인했다. Q 를 전부 닫아 그 가지로 들어간 뒤에 본다.
+    // 기대 메시지가 1–10 인 것이 요점이다: 펜스 안의 11 을 세면 1–11 이 되고 이 케이스가 운다.
+    id: '27j §7 펜스 안의 번호는 마지막 단계로 세지 않는다',
+    expect: 'fail',
+    mentions: ['Q 게이트로는 1–10단계다'],
+    mutate: (dir) => {
+      edit(dir, 'docs/plan.md', (t) =>
+        t.replace(NL + '10. 스모크', NL + '10. 스모크' + NL + NL + F3 + 'text' + NL + '11. 예시일 뿐이다' + NL + F3)
+      )
+      edit(dir, 'docs/open-questions.md', (t) =>
+        t.replace(/^(\*\*Q\d+\.[^\n]*)$/gm, (line) =>
+          line.includes('해결 →') ? line : line + ' — **해결 → D99**'
+        )
+      )
+    },
+  },
+  {
     // 펜스 안의 인용은 주장이 아니다. 빼지 않으면 예시 하나가 N 을 정한다.
     id: '27f 코드 펜스 안의 옛 문장은 주장으로 세지 않는다',
     expect: 'pass',
