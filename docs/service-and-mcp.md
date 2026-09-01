@@ -84,6 +84,9 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 응답 `data.results[]`: `path`, `heading_path`, `excerpt`, `commit_sha`, `status`, `score`
 
+**`query`는 필수다.** 없거나 공백뿐이면 `VALIDATION`이다 (D33) — 문서 검색에는 질의 말고 신호가 없어
+필터만으로는 "관련 문서 전부"가 되고 그것은 설계 위반이다. `search_events`는 반대다.
+
 `heading_path`는 그 청크가 속한 절까지의 제목을 상위부터 ` > `로 이은 문자열이다 (D30).
 첫 제목 앞 서두는 `null`이고, 레벨을 건너뛴 문서는 빈 칸을 채우지 않는다. 길이 상한은 없다.
 `commit_sha`는 D30에 따라 **v1 내내 빈 문자열**이다 — 필드는 계약이고 값이 생기면 채우는 자리다.
@@ -116,6 +119,8 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 키워드는 `title`·`summary`·`root_cause`·`resolution` 네 필드를 이은 `tsv`에 건다.
 **뒤의 둘로 걸린 히트는 응답만 보고 설명할 수 없다** — 그 두 필드가 응답에 없다.
 원문은 `get_event`(7단계)에서 본다.
+**`query`는 선택이다.** 없거나 공백뿐이면 필터 집합이 그대로 결과이고 `score`는 `null`이다 (D33).
+순서는 `occurred_at DESC, id DESC`다. `query`가 있으면 `ts_rank` 순이고 같은 두 키가 타이브레이크다.
 `query`에 값이 있는데 렉심이 하나도 나오지 않으면 결과는 0건이다 — 필터 집합을 돌려주지 않는다.
 
 ### 단건
