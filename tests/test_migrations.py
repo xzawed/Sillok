@@ -29,7 +29,12 @@ TABLES = [
 def test_discover_orders_by_version():
     found = migrations.discover()
     assert [m.version for m in found] == sorted(m.version for m in found)
-    assert [m.name for m in found] == ["001_extensions.sql", "002_schema.sql", "003_ingest_counters.sql"]
+    assert [m.name for m in found] == [
+        "001_extensions.sql",
+        "002_schema.sql",
+        "003_ingest_counters.sql",
+        "004_event_tsv.sql",
+    ]
 
 
 def test_extensions_run_before_schema():
@@ -124,7 +129,12 @@ def conn():
 
 @needs_db
 def test_apply_returns_what_it_applied(applied):
-    assert [m.name for m in applied] == ["001_extensions.sql", "002_schema.sql", "003_ingest_counters.sql"]
+    assert [m.name for m in applied] == [
+        "001_extensions.sql",
+        "002_schema.sql",
+        "003_ingest_counters.sql",
+        "004_event_tsv.sql",
+    ]
 
 
 @needs_db
@@ -297,3 +307,50 @@ def test_ingest_run_counters_are_separate(applied, conn):
         """
     ).fetchall()
     assert sorted(r[0] for r in rows) == ["files_changed", "files_deleted", "files_seen"]
+
+
+@needs_db
+def test_event_tsv_is_generated_from_four_fields(applied, conn):
+    """D34. 네 필드를 전부 coalesce 로 감싼다 — 하나가 NULL 이면 tsv 가 통째로 NULL 이 된다.
+
+    그러면 그 행은 어떤 질의에도 걸리지 않고 오류는 어디에도 없다.
+    """
+    expr = conn.execute(
+        """
+        SELECT pg_get_expr(d.adbin, d.adrelid) AS e
+        FROM pg_attrdef d JOIN pg_attribute a
+          ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+        WHERE d.adrelid = 'kb_events'::regclass AND a.attname = 'tsv'
+        """
+    ).fetchone()[0]
+    for field in ("title", "summary", "root_cause", "resolution"):
+        assert f"COALESCE({field}" in expr, f"{field} 가 coalesce 로 감싸이지 않았다"
+    assert "'simple'" in expr
+
+
+@needs_db
+def test_event_tsv_survives_a_null_field(applied, conn):
+    """root_cause 가 NULL 인 이벤트도 title 의 낱말로 찾힌다."""
+    conn.execute(
+        "INSERT INTO kb_events (project, kind, title, summary, result, occurred_at)"
+        " VALUES ('t_mig_tsv', 'failure', '락 경쟁', '요약', 'failure', now())"
+    )
+    got = conn.execute(
+        "SELECT count(*) FROM kb_events"
+        " WHERE project = 't_mig_tsv' AND tsv @@ websearch_to_tsquery('simple', '락')"
+    ).fetchone()[0]
+    assert got == 1
+
+
+@needs_db
+def test_no_trgm_index_exists(applied, conn):
+    """D34. pg_trgm 은 v1 미사용이다. 확장 설치만 보는 검사의 짝이다."""
+    rows = conn.execute(
+        """
+        SELECT c.relname FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid
+        JOIN pg_opclass o ON o.oid = ANY(i.indclass)
+        WHERE o.opcname IN ('gin_trgm_ops', 'gist_trgm_ops')
+        """
+    ).fetchall()
+    assert rows == []

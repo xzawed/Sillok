@@ -146,10 +146,10 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 
 ## 검색 규칙
 
-- 문서: 벡터 유사도 + `tsv` 키워드, 가능하면 RRF 병합 (병합 방식 미정 — Q8)
-- 이벤트: **필터(project, kind, module, 기간)를 먼저** 걸고 남은 집합에 벡터/키워드
+- 문서: 벡터 유사도 + `tsv` 키워드를 RRF(`k=60`)로 병합 (정의는 D33)
+- 이벤트: **필터(project, kind, module, 기간)를 먼저** 걸고 남은 집합에 키워드만 (D34)
 - 식별자·에러코드·날짜·건수는 벡터로 풀지 않는다 (필터/SQL)
-- 이벤트 임베딩은 `summary`만
+- 이벤트 임베딩은 `summary`만 — 다만 **v1 은 이벤트를 임베딩하지 않는다** (D34)
 - 재색인은 `(project, repo, path)` 단위로 청크 삭제 후 insert
 - 검색 0건도 `kb_query_logs`에 `hit_count=0`으로 남긴다 (v1 성공 조건)
 

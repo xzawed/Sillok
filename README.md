@@ -140,7 +140,8 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
   MCP and any human UI must go through the HTTP API; the CLI calls the same functions in-process.
   What is forbidden is a second SQL layer anywhere.
 - **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column
-  stays NULL and search will use `tsv` keywords only.
+  stays NULL and document search will use `tsv` keywords only. Event search is keywords only
+  either way — v1 does not embed events.
   Search itself is stage 6 and is not built yet.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
 

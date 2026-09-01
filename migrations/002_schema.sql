@@ -5,9 +5,9 @@
 --
 -- 재기동이 안전해야 하므로 전부 IF NOT EXISTS 다 (D17).
 --
--- HNSW 인덱스는 여기 없다. data-model.md 와 plan.md §6 이
--- "행이 적을 때 이득이 없다. v1 에서 나중에 만들어도 된다" 로 명시적으로 허용한다.
--- 만들 때는 다음 번호로 붙인다 (003 은 D30 의 files_deleted 가 가져갔다).
+-- HNSW 인덱스는 여기 없다. v1 은 만들지 않는다 (D33) — 행이 적어 이득이 없고,
+-- kb_events 쪽은 채울 값이 아예 없다 (D34: v1 은 이벤트를 임베딩하지 않는다).
+-- 만들기로 하는 결정은 별도 번호를 받는다.
 
 -- 문서 헤더 — Git 현재 문서의 인덱스. 원문은 Git.
 CREATE TABLE IF NOT EXISTS kb_documents (
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS kb_events (
   source            text NOT NULL DEFAULT 'agent',
   related_doc_path  text,
   payload           jsonb NOT NULL DEFAULT '{}'::jsonb,
-  embedding         vector(1536),  -- text-embedding-3-small, summary 만
+  embedding         vector(1536),  -- text-embedding-3-small, summary 만. v1 미충전 (D34)
   created_at        timestamptz NOT NULL DEFAULT now(),
   created_by        text
 );

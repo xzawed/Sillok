@@ -134,13 +134,14 @@ Service 기본 `http://127.0.0.1:8080`.
 ## 6. 데이터 (요약)
 
 테이블: `kb_documents`, `kb_chunks`, `kb_events`, `kb_ingest_runs`, `kb_query_logs`.
-DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는 행이 적을 때 이득이 없으므로 나중에 만들어도 된다.
+DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 **v1 은 HNSW 를 만들지 않는다 (D33)** —
+행이 적어 이득이 없고,  쪽은 채울 값이 아예 없다 (D34).
 
 - 문서 원본은 Git. DB는 해시·청크 인덱스
 - 이벤트는 Git에 없는 원장. **백업 대상**
 - 재색인: `(project, repo, path)` 단위로 청크 삭제 후 insert
 - 검색: 벡터 + tsv. 식별자·날짜·건수는 필터/SQL
-- 이벤트 임베딩은 `summary`만
+- 이벤트 임베딩은 `summary`만 — 다만 **v1 은 이벤트를 임베딩하지 않는다** (D34)
 
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 

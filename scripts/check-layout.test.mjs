@@ -128,10 +128,20 @@ const CASES = [
     mutate: write('src/sillok/_probe.py', '@app.get("/v1/files")\ndef s(): pass\n'),
   },
   {
-    id: '10 6단계 라우트',
+    // 6단계(Q8·Q9)가 D33–D34 로 닫히면서 검색 라우트는 더 이상 막히지 않는다.
+    // 케이스 11 과 같은 형태로 바꾼다 — Q 를 다시 열어 게이트가 문서를 따라가는지 본다.
+    id: '10 Q8 을 다시 열면 6단계 라우트가 막힌다',
     expect: 'fail',
-    mentions: ['6단계', 'Q8', 'Q9'],
-    mutate: write('src/sillok/_probe.py', '@app.post("/v1/search/docs")\ndef s(): pass\n'),
+    mentions: ['6단계', 'Q8', '/v1/search/docs'],
+    mutate: (dir) => {
+      edit(dir, 'docs/open-questions.md', (s) => s.replace(' — **해결 → D33**', ''))
+      write('src/sillok/_probe.py', '@app.post("/v1/search/docs")' + NL + 'def s(): pass' + NL)(dir)
+    },
+  },
+  {
+    id: '10b 6단계 라우트는 이제 통과한다',
+    expect: 'pass',
+    mutate: write('src/sillok/_probe.py', '@app.post("/v1/search/docs")' + NL + 'def s(): pass' + NL),
   },
   {
     // 5단계(Q6·Q7·Q10)가 D30–D32 로 닫히면서 ingest 는 더 이상 막히지 않는다.
@@ -172,20 +182,20 @@ const CASES = [
     ),
   },
   {
-    // /v1/ingest 는 5단계라 이제 안 막힌다. 같은 문법을 아직 막힌 단계로 옮긴다.
+    // /v1/search/* 는 6단계라 이제 안 막힌다. 같은 문법을 아직 막힌 단계로 옮긴다.
     id: '14 include_router(prefix=) + 상대 경로',
     expect: 'fail',
-    mentions: ['6단계', '/v1/search/docs'],
+    mentions: ['7단계', '/v1/docs/proposals'],
     mutate: write(
       'src/sillok/_probe.py',
-      'app.include_router(r, prefix="/v1")' + NL + NL + '@r.post("/search/docs")' + NL + 'def s(): pass' + NL
+      'app.include_router(r, prefix="/v1")' + NL + NL + '@r.post("/docs/proposals")' + NL + 'def s(): pass' + NL
     ),
   },
   {
     id: '15 path= 키워드 인자',
     expect: 'fail',
-    mentions: ['6단계', '/v1/search/events'],
-    mutate: write('src/sillok/_probe.py', '@app.get(path="/v1/search/events")\ndef s(): pass\n'),
+    mentions: ['7단계', '/v1/events/'],
+    mutate: write('src/sillok/_probe.py', '@app.get(path="/v1/events/1")' + NL + 'def s(): pass' + NL),
   },
   {
     id: '16 add_api_route',
@@ -296,6 +306,20 @@ const CASES = [
     expect: 'fail',
     mentions: ['폐기된 문구', 'D32'],
     mutate: append('docs/spec.md', NL + 'CONFLICT 는 예약. v1은 발신하지 않는다.' + NL),
+  },
+  {
+    // D34 는 확장을 선언만 하고 쓰지 않기로 정했다. 검사가 없으면 다음 사람이 조용히 쓴다.
+    // 인덱스가 실제로 들어올 자리는 migrations/ 라 거기까지 본다.
+    id: '26b migrations 에 trgm 인덱스가 들어오면 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용', 'gin_trgm_ops'],
+    mutate: write('migrations/900_probe.sql', 'CREATE INDEX x ON t USING gin (c gin_trgm_ops);' + NL),
+  },
+  {
+    id: '26c src 에 trgm 유사도 함수가 들어와도 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용'],
+    mutate: write('src/sillok/_probe.py', 'SQL = "select similarity(a,b)"' + NL),
   },
   {
     id: '26 문서에서 백틱으로 인용하는 것은 허용한다',
