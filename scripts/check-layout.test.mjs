@@ -431,6 +431,13 @@ const CASES = [
     },
   },
   {
+    // 세 문서 밖의 네 번째 파일이 옛 단계를 말하는 부류. 필수는 셋이지만 검사는 셋에서 끝나지 않는다.
+    id: '27k 세 문서 밖에서 옛 단계를 말해도 운다',
+    expect: 'fail',
+    mentions: ['docs/spec.md', `Q 게이트로는 1–${STAGE_NOW}단계다`],
+    mutate: append('docs/spec.md', NL + '옛 문장: ' + claim(4) + '.' + NL),
+  },
+  {
     // 펜스 안의 인용은 주장이 아니다. 빼지 않으면 예시 하나가 N 을 정한다.
     id: '27f 코드 펜스 안의 옛 문장은 주장으로 세지 않는다',
     expect: 'pass',

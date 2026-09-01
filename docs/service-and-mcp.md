@@ -51,7 +51,7 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 | `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락 |
 | `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
 | `NOT_FOUND` | 404 | **하나를 지목한 조회**에 답이 없을 때. 집합 질의는 404가 아니라 빈 결과다 (D35) |
-| `CONFLICT` | 409 | 같은 project 의 ingest 가 이미 돌고 있다 (D32). v1의 유일한 발신자이고 `message`는 고정 문구 `ingest already running for this project` |
+| `CONFLICT` | 409 | 발신자가 **둘**이다. ① 같은 project 의 ingest 가 이미 돌고 있다 (D32) — `message`는 고정 문구 `ingest already running for this project`. ② `save_doc` 의 `base_hash` 가 현재 내용과 다르다 (D38). **①의 고정 문구를 ②에 쓰지 않는다** |
 | `INTERNAL` | 500 | 서버 결함. `message`는 고정 문자열 `internal error` |
 
 `INTERNAL`에 예외 문구·트레이스백·경로를 싣지 않는다. DSN·`SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`가 새는 길이다.

@@ -427,6 +427,7 @@ const RETIRED = [
   ['1–5단계를 이제 검증할 수 있다', '1–6단계다'],
   ['지금은 그 명령이 없다', 'sillok ingest 는 5단계에서 생겼다'],
   ['Q9는 그대로 열려 있다', 'D34 가 닫았다'],
+  ['v1의 유일한 발신자', 'D38 의 base_hash 불일치가 CONFLICT 의 둘째 발신자다'],
 ]
 const textish = all.filter(
   (p) =>
@@ -512,7 +513,7 @@ for (const p of STAGE_CLAIM_FILES) {
   stageClaims.push([p, distinct[0]])
 }
 if (
-  stageClaims.length === STAGE_CLAIM_FILES.length &&
+  stageClaims.length === STAGE_CLAIM_FILES.length && // 아래에서 늘어나기 **전**이다
   new Set(stageClaims.map((s) => s[1])).size !== 1
 ) {
   fail(
@@ -521,6 +522,16 @@ if (
       ' (정본은 docs/plan.md §7)'
   )
 }
+// 세 문서 **밖에서도** 같은 주장을 할 수 있다. 거기까지 보지 않으면
+// "네 번째 파일이 옛 단계를 말한다" 가 그대로 남는다. 필수는 셋이고, 나머지는 발견되면 검사한다.
+for (const p of md) {
+  if (STAGE_CLAIM_FILES.includes(p)) continue
+  const { prose } = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  for (const n of new Set([...prose.matchAll(STAGE_CLAIM)].map((m) => Number(m[1])))) {
+    stageClaims.push([p, n])
+  }
+}
+
 // 셋이 같아도 그 값이 틀릴 수 있다. Q 게이트가 유도한 값과 맞춘다.
 for (const [p, n] of stageClaims) {
   if (verifiableThrough !== null && n !== verifiableThrough) {
