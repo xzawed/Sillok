@@ -670,13 +670,16 @@ def _keyword_arm(cur, where: str, params: dict[str, Any], query: str) -> list[se
     rows = cur.execute(
         f"""
         SELECT c.id, d.repo, d.path, c.chunk_idx, d.id AS document_id,
-               rank() OVER (ORDER BY ts_rank(c.tsv, tq.q, 1) DESC,
-                            d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx) AS rk
+               -- rank() 는 점수 식만 본다. 타이브레이크를 여기 넣으면 rank() 가
+               -- row_number() 와 같아져 알파벳 순서가 그대로 점수가 된다 (D33 §2).
+               rank() OVER (ORDER BY ts_rank(c.tsv, tq.q, 1) DESC) AS rk
         FROM kb_chunks c
         JOIN kb_documents d ON d.id = c.document_id,
              plainto_tsquery('{TS_CONFIG}', %(query)s) AS tq(q)
         WHERE {where} AND c.tsv @@ tq.q
-        ORDER BY rk
+        -- 풀에 들어갈 60행을 고르는 정렬은 총순서여야 한다.
+        ORDER BY ts_rank(c.tsv, tq.q, 1) DESC,
+                 d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx
         LIMIT {search.CANDIDATE_POOL}
         """,
         {**params, "query": query},
@@ -696,11 +699,11 @@ def _vector_arm(cur, where: str, params: dict[str, Any], vector: str) -> list[se
     rows = cur.execute(
         f"""
         SELECT c.id, d.repo, d.path, c.chunk_idx, d.id AS document_id,
-               rank() OVER (ORDER BY c.embedding <=> %(v)s::vector ASC,
-                            d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx) AS rk
+               rank() OVER (ORDER BY c.embedding <=> %(v)s::vector ASC) AS rk
         FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
         WHERE {where} AND c.embedding IS NOT NULL
-        ORDER BY rk
+        ORDER BY c.embedding <=> %(v)s::vector ASC,
+                 d.repo COLLATE "C", d.path COLLATE "C", c.chunk_idx
         LIMIT {search.CANDIDATE_POOL}
         """,
         {**params, "v": vector},
@@ -741,47 +744,54 @@ def search_docs(dsn: str, body: dict[str, Any], api_key: str = "") -> dict[str, 
 
 
 def _decorate(cur, picked: list[dict], query: str, matched: set) -> list[dict[str, Any]]:
-    """`excerpt` 는 `LIMIT` 뒤에만 만든다. 후보 풀에 걸면 원문을 그만큼 다시 파싱한다."""
-    out: list[dict[str, Any]] = []
-    for row in picked:
-        key = (row["repo"], row["path"], row["chunk_idx"])
-        # 키워드로 걸리지 않은 행에는 ts_headline 을 쓰지 않는다 — 매칭이 없으면
-        # 출력 길이가 통제되지 않는다 (실측: 2자짜리 발췌). 그 행은 앞머리를 쓴다.
-        if key in matched:
-            got = cur.execute(
-                f"""
-                SELECT ts_headline('{TS_CONFIG}', {EMBED_INPUT_SQL},
-                         plainto_tsquery('{TS_CONFIG}', %(query)s), %(opts)s) AS excerpt,
-                       d.commit_sha, d.status
-                FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
-                WHERE c.id = %(id)s
-                """,
-                {"id": row["id"], "query": query, "opts": HEADLINE_OPTS},
-            ).fetchone()
-        else:
-            got = cur.execute(
-                "SELECT left(c.content, %(n)s) AS excerpt, d.commit_sha, d.status"
-                " FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
-                " WHERE c.id = %(id)s",
-                {"id": row["id"], "n": search.EXCERPT_MAX},
-            ).fetchone()
-        out.append(
-            {
-                "path": row["path"],
-                "heading_path": _heading_path(cur, row["id"]),
-                "excerpt": search.clip_excerpt(got["excerpt"]),
-                "commit_sha": got["commit_sha"],
-                "status": got["status"],
-                "score": row["score"],
-            }
-        )
-    return out
+    """`excerpt` 는 `LIMIT` 뒤에만 만든다. 후보 풀에 걸면 원문을 그만큼 다시 파싱한다.
 
+    **한 질의로 모아 온다.** 행마다 부르면 최대 열두 번이고, `WHERE c.id = ANY(…)` 는
+    순서를 보존하지 않으므로 병합 순서대로 다시 늘어놓는다 (D33 §9).
+    """
+    if not picked:
+        return []
 
-def _heading_path(cur, chunk_id: int) -> str | None:
-    return cur.execute(
-        "SELECT heading_path FROM kb_chunks WHERE id = %s", (chunk_id,)
-    ).fetchone()["heading_path"]
+    ids = [row["id"] for row in picked]
+    # 키워드로 걸리지 않은 행에는 ts_headline 을 쓰지 않는다 — 매칭이 없으면
+    # 출력 길이가 통제되지 않는다 (실측: 2자짜리 발췌). 그 행은 앞머리를 쓴다.
+    keyword_ids = [
+        row["id"] for row in picked if (row["repo"], row["path"], row["chunk_idx"]) in matched
+    ]
+    rows = cur.execute(
+        f"""
+        SELECT c.id, c.heading_path, d.commit_sha, d.status,
+               CASE WHEN c.id = ANY(%(hit)s)
+                    THEN ts_headline('{TS_CONFIG}', {EMBED_INPUT_SQL},
+                           plainto_tsquery('{TS_CONFIG}', %(query)s), %(opts)s)
+                    -- 상한보다 한 글자 더 가져온다. 그래야 clip_excerpt 가 잘렸는지 알고
+                    -- 말줄임표를 붙인다 — left(…, 800) 이면 절단과 짧은 청크가 같아 보인다.
+                    ELSE left(c.content, %(n)s)
+               END AS excerpt
+        FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
+        WHERE c.id = ANY(%(ids)s)
+        """,
+        {
+            "ids": ids,
+            "hit": keyword_ids,
+            "query": query,
+            "opts": HEADLINE_OPTS,
+            "n": search.EXCERPT_MAX + 1,
+        },
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
+
+    return [
+        {
+            "path": row["path"],
+            "heading_path": by_id[row["id"]]["heading_path"],
+            "excerpt": search.clip_excerpt(by_id[row["id"]]["excerpt"]),
+            "commit_sha": by_id[row["id"]]["commit_sha"],
+            "status": by_id[row["id"]]["status"],
+            "score": row["score"],
+        }
+        for row in picked
+    ]
 
 
 def _event_search_filters(body: dict[str, Any], project: str) -> tuple[str, dict[str, Any]]:
@@ -824,8 +834,8 @@ def search_events(dsn: str, body: dict[str, Any]) -> dict[str, Any]:
         if query is None:
             rows = cur.execute(
                 f"SELECT {fields}, NULL::float8 AS score FROM kb_events"
-                f" WHERE {where} ORDER BY occurred_at DESC, id DESC LIMIT {top_k}",
-                params,
+                f" WHERE {where} ORDER BY occurred_at DESC, id DESC LIMIT %(top_k)s",
+                {**params, "top_k": top_k},
             ).fetchall()
         else:
             rows = cur.execute(
@@ -836,9 +846,9 @@ def search_events(dsn: str, body: dict[str, Any]) -> dict[str, Any]:
                 FROM kb_events, websearch_to_tsquery('{TS_CONFIG}', %(query)s) AS tq(q)
                 WHERE {where} AND tsv @@ tq.q
                 ORDER BY rk
-                LIMIT {top_k}
+                LIMIT %(top_k)s
                 """,
-                {**params, "query": query},
+                {**params, "query": query, "top_k": top_k},
             ).fetchall()
 
     results = []

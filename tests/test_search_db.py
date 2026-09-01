@@ -337,3 +337,22 @@ def test_http_empty_result_is_two_hundred_with_an_empty_array(indexed):
     res = _client().post("/v1/search/docs", json={"project": PROJECT, "query": "없는낱말zzz"})
     assert res.status_code == 200
     assert res.json() == {"ok": True, "data": {"results": []}}
+
+
+def test_sql_rank_keeps_ties_as_ties(indexed, tmp_path, db):
+    """D33 §2. `rank()` 에 타이브레이크를 넣으면 `row_number()` 와 같아져
+
+    **동점이 사라지고 알파벳 순서가 그대로 점수가 된다.** 그것이 이 결정이 막으려는 것이다.
+    같은 텍스트를 가진 두 문서는 `ts_rank` 가 같으므로 `score` 도 같아야 한다.
+    """
+    for name in ("aaa", "zzz"):
+        (tmp_path / "docs" / f"{name}.md").write_text(
+            FM + "# 같음\n\n동점낱말 본문이 완전히 같다\n", encoding="utf-8"
+        )
+    service.ingest(DSN, PROJECT, str(tmp_path))
+
+    got = docs({"query": "동점낱말", "top_k": 12})
+    assert {r["path"] for r in got} == {"docs/aaa.md", "docs/zzz.md"}
+    assert got[0]["score"] == got[1]["score"], "타이브레이크가 점수로 샜다"
+    # 순서는 여전히 총순서다 — 점수가 같아도 경로가 자른다.
+    assert [r["path"] for r in got] == ["docs/aaa.md", "docs/zzz.md"]
