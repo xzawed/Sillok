@@ -285,8 +285,9 @@ def test_hnsw_is_absent_in_v1(applied, conn):
 def test_ingest_run_counters_are_separate(applied, conn):
     """D30. 삭제를 files_changed 에 접으면 가장 파괴적인 동작이 원장에서 사라진다.
 
-    003 이 더한 컬럼이다. 이 검사가 없으면 test 이미지의 구운 migrations/ 가
-    낡아도 아무도 비명을 지르지 않는다 — D28 이 예고한 부류이고 실제로 한 번 났다.
+    003 이 더한 컬럼이다. 이 검사가 무는 것은 "003 이 돌았는데 컬럼이 없다" 하나다 —
+    이미지가 낡아 003 을 못 본 것은 위의 discover·apply 이름 목록이 잡는다.
+    공유 db_data 에 컬럼이 이미 있으면 이 단언만으로는 조용히 통과한다.
     """
     rows = conn.execute(
         """

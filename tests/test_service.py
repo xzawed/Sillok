@@ -131,7 +131,8 @@ def db():
 
 
 def _wipe(db, project):
-    for table in ("kb_events", "kb_ingest_runs"):
+    # kb_documents 는 청크를 ON DELETE CASCADE 로 끌고 간다.
+    for table in ("kb_events", "kb_ingest_runs", "kb_documents"):
         db.execute(f"DELETE FROM {table} WHERE project = %s", (project,))
     db.commit()
 
@@ -277,8 +278,38 @@ def test_status_ignores_failed_ingest_runs(db, clean_project):
     """D32. 실패한 run 을 세면 실패가 마지막 색인으로 보고된다."""
     _add_run(db, clean_project, "failed")
     assert service.kb_status(DSN, clean_project)["last_ingest_at"] is None
-    _add_run(db, clean_project, "ok")
+    # partial 은 텍스트 색인이 끝까지 간 run 이다. 세지 않으면 그것도 거짓말이 된다.
+    _add_run(db, clean_project, "partial")
     assert service.kb_status(DSN, clean_project)["last_ingest_at"] is not None
+
+
+@needs_db
+def test_status_counts_chunks_without_embedding(db, clean_project):
+    """D31. 빈 project 의 0 은 SQL 을 증명하지 못한다 — 틀린 FROM 도 0 을 준다."""
+    doc = db.execute(
+        "INSERT INTO kb_documents (project, path, content_hash)"
+        " VALUES (%s, %s, %s) RETURNING id",
+        (clean_project, "docs/x.md", "h"),
+    ).fetchone()[0]  # db 픽스처는 dict_row 가 아니다
+    db.execute(
+        "INSERT INTO kb_chunks (document_id, chunk_idx, content) VALUES (%s, 0, %s), (%s, 1, %s)",
+        (doc, "가", doc, "나"),
+    )
+    db.commit()
+
+    status = service.kb_status(DSN, clean_project)
+    assert status["chunks"] == 2
+    assert status["chunks_without_embedding"] == 2
+
+    db.execute(
+        "UPDATE kb_chunks SET embedding = %s WHERE document_id = %s AND chunk_idx = 0",
+        ("[" + ",".join(["0"] * 1536) + "]", doc),
+    )
+    db.commit()
+
+    status = service.kb_status(DSN, clean_project)
+    assert status["chunks"] == 2
+    assert status["chunks_without_embedding"] == 1
 
 
 @needs_db

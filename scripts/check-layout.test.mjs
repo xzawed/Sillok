@@ -139,7 +139,7 @@ const CASES = [
     // 그래서 **Q 를 다시 열어** 분기가 살아 있는지 본다. 게이트가 문서를 따라간다는 증거다.
     id: '11 Q6 를 다시 열면 CLI ingest 가 막힌다',
     expect: 'fail',
-    mentions: ['5단계', 'Q6'],
+    mentions: ['5단계', 'Q6', 'CLI ingest'],
     mutate: (dir) => {
       edit(dir, 'docs/open-questions.md', (s) => s.replace(' — **해결 → D30**', ''))
       write('src/sillok/_probe.py', 'sub.add_parser("ingest")' + NL)(dir)
@@ -388,6 +388,16 @@ const META = [
     id: 'M6 검사 3(front matter 필수)을 끄면 docs 문서의 결손이 통과한다',
     disable: (s) => s.replace('\nfor (const p of indexed) {', '\nfor (const p of []) {'),
     inject: dropFM('docs/spec.md'),
+  },
+  {
+    // 케이스 11 은 Q 를 다시 열어 CLI 분기를 깨운다. 그 분기를 끄면 통과해야 한다 —
+    // 통과하지 않으면 케이스 11 이 다른 검사 때문에 붉은불이었다는 뜻이다.
+    id: 'M7 검사 9 의 CLI 분기를 끄면 Q6 재개방 주입이 통과한다',
+    disable: (s) => s.replace('const step = CLI_STEP[m[1]]', 'const step = undefined'),
+    inject: (dir) => {
+      edit(dir, 'docs/open-questions.md', (s) => s.replace(' — **해결 → D30**', ''))
+      write('src/sillok/_probe.py', 'sub.add_parser("ingest")' + NL)(dir)
+    },
   },
 ]
 

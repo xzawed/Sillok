@@ -7,7 +7,7 @@
 --
 -- HNSW 인덱스는 여기 없다. data-model.md 와 plan.md §6 이
 -- "행이 적을 때 이득이 없다. v1 에서 나중에 만들어도 된다" 로 명시적으로 허용한다.
--- 만들 때는 003 으로 붙인다.
+-- 만들 때는 다음 번호로 붙인다 (003 은 D30 의 files_deleted 가 가져갔다).
 
 -- 문서 헤더 — Git 현재 문서의 인덱스. 원문은 Git.
 CREATE TABLE IF NOT EXISTS kb_documents (
