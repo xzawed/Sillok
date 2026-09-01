@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Sillok 저장소 배치 검증.
 // 이 레포가 자기 색인 계약(D9: docs/**, 루트 README*, adr/**)을 지키는지 검사한다.
-// sillok ingest 가 생기기 전까지 "색인 0건이 정상인지 버그인지" 구분하는 유일한 수단이다.
+// "색인 0건이 정상인지 버그인지" 를 가르는 기준선이다 — 여기가 **기대**다.
+// ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
@@ -196,6 +197,10 @@ for (const p of md) {
   }
 }
 
+// 검사 14 가 쓸 값. Q 게이트가 이미 아는 것에서 유도한다 — 사실을 두 번 적지 않는다.
+let verifiableThrough = null
+let stageReason = ''
+
 // 9. Q 게이트 — 단계를 막는 질문이 열려 있는데 그 단계의 표면이 코드에 있는가.
 //    plan.md §7 이 "n단계 전에 Qx·Qy" 를 소유한다. 여기서는 그 문장을 읽어 강제만 한다.
 //    문장을 고치면 검사가 따라온다 — 사실을 두 곳에 적지 않기 위해서다.
@@ -268,6 +273,43 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
           'Q 가 해결됐더라도 절을 지우지 말고 남긴다 (해결 표시는 open-questions.md 가 한다).'
       )
     }
+  }
+
+  // "1–N단계를 이제 검증할 수 있다" 의 N 은 여기서 나온다.
+  // **막힌 가장 이른 단계 바로 앞**이 N 이다 — 7단계가 막혀 있으면 8단계 Q 가 다 풀려도 1–6 이다.
+  // "Q 가 다 풀린 단계의 **개수**" 가 아니다: 1–N 은 1부터 이어지는 구간이지 세는 값이 아니고,
+  // 뒤 단계만 열리는 것은 §7 이 금지하는 건너뛰기다.
+  const blockedSteps = [...gates.keys()]
+    .filter((step) => gates.get(step).some((q) => !resolved.has(q)))
+    .toSorted((a, b) => a - b)
+
+  // 막힌 단계가 없을 때는 §7 목록의 **마지막 단계**가 N 이다.
+  // 여기서 유도를 멈추면(예전 코드) 마지막 Q 가 닫히는 순간 검사의 절반이 조용히 은퇴하고
+  // "셋이 사이좋게 틀림" 이 다시 통과한다 — 그것이 이 검사의 존재 이유였다.
+  // gates 의 최대값(8)을 쓰면 안 된다. Q 가 걸린 적 없는 9·10단계가 영원히 빠진다.
+  // 제목은 **줄머리에 고정**한다. indexOf 로 찾으면 산문 속의 "## 7." 이나
+  // "### 7." 에도 걸려, 실패하지 않은 채 엉뚱한 구간을 잘라 온다.
+  const h7 = plan.search(/^## 7\./m)
+  const h8 = plan.search(/^## 8\./m)
+  // 펜스·코드 스팬은 뺀다 (검사 8·10·11·14 와 같은 규칙). 예시로 적은 "11. …" 한 줄이
+  // 조용히 N 을 올리면, 아직 열지 않은 단계를 게이트가 요구하게 된다.
+  const section7 = h7 >= 0 && h8 > h7 ? stripCode(plan.slice(h7, h8)).prose : ''
+  const stepNos = [...section7.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]))
+  const lastStep = stepNos.length ? Math.max(...stepNos) : 0
+  // **1,2,…,last 와 정확히 같아야 한다.** 최대값과 개수만 보면 마지막 항목이
+  // 하나 내려간 경우(10 → 9 가 둘)가 빠져나가고 N 이 조용히 하나 작아진다.
+  const expectedSteps = Array.from({ length: lastStep }, (_, i) => i + 1).join(',')
+  if (!lastStep || stepNos.join(',') !== expectedSteps) {
+    fail(
+      `${planPath} §7 : 번호 목록을 읽지 못했다 (${stepNos.join(',') || '없음'}). ` +
+        '검사 14 가 쓸 마지막 단계를 정할 수 없다.'
+    )
+  } else if (blockedSteps.length) {
+    verifiableThrough = blockedSteps[0] - 1
+    stageReason = `${blockedSteps[0]}단계를 막는 Q 가 아직 열려 있다`
+  } else {
+    verifiableThrough = lastStep
+    stageReason = '§7 을 막는 Q 가 하나도 남지 않았다'
   }
 
   const py = all.filter((p) => p.startsWith('src/') && p.endsWith('.py'))
@@ -379,6 +421,12 @@ const RETIRED = [
   ['병합 방식 미정', 'D33 이 Q8 을 닫았다'],
   ['남은 집합에 벡터/키워드', 'D34: v1 이벤트는 키워드만이다'],
   ['나중에 만들어도 된다', 'HNSW 를 만들지 않는 결정은 D33 이 소유한다'],
+  // 순차 머지가 남긴 현재형 거짓말. 게이트가 초록인 채로 방문자 README 가 거짓을 말했다.
+  ['is stage 6 and is not built yet', '6단계는 구현됐다'],
+  ['검색 자체는 6단계이고 아직 없습니다', '6단계는 구현됐다'],
+  ['1–5단계를 이제 검증할 수 있다', '1–6단계다'],
+  ['지금은 그 명령이 없다', 'sillok ingest 는 5단계에서 생겼다'],
+  ['Q9는 그대로 열려 있다', 'D34 가 닫았다'],
 ]
 const textish = all.filter(
   (p) =>
@@ -430,6 +478,56 @@ for (const p of trgmish) {
   for (const [needle, what] of TRGM) {
     // 001 은 확장을 설치하는 파일이다. 설치 자체는 D34 가 남기기로 한 것이라 세지 않는다.
     if (body.includes(needle)) fail(`${p} : ${what} "${needle}" — pg_trgm 은 v1 미사용이다 (D34)`)
+  }
+}
+
+// 14. "1–N단계를 이제 검증할 수 있다" — 세 곳이 같은 N 을 말하고, 그 N 이 Q 게이트와 맞는가.
+//     순차 머지가 남기는 부류다: 단계가 하나 늘 때 세 문서 중 하나만 고치면
+//     게이트는 초록인 채로 방문자 문서가 옛 단계를 말한다. 실측으로 한 번 났다 —
+//     plan 과 CLAUDE 는 1–5, open-questions 는 1–6 이었다.
+//
+//     **셋의 일치만 보는 것으로는 부족하다.** 단계가 늘 때는 셋을 한 번에 훑어 고치므로
+//     셋이 같이 틀린 N 을 말하는 쪽이 오히려 흔하고, 그때 일치 검사는 초록불을 준다.
+//     그래서 N 을 Q 게이트에서 **유도해** 맞춰 본다 (verifiableThrough). 사실은 한 곳에만 있다:
+//     어떤 Q 가 어느 단계를 막는지는 plan.md §7 이, 그 Q 가 닫혔는지는 open-questions.md 가 소유한다.
+//     이 검사는 그 둘에서 나오는 값을 세 문서의 문장과 대조할 뿐 자기 답을 갖지 않는다.
+const STAGE_CLAIM = /1[–-](\d+)단계를 이제 검증할 수 있다/g
+const STAGE_CLAIM_FILES = ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']
+const stageClaims = []
+for (const p of STAGE_CLAIM_FILES) {
+  // 펜스·코드 스팬은 검사 8·10·11 과 같은 이유로 뺀다 — 예시로 옛 문장을 보여 줄 수 있어야 한다.
+  // 빼지 않으면 인용 하나가 N 을 정하고, 산문의 진짜 주장이 가려진다.
+  const { prose } = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+  // 한 파일에 두 벌이 있을 수 있다. 첫 개만 보면 위만 고치고 아래를 잊는 길이 열린다.
+  const claims = [...prose.matchAll(STAGE_CLAIM)].map((m) => Number(m[1]))
+  if (!claims.length) {
+    fail(`${p} : "1–N단계를 이제 검증할 수 있다" 문장이 없다 — 셋이 함께 움직여야 한다.`)
+    continue
+  }
+  const distinct = [...new Set(claims)]
+  if (distinct.length > 1) {
+    fail(`${p} : 한 파일 안에서 단계 주장이 갈린다 — ${distinct.map((n) => '1–' + n).join(', ')}`)
+    continue
+  }
+  stageClaims.push([p, distinct[0]])
+}
+if (
+  stageClaims.length === STAGE_CLAIM_FILES.length &&
+  new Set(stageClaims.map((s) => s[1])).size !== 1
+) {
+  fail(
+    '단계 주장이 어긋난다 — ' +
+      stageClaims.map(([p, n]) => `${p}=1–${n}`).join(', ') +
+      ' (정본은 docs/plan.md §7)'
+  )
+}
+// 셋이 같아도 그 값이 틀릴 수 있다. Q 게이트가 유도한 값과 맞춘다.
+for (const [p, n] of stageClaims) {
+  if (verifiableThrough !== null && n !== verifiableThrough) {
+    fail(
+      `${p} : 1–${n}단계라고 하는데 Q 게이트로는 1–${verifiableThrough}단계다 ` +
+        `(${stageReason}). 문장이 아니라 Q 를 먼저 본다.`
+    )
   }
 }
 

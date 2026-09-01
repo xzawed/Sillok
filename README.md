@@ -142,7 +142,7 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 - **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column
   stays NULL and document search will use `tsv` keywords only. Event search is keywords only
   either way — v1 does not embed events.
-  Search itself is stage 6 and is not built yet.
+  A key turns the vector arm on; without one the merge runs over the keyword list alone.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
 
 ## Status

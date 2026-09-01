@@ -505,3 +505,37 @@ def test_http_ingest_rejects_a_missing_project(db, clean, workspace):
     res = _client(workspace).post("/v1/ingest", json={})
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "VALIDATION"
+
+
+def test_an_unknown_run_status_is_rejected(db, clean, workspace, monkeypatch):
+    """D25 는 DDL 에 CHECK 를 넣지 않기로 했다 — 값 집합을 지키는 것은 이 가드뿐이다.
+
+    아무도 읽지 않는 값 집합은 틀려도 드러나지 않는다.
+    """
+    real = service._finish
+    monkeypatch.setattr(
+        service, "_finish", lambda conn, run_id, status, error, counters: real(
+            conn, run_id, "발명한상태", error, counters
+        )
+    )
+    with pytest.raises(service.IngestFailed, match="unknown ingest status"):
+        run(workspace)
+
+
+def test_kb_status_counts_exactly_the_declared_statuses(db, clean, workspace):
+    """last_ingest_at 이 세는 집합 (D32). **기대값을 리터럴로 못 박는다.**
+
+    상수와 대조하면 상수를 바꿀 때 기대값도 같이 바뀌어 자기 자신과 비교하게 된다 —
+    주입으로 확인했다: COUNTED 에 failed 를 더해도 그런 검사는 그대로 통과한다.
+    """
+    assert service.INGEST_STATUSES == {"running", "ok", "partial", "failed"}
+    assert service.INGEST_COUNTED_STATUSES == {"ok", "partial"}
+    for status, counted in (("ok", True), ("partial", True), ("failed", False)):
+        db.execute("DELETE FROM kb_ingest_runs WHERE project = %s", (clean,))
+        db.execute(
+            "INSERT INTO kb_ingest_runs (project, finished_at, status)"
+            " VALUES (%s, now(), %s)",
+            (clean, status),
+        )
+        got = service.kb_status(DSN, clean)["last_ingest_at"]
+        assert (got is not None) == counted, f"{status} 처리가 D32 와 다르다"
