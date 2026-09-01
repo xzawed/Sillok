@@ -398,8 +398,14 @@ def test_backfill_fills_null_vectors_only(db, clean, workspace, monkeypatch):
     assert again["chunks_embedded"] == 0
 
 
-def test_deletion_runs_before_the_backfill(db, clean, workspace, monkeypatch):
-    """뒤에 두면 백필 첫 실패에서 멈추는 run 이 삭제를 영구히 건너뛴다."""
+def test_partial_run_still_applies_deletions(db, clean, workspace, monkeypatch):
+    """D32 가 삭제를 백필 앞에 둔 이유가 이 결과다 — partial 이어도 삭제는 반영된다.
+
+    **이 검사가 잠그는 것은 순서가 아니라 결과다.** 지금 구현은 백필 실패에서
+    파이프라인을 끊지 않으므로 두 순서가 관측상 같다 — 실제로 삭제 블록을 백필 뒤로
+    옮겨 보니 이 검사가 그대로 통과했다. 순서를 어겨도 삭제를 건너뛰게 되는 것은
+    누군가 백필 실패에서 일찍 빠져나가게 고칠 때이고, 그때 이 검사가 문다.
+    """
     run(workspace)
     (workspace / "docs" / "a.md").unlink()
     monkeypatch.setattr(service, "_embed", lambda t, k: (_ for _ in ()).throw(RuntimeError("nope")))
@@ -430,3 +436,72 @@ def test_vector_literal_round_trips(db, clean, workspace, monkeypatch):
     # 컬럼이 float4 라 서버가 정밀도를 자르는 것은 어댑터를 써도 같다.
     assert got[:3] == [0.5, -0.25, 0.125]
     assert all(v == 0.0 for v in got[3:])
+
+
+# --- HTTP 얼굴 (D32) --------------------------------------------------------
+
+
+def _client(workspace):
+    from fastapi.testclient import TestClient
+
+    from sillok import api
+    from sillok.config import Config
+
+    return TestClient(
+        api.create_app(
+            Config(
+                database_url=DSN,
+                host="127.0.0.1",
+                port=8080,
+                workspace=str(workspace),
+                bearer_token="",
+                openai_api_key="",
+            )
+        ),
+        raise_server_exceptions=False,
+    )
+
+
+def test_http_ingest_returns_the_same_envelope(db, clean, workspace):
+    """같은 Service 함수의 HTTP 얼굴이고 인자까지 같다 (D20·D30)."""
+    res = _client(workspace).post("/v1/ingest", json={"project": PROJECT})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["data"]["status"] == "ok"
+    assert body["data"]["files_seen"] == 3
+    # error 는 응답에 싣지 않는다 (D32).
+    assert "error" not in body["data"]
+
+
+def test_http_ingest_rejects_a_concurrent_run_with_conflict(db, clean, workspace):
+    """**발신 경로를 잠근다.** 이 핸들러가 없으면 락 거절이 포괄 예외에 걸려
+
+    409 가 아니라 500 으로 나간다 — 상태 매핑 표만 봐서는 드러나지 않는 자리다 (D32).
+    """
+    with psycopg.connect(DSN, row_factory=dict_row) as holder:
+        holder.autocommit = True
+        holder.execute(
+            "SELECT pg_try_advisory_lock(hashtext(%s), hashtext(%s))",
+            (service.LOCK_NAMESPACE, PROJECT),
+        )
+        try:
+            res = _client(workspace).post("/v1/ingest", json={"project": PROJECT})
+        finally:
+            holder.execute(
+                "SELECT pg_advisory_unlock(hashtext(%s), hashtext(%s))",
+                (service.LOCK_NAMESPACE, PROJECT),
+            )
+
+    assert res.status_code == 409
+    assert res.json() == {
+        "ok": False,
+        "error": {"code": "CONFLICT", "message": service.LOCKED_MESSAGE},
+    }
+
+
+def test_http_ingest_rejects_a_missing_project(db, clean, workspace):
+    """D25 의 검증은 HTTP 얼굴에서도 같은 코드로 나간다."""
+    res = _client(workspace).post("/v1/ingest", json={})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "VALIDATION"
