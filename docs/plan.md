@@ -145,7 +145,7 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 HNSW 인덱스는
 ## 7. 작업 순서 (이 순서를 어기지 말 것)
 
 A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**로 마감됐다 (2026-08-31).
-1–4단계를 이제 검증할 수 있다.
+1–5단계를 이제 검증할 수 있다.
 **B절의 Q6·Q7·Q10은 D30–D32로 마감됐다** (2026-09-01) — 5단계 계약이 이제 있다.
 남은 공백은 단계별로 걸린다 — **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
 6단계 전에 Q8·Q9, 7단계 전에 Q12·Q15·Q19·Q20, 8단계 전에 Q17이 필요하다.
@@ -185,7 +185,10 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
 - [x] 필수 필드 없는 `save_event`가 `VALIDATION`으로 거절된다 — 2026-08-31 실측.
       `POST /v1/events {}` → 422 `{"code":"VALIDATION","message":"missing required field: project, kind, …"}`.
       오프셋 없는 `occurred_at`도 같은 코드로 거절된다 (D25)
-- [ ] ingest가 `docs/**`, 루트 `README*`, `adr/**`만 먹는다
+- [x] ingest가 `docs/**`, 루트 `README*`, `adr/**`만 먹는다 — 2026-09-01 실측.
+      이 저장소를 대상으로 돌아 게이트의 색인 목록과 **같은 파일을 먹었고**,
+      두 번째 run 은 아무것도 바꾸지 않았다(해시가 유일한 변경 판정이다).
+      대조는 `scripts/check-index-parity.mjs` 가 매번 한다 — 파일 수를 여기 적지 않는다. 문서가 자라면 낡는다
 - [ ] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다
 - [ ] `get_file`이 workspace의 해당 path를 돌려준다
 - [ ] `save_doc`이 Git을 변경하지 않는다
@@ -204,7 +207,9 @@ curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
 uv run pytest -q
 ```
 
-> **지금은 3번째 줄이 돌지 않는다.** `sillok ingest`는 5단계에서 생긴다.
+> **3번째 줄의 `exec api` 는 아직 확인하지 않았다.** `sillok ingest` 는 5단계에서 생겼지만
+> `Dockerfile` 이 가상환경 경로를 PATH 에 넣지 않아 그 형태로 도는지는 실행해 보지 않았다 (D30).
+> 5단계 검증은 `--profile test` 안에서 같은 Service 함수를 불러 했다.
 > `/v1/status`는 4단계에서 생겼으므로 4번째 줄은 돈다.
 > 5번째 줄은 호스트에서 DB 검사가 skip된 채로 돈다 — 전부 돌리려면 D22의 `--profile test`다.
 > 이 블록은 **v1 목표**이지 현재 상태가 아니다.

@@ -2,7 +2,8 @@
 // PR 하나의 증거를 한 번에 만든다 (AGENTS.md `PR 하나의 증거`).
 //
 // 왜 있나: 2026-08-31 감사에서 PR #5~#10 이 요구된 증거 4종 중 1~3종만 싣고 머지됐다.
-// 빠뜨린 것을 아무도 알아채지 못한 이유는 네 명령을 손으로 따로 돌렸기 때문이다.
+// 그 뒤로 항목이 늘었다 — 개수를 여기 적지 않는다. 늘 때마다 낡는다.
+// 빠뜨린 것을 아무도 알아채지 못한 이유는 명령을 손으로 따로 돌렸기 때문이다.
 // 하나라도 못 돌리면 **여기서 실패한다.** 조용히 빠지는 길을 남기지 않는다.
 //
 // 사용: node scripts/evidence.mjs
@@ -39,6 +40,14 @@ const STEPS = [
     name: 'DB 포함 테스트 (D22)',
     cmd: ['docker', ['compose', '--profile', 'test', 'run', '--rm', 'test']],
     summary: (out) => lastMatch(out, /\d+ (passed|failed|skipped|error)[^\n]*/),
+  },
+  {
+    // 게이트와 ingest 가 같은 집합을 보는가 (D30). 규칙이 두 언어에 있어
+    // 단위 검사로는 대조할 수 없다 — 둘 다 실제로 돌려 맞춘다.
+    name: '색인 목록 대조 (D30)',
+    cmd: ['node', ['scripts/check-index-parity.mjs']],
+    summary: (out) => lastMatch(out, /색인 대상 \d+개가 게이트와 같다|색인 목록 불일치/),
+    note: '저장소 자신을 대상으로 도는 첫 ingest 스모크다 (자기 색인)',
   },
 ]
 
@@ -84,7 +93,7 @@ for (const { step, ok } of results) {
 
 const failed = results.filter((r) => !r.ok)
 if (failed.length) {
-  console.error(`\n증거 ${failed.length}종이 빠졌다. PR 본문에 4종이 다 있어야 한다 (AGENTS).`)
+  console.error(`\n증거 ${failed.length}종이 빠졌다. PR 본문에 위 목록이 다 있어야 한다 (AGENTS).`)
   for (const f of failed) {
     if (f.missing) {
       console.error(`  - ${f.step.name}: 도구가 없다. 빠뜨린 채 머지하지 않는다.`)

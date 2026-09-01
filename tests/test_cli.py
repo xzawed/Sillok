@@ -36,7 +36,7 @@ def test_command_is_required():
 
 def test_unknown_command_is_rejected():
     with pytest.raises(SystemExit) as exc:
-        cli.main(["ingest"])  # D8 의 명령이지만 5단계 전까지는 없다
+        cli.main(["reindex"])  # D19 의 인자 목록에 없다. 편의 명령을 발명하지 않는다
     assert exc.value.code != 0
 
 
@@ -48,4 +48,4 @@ def test_registered_commands_are_exactly_the_implemented_ones():
     """
     parser = cli._build_parser()
     actions = [a for a in parser._actions if a.dest == "command"]
-    assert sorted(actions[0].choices) == ["migrate", "serve"]
+    assert sorted(actions[0].choices) == ["ingest", "migrate", "serve"]
