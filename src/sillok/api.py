@@ -57,6 +57,15 @@ _CODE_FOR_STATUS = {status: code for code, status in STATUS_FOR_CODE.items()}
 # psycopg 예외는 DSN 을 품는 일이 잦고 토큰·키도 같은 길로 샌다 (D21).
 INTERNAL_MESSAGE = "internal error"
 
+# NOT_FOUND 의 문구는 service 가 소유한 세 상수뿐이다 (D35: 없는 것과 남의 것은 같은 답).
+# 그 밖의 문구는 버린다 — 이 핸들러만 `str(exc)` 를 그대로 흘리므로, 나중에 누가
+# `NotFound(f"...{exc}")` 를 쓰면 경로나 DSN 이 여기로 새어 나간다 (Grok 지적).
+# D21 이 INTERNAL 에 건 이유와 같다: **호출자를 믿지 않는다.**
+NOT_FOUND_FALLBACK = "not found"
+NOT_FOUND_MESSAGES = frozenset(
+    {service.NOT_FOUND_EVENT, service.NOT_FOUND_FILE, service.NOT_FOUND_DOC}
+)
+
 
 def ok(data: object = None) -> JSONResponse:
     return JSONResponse({"ok": True, "data": data if data is not None else {}})
@@ -206,8 +215,12 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.exception_handler(service.NotFound)
     async def _not_found(_: Request, exc: service.NotFound) -> JSONResponse:
         # D35: 지목한 조회에 답이 없다. 없는 id 와 남의 id 는 같은 응답이다 —
-        # 메시지도 service 가 고정 문구로 준다.
-        return error(ErrorCode.NOT_FOUND, str(exc))
+        # 메시지도 service 가 고정 문구로 준다. 그 목록 밖이면 버리고 로그에만 남긴다.
+        message = str(exc)
+        if message not in NOT_FOUND_MESSAGES:
+            log.error("계약에 없는 NOT_FOUND 문구를 버렸다: %r", message)
+            message = NOT_FOUND_FALLBACK
+        return error(ErrorCode.NOT_FOUND, message)
 
     @app.exception_handler(service.BaseHashMismatch)
     async def _base_hash(_: Request, exc: service.BaseHashMismatch) -> JSONResponse:

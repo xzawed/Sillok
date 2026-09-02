@@ -162,6 +162,16 @@ def test_get_file_validates_before_touching_the_db():
         service.get_file(DEAD_DSN, "", "docs/plan.md", 0, ".")
 
 
+@pytest.mark.parametrize("body", [None, 7, 1.5, True, ["조각"], {"text": "본문"}])
+def test_body_must_be_a_string(body):
+    """문서 전체를 문자열로 받는다 (D38). 다른 모양을 서버가 풀어 주지 않는다."""
+    request = {"project": "sillok", "path": "docs/plan.md"}
+    if body is not None:
+        request["body"] = body
+    with pytest.raises(service.ValidationFailed):
+        service.save_doc(DEAD_DSN, request, ".")
+
+
 def test_save_doc_validates_before_touching_the_db():
     with pytest.raises(service.ValidationFailed):
         service.save_doc(DEAD_DSN, {"project": "sillok", "path": "docs/plan.md"}, ".")
