@@ -1,7 +1,11 @@
 """Service 함수 — DB를 만지는 유일한 문 (D19).
 
 여기 있는 함수만 SQL을 안다. HTTP 어댑터(`api.py`)와 CLI는 이 함수들을 부를 뿐이다.
-4단계(plan §7)의 세 가지: `save_event` · `event_stats` · `kb_status`.
+4단계(plan §7)의 세 가지(`save_event` · `event_stats` · `kb_status`)에서 시작해
+5단계 `ingest`, 6단계 검색 둘, 7단계 단건·제안 셋까지 같은 자리에 있다.
+
+**파일을 여는 걸음은 여기 없다.** D36 의 `openat` 걸음은 `workspace.py` 가 갖고,
+*무엇을 열어도 되는가*(= `kb_documents` 에 행이 있는가)만 이 파일이 판정한다.
 
 **검증은 여기서 한다 (D10·D25).** DDL에 CHECK를 두지 않는 이유는, CHECK 위반이
 Postgres 예외가 되고 D21이 그것을 `INTERNAL 500`으로 접기 때문이다 —
@@ -10,6 +14,10 @@ Postgres 예외가 되고 D21이 그것을 `INTERNAL 500`으로 접기 때문이
 
 from __future__ import annotations
 
+import difflib
+import logging
+import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +29,9 @@ from psycopg.rows import dict_row
 from . import ingest as ingest_rules
 from . import search
 from . import migrations
+from . import workspace as workspace_rules
+
+log = logging.getLogger(__name__)
 
 # 정본: docs/skills/sillok-storage/SKILL.md · docs/service-and-mcp.md
 REQUIRED_FIELDS = ("project", "kind", "title", "summary", "occurred_at", "result")
@@ -871,3 +882,257 @@ def search_events(dsn: str, body: dict[str, Any]) -> dict[str, Any]:
         )
         results.append(item)
     return {"results": results}
+
+
+# --- 7단계 단건·제안 (D35–D41) ----------------------------------------------
+
+# D39. 행이 가진 사실을 전부 주되 파생 컬럼(`tsv`)과 v1 이 채우지 않는 벡터(`embedding`, D34)는 뺀다.
+EVENT_FIELDS = (
+    "id",
+    "project",
+    "module",
+    "kind",
+    "title",
+    "summary",
+    "root_cause",
+    "resolution",
+    "result",
+    "severity",
+    "occurred_at",
+    "resolved_at",
+    "source",
+    "related_doc_path",
+    "payload",
+    "created_at",
+    "created_by",
+)
+_EVENT_TIMESTAMPS = ("occurred_at", "resolved_at", "created_at")
+
+# 없는 것과 남의 것은 같은 답이다 (D35). 무엇이 없는지도 구분해 알려 주지 않는다.
+NOT_FOUND_EVENT = "event not found"
+NOT_FOUND_FILE = "file not found"
+NOT_FOUND_DOC = "document not found"
+
+# D38. D32 의 문구를 쓰지 않는다 — 발신자가 둘이고 원인이 다르다.
+BASE_HASH_MESSAGE = "document changed since base_hash"
+# D40. 받아들이는 형식은 하나다. 접두사를 관대하게 벗기면 "무엇이 같은 해시인가" 규칙이 생긴다.
+# **fullmatch 로 본다.** `$` 는 끝의 개행 **앞**에서도 맞으므로 `^…$` + match 는
+# 뒤에 개행이 붙은 값을 통과시키고, 그 개행이 digest 에 남아 영원한 CONFLICT 가 된다 —
+# 클라이언트 입력 문제가 VALIDATION 이 아니라 충돌로 보고되는 것이다 (Grok 지적).
+_BASE_HASH = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+class NotFound(Exception):
+    """지목한 조회에 답이 없다 (D35). 집합 질의는 빈 결과이지 이 예외가 아니다."""
+
+
+class BaseHashMismatch(Exception):
+    """`save_doc` 의 `base_hash` 가 현재 내용과 다르다. `CONFLICT` 의 둘째 발신자다 (D38)."""
+
+
+def _require_path(raw: object) -> str:
+    """**정규화하지 않는다** (D36). `kb_documents` 의 값과 바이트로 같아야 한다.
+
+    빈 문자열·끝의 슬래시·겹친 슬래시·`./` 는 정규화 대상이 아니라 그냥 행이 없는 것이고 404 다.
+    여기서 정규화하면 "무엇이 같은 경로인가" 라는 두 번째 규칙이 생기고,
+    그 규칙이 곧 허용 목록을 느슨하게 만드는 손잡이가 된다.
+    """
+    if not isinstance(raw, str):
+        raise ValidationFailed("path must be a string")
+    # NUL 만 예외다. **정규화가 아니라 물어볼 수 없는 질문을 거절하는 것이다** —
+    # Postgres 의 text 는 NUL 을 담지 못하므로 그런 행은 존재할 수 없고,
+    # 그대로 넘기면 드라이버 예외가 D21 의 포괄 예외에 걸려 INTERNAL 500 이 된다.
+    # 클라이언트 입력 문제가 서버 결함으로 보고되는 자리다 (D25 가 project 에서 이미 막았다).
+    # 실측: `path=docs/plan.md%00.txt` 가 500 을 냈다 (Grok 이 라이브에서 찾았다).
+    if "\x00" in raw:
+        raise ValidationFailed("path must not contain NUL")
+    return raw
+
+
+def _require_offset(raw: object) -> int:
+    # bool 은 int 의 하위 타입이다. `offset=true` 를 0/1 로 받아들이지 않는다.
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValidationFailed("offset must be an integer")
+    if raw < 0:
+        raise ValidationFailed("offset must not be negative")
+    return raw
+
+
+def _require_base_hash(raw: object) -> str | None:
+    """D40. `sha256:` + 소문자 16진 64자. 없으면 검사하지 않는다 (D38)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not _BASE_HASH.fullmatch(raw):
+        raise ValidationFailed("base_hash must be sha256: followed by 64 lowercase hex digits")
+    return raw.split(":", 1)[1]
+
+
+def _indexed(dsn: str, project: str, path: str) -> bool:
+    """허용 목록은 `kb_documents` 다 (D36). D9·D30 을 요청 문자열 위에 다시 구현하지 않는다.
+
+    `repo = ''` 는 ingest 가 넣는 값이다 (D37). `repo` 를 두 번째 뿌리로 쓰면 Q20 이 되살아난다.
+    """
+    with connect(dsn) as conn, conn.cursor() as cur:
+        row = cur.execute(
+            "SELECT id FROM kb_documents WHERE project = %s AND repo = '' AND path = %s",
+            (project, path),
+        ).fetchone()
+    return row is not None
+
+
+def get_event(dsn: str, event_id: int, project: object) -> dict[str, Any]:
+    """D35·D39. `project` 는 필수이고, 행의 `project` 와 다르면 없는 것과 같은 답이다.
+
+    경계 검사를 SQL 에 둔다. 행을 읽어 와서 파이썬에서 비교하면 그 사이에 "읽었지만 안 준다" 는
+    상태가 생기고, 로그·예외 문구 한 줄이 남의 이벤트 존재를 흘린다.
+    """
+    project = normalize_project(project)
+    with connect(dsn) as conn, conn.cursor() as cur:
+        row = cur.execute(
+            f"SELECT {', '.join(EVENT_FIELDS)} FROM kb_events"
+            " WHERE id = %(id)s AND project = %(project)s",
+            {"id": event_id, "project": project},
+        ).fetchone()
+    if row is None:
+        raise NotFound(NOT_FOUND_EVENT)
+
+    event = dict(row)
+    for field in _EVENT_TIMESTAMPS:
+        value = event[field]
+        event[field] = value.isoformat() if value is not None else None
+    return event
+
+
+def _open_in_workspace(workspace: str, path: str) -> int:
+    """D36 의 걸음. 호출자가 fd 를 닫는다."""
+    return workspace_rules.open_regular(workspace, path)
+
+
+def get_file(dsn: str, project: object, path: object, offset: object, workspace: str) -> dict[str, Any]:
+    """D36·D37·D41. 색인된 행만 열고, 응답은 파일이 아니라 창이다.
+
+    `text` 는 **원본 바이트를 그대로 푼 것이다.** 정규화하면 `offset` 세 개가 무엇의
+    바이트인지 사라진다 — `save_doc` 이 정규화한 텍스트를 보는 것과 일부러 다르다 (D41).
+    """
+    project = normalize_project(project)
+    path = _require_path(path)
+    offset = _require_offset(offset)
+
+    if not _indexed(dsn, project, path):
+        raise NotFound(NOT_FOUND_FILE)
+
+    try:
+        fd = _open_in_workspace(workspace, path)
+    except workspace_rules.OpenFailed as exc:
+        # 행은 남아 있고 파일 쪽이 바뀐 것이다 (D36). 구분은 로그에만 남긴다.
+        log.warning("색인된 행을 열지 못했다: %s (%s)", path, exc)
+        raise NotFound(NOT_FOUND_FILE) from None
+
+    try:
+        window = workspace_rules.read_window(fd, offset)
+    except workspace_rules.OffsetInvalid as exc:
+        raise ValidationFailed(str(exc)) from None
+    finally:
+        os.close(fd)
+
+    return {"project": project, "path": path, **window}
+
+
+def _read_current(workspace: str, path: str) -> str | None:
+    """`save_doc` 이 보는 현재 내용 — D36 의 걸음으로 열되 **끝까지 읽는다** (D38).
+
+    D30 의 정규화를 거친다 (D41). 해시와 diff 가 같은 텍스트를 봐야 응답이 자기모순이 되지 않는다.
+    열 수 없으면 빈 내용이 아니라 **부재**다 — None 이 그것이다.
+    """
+    try:
+        fd = _open_in_workspace(workspace, path)
+    except workspace_rules.OpenFailed as exc:
+        log.warning("제안 대상 파일을 열지 못했다: %s (%s)", path, exc)
+        return None
+    try:
+        raw = workspace_rules.read_all(fd)
+    finally:
+        os.close(fd)
+    return ingest_rules.normalize(raw, path)
+
+
+def _unified_diff(path: str, current: str | None, proposed: str) -> str:
+    """현재 파일과 제안 본문의 unified diff. 같으면 빈 문자열이다 (D38).
+
+    파일이 없으면 `/dev/null` 에서의 추가다 (D41). **새 문서 제안이 아니다** — 행은 있어야 한다.
+    """
+    before = current.splitlines(keepends=True) if current is not None else []
+    return "".join(
+        difflib.unified_diff(
+            before,
+            proposed.splitlines(keepends=True),
+            fromfile=f"a/{path}" if current is not None else "/dev/null",
+            tofile=f"b/{path}",
+        )
+    )
+
+
+def save_doc(dsn: str, body: dict[str, Any], workspace: str) -> dict[str, Any]:
+    """D38·D40·D41. **Git 에 쓰지 않는다** — 응답이 전부다 (D3).
+
+    `body` 는 문서 전체다. 부분 패치를 받지 않는다 — 서버가 조각을 붙이기 시작하면
+    붙이는 규칙이 두 번째 계약이 되고, 그 규칙은 아무 문서에도 없다.
+    """
+    if not isinstance(body, dict):
+        raise ValidationFailed("body must be an object")
+    project = normalize_project(body.get("project"))
+    path = _require_path(body.get("path"))
+    proposed_raw = body.get("body")
+    if not isinstance(proposed_raw, str):
+        raise ValidationFailed("body required: the whole document as a string")
+    base_hash = _require_base_hash(body.get("base_hash"))
+
+    # 경로 판정은 get_file 과 같다 (D38). 색인된 경로만 고칠 수 있다.
+    if not _indexed(dsn, project, path):
+        raise NotFound(NOT_FOUND_DOC)
+
+    current = _read_current(workspace, path)
+    if base_hash is not None:
+        # 파일이 없으면 어떤 해시와도 다르다 — 사라진 것은 바뀐 것의 부분집합이다 (D41).
+        digest = ingest_rules.content_hash(current) if current is not None else None
+        if digest != base_hash:
+            # 현재 해시를 응답에 싣지 않는다 (D38). error 봉투는 값을 나르는 자리가 아니다.
+            raise BaseHashMismatch(BASE_HASH_MESSAGE)
+
+    # body 도 같은 정규화를 거친다 (D41). 한쪽만 정규화하면 자기모순이 방향만 바꿔 돌아온다.
+    proposed = ingest_rules.normalize(proposed_raw.encode("utf-8"), path)
+    return {
+        "proposal": {
+            "project": project,
+            "path": path,
+            "exists": current is not None,
+            "diff": _unified_diff(path, current, proposed),
+            "body": proposed,
+        }
+    }
+
+
+def resolve_workspace(requested: object, configured: str) -> str:
+    """D37. ingest 는 `SILLOK_WORKSPACE` 와 다른 나무를 색인하지 않는다.
+
+    저쪽 나무를 색인해 두면 `get_file` 은 **이 나무**를 저쪽의 `path` 로 연다 —
+    같은 경로에 다른 내용이 있으면 조용히 남의 파일을 돌려준다.
+
+    같은지는 **정규화한 절대 경로**로 본다. `.` 과 `/workspace` 가 같은 곳을 가리켜도
+    문자열은 다르다. 기본값(`.`)이면 프로세스의 작업 디렉터리를 기준으로 푼다.
+    거절 문구에 설정값을 싣지 않는다 — 요청자가 이미 아는 값만 돌려준다.
+    """
+    if requested is None or requested == "":
+        return configured
+    if not isinstance(requested, str):
+        raise ValidationFailed("workspace must be a string")
+    if _real(requested) != _real(configured):
+        raise ValidationFailed(
+            f"workspace must be the configured SILLOK_WORKSPACE (D37): {requested!r} is a different tree"
+        )
+    return configured
+
+
+def _real(path: str) -> str:
+    # normcase 까지 간다. Windows 에서 대소문자만 다른 두 문자열이 같은 디렉터리다.
+    return os.path.normcase(str(Path(path).resolve()))

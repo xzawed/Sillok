@@ -8,9 +8,12 @@
 FROM python:3.12-slim AS runtime
 
 # PYTHONUTF8: cli 가 stdout 을 UTF-8 로 고정하지만 그 전에 죽는 경우까지 덮는다.
+# PATH: plan.md §9 의 판정 명령이 `compose exec api sillok ingest` 다. 이것이 없으면
+# 그 줄이 `executable file not found` 로 죽는다 (2026-09-02 실측). uv run 은 그대로 돈다.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONUTF8=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 

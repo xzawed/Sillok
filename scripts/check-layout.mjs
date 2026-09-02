@@ -428,6 +428,13 @@ const RETIRED = [
   ['지금은 그 명령이 없다', 'sillok ingest 는 5단계에서 생겼다'],
   ['Q9는 그대로 열려 있다', 'D34 가 닫았다'],
   ['v1의 유일한 발신자', 'D38 의 base_hash 불일치가 CONFLICT 의 둘째 발신자다'],
+  // 7단계가 구현되면서 낡은 문장들. 같은 부류가 6단계에서 이미 한 번 났다 —
+  // 게이트는 초록인데 방문자 문서가 현재형으로 거짓을 말한다.
+  ['업무 라우트는 여섯이다', '7단계에서 셋이 늘어 아홉이다'],
+  ['1–6단계까지 구현돼 있고', '7단계가 구현됐다'],
+  ['아직이다 — 그 경로는 정직하게 404다', 'get_file·save_doc 은 7단계에서 생겼다'],
+  ['those routes honestly return 404', 'get_file·save_doc 은 7단계에서 생겼다'],
+  ['그 형태로 도는지는 실행해 보지 않았다', 'compose exec api sillok ingest 는 2026-09-02 에 확인했다'],
 ]
 const textish = all.filter(
   (p) =>

@@ -212,15 +212,14 @@ def test_http_exception_5xx_does_not_leak_detail():
 @pytest.mark.parametrize(
     "path",
     [
-        # 7~8단계. Q12·Q15·Q19·Q20 / Q17 이 아직 열려 있다.
-        # /v1/ingest 는 5단계, /v1/search/* 는 6단계라 여기서 빠졌다.
-        "/v1/events/1",
-        "/v1/files",
+        # GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다 — 여기서 단계를 발명하지 않는다.
         "/v1/docs",
-        "/v1/docs/proposals",
+        # 8단계. Q17 이 아직 열려 있다.
+        "/v1/mcp",
+        "/mcp",
     ],
 )
-def test_later_step_routes_do_not_exist_yet(path):
+def test_unbuilt_routes_do_not_exist_yet(path):
     """뒤 단계의 계약 경로가 통과하는 것처럼 보이면 안 된다.
 
     `app.routes` 를 훑는 대신 **실제로 때린다.** 라우터를 mount 로 붙이면
@@ -231,6 +230,83 @@ def test_later_step_routes_do_not_exist_yet(path):
         r = client.request(method, path)
         assert r.status_code == 404, f"{method} {path} -> {r.status_code}"
         assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", "/v1/events/1"), ("GET", "/v1/files"), ("POST", "/v1/docs/proposals")],
+)
+def test_step7_routes_exist(method, path):
+    """7단계 경로는 이제 있어야 한다. 404 면 붙지 않은 것이다 (D35·D36·D38)."""
+    r = _client().request(method, path)
+    assert r.status_code != 404
+
+
+def test_get_event_requires_project_and_an_integer_id():
+    """D35: `project` 는 필수다. 정수가 아닌 id 도 같은 자리에서 걸린다 (D21)."""
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    for path in ("/v1/events/1", "/v1/events/abc?project=sillok"):
+        r = client.get(path)
+        assert r.status_code == 422, path
+        assert r.json()["error"]["code"] == "VALIDATION"
+
+
+def test_get_file_requires_project_and_path():
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    for path in ("/v1/files", "/v1/files?project=sillok", "/v1/files?path=docs/plan.md"):
+        r = client.get(path)
+        assert r.status_code == 422, path
+        assert r.json()["error"]["code"] == "VALIDATION"
+
+
+@pytest.mark.parametrize(
+    ("query", "fragment"),
+    [("&offset=-1", "negative"), ("&offset=x", "offset")],
+)
+def test_get_file_offset_validation_reaches_the_client(query, fragment):
+    """DB 에 닿기 전에 걸린다 — 죽은 DSN 이어도 422 다 (D36)."""
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    r = client.get(f"/v1/files?project=sillok&path=docs/plan.md{query}")
+    assert r.status_code == 422
+    assert fragment in r.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "fragment"),
+    [
+        ({"project": "sillok", "path": "docs/plan.md"}, "body required"),
+        ({"project": "sillok", "path": "docs/plan.md", "body": 7}, "body required"),
+        (
+            {"project": "sillok", "path": "docs/plan.md", "body": "새 본문", "base_hash": "a" * 64},
+            "base_hash",
+        ),
+    ],
+)
+def test_save_doc_validation_reaches_the_client(payload, fragment):
+    """D40: 접두사 없는 16진도 거절이다. 관대하게 벗기지 않는다."""
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    r = client.post("/v1/docs/proposals", json=payload)
+    assert r.status_code == 422
+    assert fragment in r.json()["error"]["message"]
+
+
+def test_nul_in_path_is_validation_over_http():
+    """살아 있는 Service 에서 이것이 INTERNAL 500 이었다 (Grok 이 라이브에서 찾았다)."""
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    r = client.get("/v1/files", params={"project": "sillok", "path": "docs/plan.md\x00.txt"})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION"
+
+
+def test_ingest_refuses_another_workspace_over_http(tmp_path):
+    """D37: 같은 거절이 HTTP 얼굴에도 걸린다 — CLI 에만 걸면 이 문으로 우회된다."""
+    client = _client(
+        database_url="postgresql://sillok:x@127.0.0.1:1/sillok", workspace=str(tmp_path)
+    )
+    r = client.post("/v1/ingest", json={"project": "sillok", "workspace": str(tmp_path.parent)})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION"
+    assert "SILLOK_WORKSPACE" in r.json()["error"]["message"]
 
 
 @pytest.mark.parametrize(

@@ -331,6 +331,20 @@ const CASES = [
     mutate: append('docs/spec.md', NL + 'CONFLICT 는 예약. v1은 발신하지 않는다.' + NL),
   },
   {
+    // 7단계가 구현되면서 낡은 문장. 6단계에서 이미 한 번 난 부류라 문구마다 등록한다.
+    id: '25c 7단계가 폐기한 "아직 404" 문구',
+    expect: 'fail',
+    mentions: ['폐기된 문구', 'get_file'],
+    mutate: append('docs/spec.md', NL + '아직이다 — 그 경로는 정직하게 404다' + NL),
+  },
+  {
+    // 영문 README 만 낡는 부류. 한국어 쪽을 고치고 저쪽을 잊는 것이 실제로 났다.
+    id: '25d 영문 README 의 폐기 문구',
+    expect: 'fail',
+    mentions: ['폐기된 문구', 'those routes honestly return 404'],
+    mutate: append('docs/spec.md', NL + 'Not yet — those routes honestly return 404' + NL),
+  },
+  {
     // D34 는 확장을 선언만 하고 쓰지 않기로 정했다. 검사가 없으면 다음 사람이 조용히 쓴다.
     // 인덱스가 실제로 들어올 자리는 migrations/ 라 거기까지 본다.
     id: '26b migrations 에 trgm 인덱스가 들어오면 운다',

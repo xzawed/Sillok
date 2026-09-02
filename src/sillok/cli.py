@@ -46,7 +46,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # D19 가 정한 인자만 둔다. --paths·--since·--commit-sha 를 만들지 않는다 —
     # 부분 목록에서는 삭제 판정이 성립하지 않는다 (D30).
     ingest.add_argument("--project", required=True, help="색인 대상 project (D5)")
-    ingest.add_argument("--workspace", default=None, help="기본값: SILLOK_WORKSPACE")
+    # SILLOK_WORKSPACE 와 **같은 나무**여야 한다 (D37). 다르면 거절한다 —
+    # 저쪽을 색인해 두면 get_file 이 이 나무를 저쪽의 path 로 연다.
+    ingest.add_argument("--workspace", default=None, help="기본값: SILLOK_WORKSPACE (달라선 안 된다)")
     return parser
 
 
@@ -108,10 +110,12 @@ def main(argv: list[str] | None = None) -> int:
 
         cfg = config.load()
         try:
+            # D37: SILLOK_WORKSPACE 와 다른 나무는 거절한다. 거절은 CLI 에서 끝난다 —
+            # VALIDATION 은 HTTP 표면의 코드이고(D21), 여기서는 종료 코드와 문구다.
             run = service.ingest(
                 cfg.database_url,
                 args.project,
-                args.workspace or cfg.workspace,
+                service.resolve_workspace(args.workspace, cfg.workspace),
                 cfg.openai_api_key,
             )
         except service.IngestLocked as exc:
