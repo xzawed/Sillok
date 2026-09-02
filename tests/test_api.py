@@ -559,3 +559,49 @@ def test_stage7_failures_stay_inside_the_error_table(method, path, func, payload
     assert code in api.STATUS_FOR_CODE
     assert r.status_code == api.STATUS_FOR_CODE[code]
     assert isinstance(body["error"]["message"], str)
+
+
+# --- 반복된 질의 인자 (프레임워크의 우연한 기본값) --------------------------
+#
+# 계약에 문장이 없다. AGENTS `테스트를 쓰는 방식` 이 이런 것을 **찾은 자리에서 잠그라**고 한다 —
+# `Headers.get` 이 첫 값만 보던 것과 같은 부류다. 그때는 D7 게이트를 우회하는 길이었고,
+# 여기는 우회할 게이트가 없어 동작을 못 박기만 한다.
+#
+# **주입 대신 관측이다.** 고칠 대상이 우리 코드가 아니라 Starlette 의 파서라,
+# 두 값이 **실제로 다른** 요청을 보내고 어느 쪽이 함수까지 갔는지 본다.
+# 기본값이 뒤집히면(첫 값이 이기면) 이 검사가 붉어진다.
+
+
+def _capture(seen):
+    def _fake(*args, **kwargs):
+        seen["args"] = args + tuple(kwargs.values())
+        return {}
+
+    return _fake
+
+
+@pytest.mark.parametrize(
+    ("path", "func"),
+    [
+        ("/v1/events/1?project=first&project=last", "get_event"),
+        ("/v1/files?path=docs/a.md&project=first&project=last", "get_file"),
+        ("/v1/status?project=first&project=last", "kb_status"),
+        ("/v1/stats/events?project=first&project=last", "event_stats"),
+    ],
+)
+def test_a_repeated_query_parameter_takes_the_last_value(monkeypatch, path, func):
+    seen: dict[str, tuple] = {}
+    monkeypatch.setattr(service, func, _capture(seen))
+    r = _client().get(path)
+    assert r.status_code == 200
+    assert "last" in seen["args"], f"{func} 가 받은 값: {seen['args']}"
+    assert "first" not in seen["args"]
+
+
+def test_a_repeated_offset_takes_the_last_value(monkeypatch):
+    """숫자 인자도 같다. 창을 페이징하는 클라이언트가 두 번 붙여 보내도 뒤엣것이 쓰인다."""
+    seen: dict[str, tuple] = {}
+    monkeypatch.setattr(service, "get_file", _capture(seen))
+    r = _client().get("/v1/files?project=p&path=docs/a.md&offset=1&offset=2")
+    assert r.status_code == 200
+    assert 2 in seen["args"] and 1 not in seen["args"], seen["args"]
