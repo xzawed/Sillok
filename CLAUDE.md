@@ -5,14 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 이 저장소의 성격
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
-[docs/plan.md](docs/plan.md) §7의 **1–6단계까지 구현돼 있고 7단계부터는 아직 없다.**
+[docs/plan.md](docs/plan.md) §7의 **1–7단계까지 구현돼 있고 8단계부터는 아직 없다.**
 (진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
-`src/sillok/`(config · migrations 러너 · api · ingest·search 규칙 · CLI `migrate`/`serve`/`ingest`), `tests/`.
-**업무 라우트는 여섯이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` ·
-`POST /v1/ingest`(5단계, MCP 에는 노출하지 않는다) · `POST /v1/search/docs` · `POST /v1/search/events`.
-`get_file`·`save_doc`·MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
-없는 것: MCP 도구 표면, `get_file`·`save_doc` — 순서대로 붙인다.
+`src/sillok/`(config · migrations 러너 · api · ingest·search 규칙 · workspace 걸음 ·
+CLI `migrate`/`serve`/`ingest`), `tests/`.
+**업무 라우트는 아홉이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` ·
+`POST /v1/ingest`(5단계, MCP 에는 노출하지 않는다) · `POST /v1/search/docs` · `POST /v1/search/events` ·
+`GET /v1/events/{id}` · `GET /v1/files` · `POST /v1/docs/proposals`.
+MCP 경로는 정직하게 404다. 스텁을 만들지 않는다.
+없는 것: MCP 도구 표면, `GET /v1/docs`(§7이 어느 단계에도 넣지 않았다) — 순서대로 붙인다.
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -27,7 +29,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 - 동작이 명세와 다르면 **코드가 틀린 것으로 본다.**
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
-- ADR의 D1–D15는 2026-08-30, D16–D20은 2026-08-31 확정. 임의로 뒤집지 않는다.
+- ADR의 D1–D15는 2026-08-30, D16–D28은 2026-08-31, D29–D34는 2026-09-01, D35–D41은 2026-09-02 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
 - **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [docs/conventions.md](docs/conventions.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
   소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 소유자를 지도에 추가한다.
@@ -35,11 +37,12 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 ### 아직 답이 없는 것
 
 [docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
-추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D39 이후로 기록한다.
+추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D42 이후로 기록한다.
 
 A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**,
 B절은 Q6·Q7·Q10이 **D30–D32**로, Q8·Q9가 **D33–D34**로,
-C절의 Q12·Q15와 D절의 Q19·Q20이 **D35–D38**로 마감됐다 —
+C절의 Q12·Q15와 D절의 Q19·Q20이 **D35–D38**로,
+F절의 Q27–Q29(7단계를 구현하다 드러난 침묵)가 **D39–D41**로 마감됐다 —
 작업 순서 1–7단계를 이제 검증할 수 있다.
 남은 것은 하나다:
 **8단계 전에 Q17**.

@@ -40,6 +40,38 @@ def test_unknown_command_is_rejected():
     assert exc.value.code != 0
 
 
+def test_ingest_refuses_a_different_workspace(capsys, monkeypatch, tmp_path):
+    """D37: ingest 와 get_file 은 같은 뿌리를 봐야 한다.
+
+    저쪽 나무를 색인해 두면 `get_file` 은 **이 나무**를 저쪽의 path 로 연다 —
+    같은 경로에 다른 내용이 있으면 조용히 남의 파일을 돌려준다.
+    거절은 CLI 에서 끝난다 (0 이 아닌 종료 코드 + 사람이 읽는 문구). DB 에 닿지 않는다.
+    """
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv("SILLOK_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sillok:secret@127.0.0.1:1/sillok")
+
+    assert cli.main(["ingest", "--project", "sillok", "--workspace", str(other)]) == 1
+    err = capsys.readouterr().err
+    assert "SILLOK_WORKSPACE" in err
+    assert "secret" not in err
+
+
+def test_ingest_accepts_the_same_tree_spelled_differently(monkeypatch, tmp_path):
+    """`.` 과 절대 경로가 같은 곳을 가리키면 통과한다 — 거절은 문자열이 아니라 경로를 본다.
+
+    거절되지 않았다는 것은 **DB 까지 갔다**는 뜻이고, 죽은 DSN 이라 거기서 끝난다.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SILLOK_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sillok:secret@127.0.0.1:1/sillok")
+
+    with pytest.raises(Exception) as exc:
+        cli.main(["ingest", "--project", "sillok", "--workspace", "."])
+    assert "SILLOK_WORKSPACE" not in str(exc.value)
+
+
 def test_registered_commands_are_exactly_the_implemented_ones():
     """구현되지 않은 명령을 파서에 미리 만들어 두지 않는다.
 

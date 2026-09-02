@@ -133,6 +133,33 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
   응답은 파일이 아니라 **4000자 창**이고 `offset`·`next_offset`·`total_bytes`는 바이트다.
   `project`는 경로 성분이 아니다. 한 인스턴스는 한 workspace를 섬긴다 (D37)
 
+`get_event`의 응답 `data`는 **그 행 자체다** (D39). 한 겹 싸지 않는다.
+
+```json
+{ "id": 1, "project": "sillok", "module": "auth", "kind": "failure",
+  "title": "…", "summary": "…", "root_cause": "…", "resolution": "…",
+  "result": "failure", "severity": "high",
+  "occurred_at": "2026-08-31T09:00:00+00:00", "resolved_at": null,
+  "source": "agent", "related_doc_path": null, "payload": {},
+  "created_at": "2026-08-31T09:04:11+00:00", "created_by": "claude" }
+```
+
+`save_event`가 받는 필드에 `id`와 `created_at`을 더한 것이다.
+`tsv`는 생성 컬럼이라, `embedding`은 v1이 채우지 않으므로(D34) 싣지 않는다.
+시각은 ISO-8601 문자열이다.
+
+`get_file`의 응답 `data`도 평평하다 (D36).
+
+```json
+{ "project": "sillok", "path": "docs/plan.md", "text": "…",
+  "offset": 0, "next_offset": 3980, "total_bytes": 24117, "truncated": true }
+```
+
+`text`는 **원본 바이트를 그대로 푼 것이다** — 정규화하지 않는다 (D41).
+창의 세 숫자가 바이트이므로 정규화하면 그 숫자가 무엇의 offset인지 사라진다.
+`truncated`는 `next_offset < total_bytes`와 같은 뜻이고, `offset == total_bytes`는
+오류가 아니라 끝이다(빈 `text`). 가장자리 표는 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md) D36이 소유한다.
+
 ### 저장
 
 `POST /v1/events`
@@ -187,6 +214,15 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 - `path`는 `get_file`과 같은 판정을 받는다 — `kb_documents`에 행이 있어야 한다. 없으면 404
 - `body`는 **문서 전체**다. 부분 패치를 받지 않는다
 - `base_hash`가 있고 현재 내용 해시와 다르면 `CONFLICT` 409. 없으면 검사하지 않는다
+- `base_hash`의 형식은 `sha256:` + **소문자 16진 64자**다 (D40).
+  콜론 뒤는 D30 `content_hash`와 같은 문자열이고, 다른 형식은 `VALIDATION`이다 —
+  접두사를 관대하게 벗기지 않는다
+- **`save_doc`이 보는 현재 내용은 정규화한 텍스트다** (D41) — 선행 BOM 제거, CRLF와 홀로 있는 CR을 LF로.
+  해시와 diff가 같은 텍스트를 본다. `body`도 같은 정규화를 거친다.
+  `get_file`의 창이 원본 바이트인 것과 **일부러 다르다**
+- `body`가 현재 내용과 같으면 `diff`는 빈 문자열이고 `exists: true`다. 오류가 아니다 (D38)
+- 행은 있는데 파일이 없거나 열 수 없으면 `exists: false`, `diff`는 `/dev/null`에서의 추가다.
+  그 상태에서 `base_hash`를 보냈으면 `CONFLICT`다 (D41)
 - **새 문서 제안은 v1 비범위다** — 색인된 경로만 고칠 수 있다
 
 ### 통계

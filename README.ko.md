@@ -151,7 +151,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 | Compose · 마이그레이션 · FastAPI 골격 | 된다 |
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
 | 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 팔이 비는데 그것이 설계상 정상이다 |
-| `get_file` · `save_doc` | **아직이다 — 그 경로는 정직하게 404다** |
+| `get_event` · `get_file` · `save_doc` | 된다. `get_file`은 색인된 행만 열고 4000자 창으로 답하며, `save_doc`은 제안만 돌려주고 Git을 건드리지 않는다 |
 | 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다 |
 | MCP 도구 | **아직이다 — 도구 표면 자체가 없다** |
 

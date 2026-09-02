@@ -196,8 +196,13 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
 - [x] `search_docs`, `search_events`, `event_stats`가 한 project에서 돈다 — 2026-09-01 실측.
       키가 없어 벡터 팔은 비어 있고 그것이 D2 의 정상 상태다. RRF 는 한 목록 위에서
       그 순위의 단조 재표기이므로 순서는 키워드 순서와 같다
-- [ ] `get_file`이 workspace의 해당 path를 돌려준다
-- [ ] `save_doc`이 Git을 변경하지 않는다
+- [x] `get_file`이 workspace의 해당 path를 돌려준다 — 2026-09-02 실측.
+      살아 있는 Service 에 대고 `docs/plan.md`를 열었고 응답은 파일이 아니라 4000자 창이었다.
+      창을 이어 붙이면 파일 전체이고, 색인 밖(`docker-compose.yml`·`.env`)과 `./`가 붙은 경로는 404다 —
+      **색인이 곧 허용 목록이다** (D36)
+- [x] `save_doc`이 Git을 변경하지 않는다 — 2026-09-02 실측.
+      CRLF로 저장된 `docs/spec.md`에 LF 본문을 제안하니 `diff`가 빈 문자열이었고(D41),
+      `base_hash` 불일치는 409, 접두사 없는 해시는 422였다. 응답이 전부이고 파일은 그대로다
 - [ ] MCP 도구 8개가 Service와 동일 동작
 - [ ] 검색 0건이 `kb_query_logs`에 `hit_count=0`으로 남는다
 
@@ -213,9 +218,9 @@ curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
 uv run pytest -q
 ```
 
-> **3번째 줄의 `exec api` 는 아직 확인하지 않았다.** `sillok ingest` 는 5단계에서 생겼지만
-> `Dockerfile` 이 가상환경 경로를 PATH 에 넣지 않아 그 형태로 도는지는 실행해 보지 않았다 (D30).
-> 5단계 검증은 `--profile test` 안에서 같은 Service 함수를 불러 했다.
+> **3번째 줄의 `exec api` 는 2026-09-02 에 확인했다.** 처음 돌렸을 때는 `sillok` 이 PATH 에 없어
+> `executable file not found` 로 죽었다 — `Dockerfile` 의 runtime 스테이지가 `/app/.venv/bin` 을
+> PATH 에 넣도록 고쳤고, 지금은 그 형태로 돈다. 5단계 검증은 `--profile test` 안에서 같은 Service 함수를 불러 했다.
 > `/v1/status`는 4단계에서 생겼으므로 4번째 줄은 돈다.
 > 5번째 줄은 호스트에서 DB 검사가 skip된 채로 돈다 — 전부 돌리려면 D22의 `--profile test`다.
 > 이 블록은 **v1 목표**이지 현재 상태가 아니다.

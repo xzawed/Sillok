@@ -1,4 +1,4 @@
-"""FastAPI 어댑터 (plan.md §7 3–4단계, D21·D23–D25).
+"""FastAPI 어댑터 (plan.md §7 3–7단계, D21·D23–D25·D35–D41).
 
 **여기에는 SQL이 없다.** 라우트는 인자를 읽어 `service.py`의 함수를 부를 뿐이다 (D19).
 `api.py`가 직접 DB를 만지기 시작하면 데이터 접근 계층이 둘이 된다.
@@ -6,9 +6,10 @@
 무엇이 오든 공통 봉투로 답한다 — FastAPI 기본 응답 `{"detail": ...}`은
 service-and-mcp.md 계약 위반이므로 전부 덮는다.
 
-붙어 있는 업무 라우트는 4단계의 셋, 5단계의 ingest, 6단계의 검색 둘이다.
-`get_file`·`save_doc`·MCP는 아직 없고 그 경로들은 정직하게 404다 —
+붙어 있는 업무 라우트는 4단계의 셋, 5단계의 ingest, 6단계의 검색 둘, 7단계의 단건·제안 셋이다.
+MCP는 아직 없고 그 경로들은 정직하게 404다 (8단계는 Q17이 막고 있다) —
 뜨기만 하는 스텁을 §9 판정 대상에 올리지 않는다.
+`GET /v1/docs`는 §7이 어느 단계에도 넣지 않았으므로 여기서 단계를 발명하지 않는다.
 """
 
 from __future__ import annotations
@@ -188,7 +189,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http(_: Request, exc: StarletteHTTPException) -> JSONResponse:
-        # 없는 경로의 404 가 여기로 온다. get_event 의 404 대 빈 결과는 Q12 로 열려 있다.
+        # 없는 **경로**의 404 가 여기로 온다. 없는 **행**의 404 는 service.NotFound 다 (D35).
         return error(_code_for_status(exc.status_code), str(exc.detail))
 
     @app.exception_handler(Exception)
@@ -201,6 +202,17 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def _service_validation(_: Request, exc: service.ValidationFailed) -> JSONResponse:
         # D21: VALIDATION 만 메시지를 그대로 돌려준다. 클라이언트가 고쳐야 하는 것이라서다.
         return error(ErrorCode.VALIDATION, str(exc))
+
+    @app.exception_handler(service.NotFound)
+    async def _not_found(_: Request, exc: service.NotFound) -> JSONResponse:
+        # D35: 지목한 조회에 답이 없다. 없는 id 와 남의 id 는 같은 응답이다 —
+        # 메시지도 service 가 고정 문구로 준다.
+        return error(ErrorCode.NOT_FOUND, str(exc))
+
+    @app.exception_handler(service.BaseHashMismatch)
+    async def _base_hash(_: Request, exc: service.BaseHashMismatch) -> JSONResponse:
+        # CONFLICT 의 둘째 발신자다 (D38). D32 의 문구를 쓰지 않는다 — 원인이 다르다.
+        return error(ErrorCode.CONFLICT, service.BASE_HASH_MESSAGE)
 
     @app.exception_handler(service.IngestLocked)
     async def _ingest_locked(_: Request, exc: service.IngestLocked) -> JSONResponse:
@@ -220,7 +232,7 @@ def _since(raw: str | None) -> datetime | None:
 
 
 def _mount_v1(app: FastAPI, cfg: Config) -> None:
-    """4단계 셋과 5단계 ingest (plan §7). 여기서 SQL 을 쓰지 않는다 — service 함수만 부른다."""
+    """4–7단계의 라우트 (plan §7). 여기서 SQL 을 쓰지 않는다 — service 함수만 부른다."""
 
     @app.post("/v1/events")
     async def save_event(body: dict[str, Any]) -> JSONResponse:
@@ -251,12 +263,29 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
     async def run_ingest(body: dict[str, Any]) -> JSONResponse:
         # 운영자 진입점은 CLI 다 (D20). 여기는 같은 Service 함수의 HTTP 얼굴이고
         # 인자까지 같다 — 변경 파일 목록을 받지 않는다 (D30).
-        # run 행이 생긴 모든 경우에 ok: true 다. 이 라우트의 ok: false 는 락 거절 하나뿐이다.
+        # run 행이 생긴 모든 경우에 ok: true 다. ok: false 는 락 거절과 D37 거절뿐이다.
+        # **같은 거절이 이 얼굴에도 걸린다** — CLI 에만 걸면 이 문으로 우회된다 (D37).
         return ok(
             service.ingest(
                 cfg.database_url,
                 body.get("project"),
-                body.get("workspace") or cfg.workspace,
+                service.resolve_workspace(body.get("workspace"), cfg.workspace),
                 cfg.openai_api_key,
             )
         )
+
+    @app.get("/v1/events/{event_id}")
+    async def get_event(event_id: int, project: str) -> JSONResponse:
+        # project 는 필수다 (D35). 없으면 FastAPI 요청 검증이 VALIDATION 으로 접는다.
+        # 정수가 아닌 {id} 도 같은 자리에서 걸린다.
+        return ok(service.get_event(cfg.database_url, event_id, project))
+
+    @app.get("/v1/files")
+    async def get_file(project: str, path: str, offset: int = 0) -> JSONResponse:
+        # 뿌리는 하나다 (D37). project 는 원장의 라벨이지 경로 성분이 아니다.
+        return ok(service.get_file(cfg.database_url, project, path, offset, cfg.workspace))
+
+    @app.post("/v1/docs/proposals")
+    async def save_doc(body: dict[str, Any]) -> JSONResponse:
+        # v1 은 제안 본문과 diff 만 돌려준다. Git 에 쓰지 않는다 (D3·D38).
+        return ok(service.save_doc(cfg.database_url, body, cfg.workspace))
