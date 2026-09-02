@@ -212,11 +212,12 @@ def test_http_exception_5xx_does_not_leak_detail():
 @pytest.mark.parametrize(
     "path",
     [
-        # GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다 — 여기서 단계를 발명하지 않는다.
+        # GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다 — 여기서 단계를 발명하지 않는다 (Q30).
         "/v1/docs",
-        # 8단계. Q17 이 아직 열려 있다.
+        # MCP 는 /mcp 하나다 (D43). 접두사를 붙인 자리는 없다.
         "/v1/mcp",
-        "/mcp",
+        # 마운트가 아니라 두 경로만 이었으므로 그 아래는 이 앱의 404 봉투다 (D43).
+        "/mcp/nope",
     ],
 )
 def test_unbuilt_routes_do_not_exist_yet(path):

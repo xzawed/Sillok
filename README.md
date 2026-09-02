@@ -154,7 +154,7 @@ Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
 | Search — `POST /v1/search/docs` and `/v1/search/events` | Working. Without a key the vector arm is empty, which is the designed normal state |
 | `get_event`, `get_file`, `save_doc` | Working. `get_file` opens indexed rows only and answers with a 4000-character window; `save_doc` returns a proposal and never writes Git |
 | Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL |
-| MCP tools | **Not yet — the tool surface does not exist** |
+| MCP tools | Working. Eight tools over `POST /mcp` and stdio (`sillok mcp`); each answers with the same envelope as its HTTP face |
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 

@@ -27,7 +27,8 @@ HEADING_SEPARATOR = " > "
 # 색인 경로 (D9). 게이트의 INCLUDE 와 같은 집합을 봐야 한다 —
 # 다르면 "게이트는 초록인데 색인은 비어 있는" 부류가 생긴다.
 _ROOT_README = re.compile(r"^README[^/]*$", re.IGNORECASE)
-_SKIP_DIRS = {".git", "node_modules"}
+# D47. 게이트의 walk 와 **같은 목록**이어야 한다 — 두 벌이 되면 갈라진다.
+_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache"}
 
 # 게이트(scripts/check-layout.mjs)의 FRONT_MATTER 와 같은 것을 본다.
 # GitHub 이 front matter 로 인정하는 것을 기준으로 잡는다 (D29).

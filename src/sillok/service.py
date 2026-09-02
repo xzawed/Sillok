@@ -950,11 +950,25 @@ def _require_path(raw: object) -> str:
 
 
 def _require_offset(raw: object) -> int:
+    # 생략은 0 이다 (D36 가장자리 표). 기본값이 여기 하나뿐이어야 두 얼굴이 같은 값을 쓴다.
+    if raw is None:
+        return 0
     # bool 은 int 의 하위 타입이다. `offset=true` 를 0/1 로 받아들이지 않는다.
     if isinstance(raw, bool) or not isinstance(raw, int):
         raise ValidationFailed("offset must be an integer")
     if raw < 0:
         raise ValidationFailed("offset must not be negative")
+    return raw
+
+
+def _require_event_id(raw: object) -> int:
+    """HTTP 얼굴에서는 경로 인자라 늘 정수지만, MCP 도구에서는 비울 수 있다 (D42).
+
+    비운 채로 SQL 에 넣으면 `id = NULL` 이 되어 **없는 것과 같은 404** 가 나간다 —
+    인자를 안 준 것과 남의 것을 물은 것이 같은 답이 되어 D35 가 지키려던 구분이 사라진다.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValidationFailed("event_id must be an integer")
     return raw
 
 
@@ -987,6 +1001,7 @@ def get_event(dsn: str, event_id: int, project: object) -> dict[str, Any]:
     상태가 생기고, 로그·예외 문구 한 줄이 남의 이벤트 존재를 흘린다.
     """
     project = normalize_project(project)
+    event_id = _require_event_id(event_id)
     with connect(dsn) as conn, conn.cursor() as cur:
         row = cur.execute(
             f"SELECT {', '.join(EVENT_FIELDS)} FROM kb_events"

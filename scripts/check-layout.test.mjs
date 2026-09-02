@@ -12,7 +12,7 @@
 //
 // 사용: node scripts/check-layout.test.mjs
 
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -187,10 +187,31 @@ const CASES = [
     mutate: write('src/sillok/_probe.py', 'sub.add_parser("ingest")' + NL),
   },
   {
-    id: '12 8단계 MCP import',
+    // 8단계(Q17)가 D42–D46 으로 닫히면서 이 import 는 더 이상 막히지 않는다.
+    // 케이스 09·10·11 과 같은 형태로 바꾼다 — Q 를 다시 열어 게이트가 문서를 따라가는지 본다.
+    id: '12 Q17 을 다시 열면 8단계 MCP import 가 막힌다',
     expect: 'fail',
     mentions: ['8단계', 'Q17'],
-    mutate: write('src/sillok/_probe.py', 'from mcp import server\n'),
+    mutate: (dir) => {
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('— **해결 → D42–D46.**', ''))
+      write('src/sillok/_probe.py', 'from mcp import server' + NL)(dir)
+    },
+  },
+  {
+    // 반대 방향. 닫힌 단계의 표면은 통과해야 한다 (09b · 10b · 11b 와 같은 이유).
+    id: '12b 8단계 MCP import 는 이제 통과한다',
+    expect: 'pass',
+    mutate: write('src/sillok/_probe.py', 'from mcp import server' + NL),
+  },
+  {
+    // CLI 분기도 8단계를 안다 (D45). Q 를 다시 열어 그 분기가 살아 있는지 본다.
+    id: '12c Q17 을 다시 열면 CLI mcp 가 막힌다',
+    expect: 'fail',
+    mentions: ['8단계', 'Q17', 'CLI mcp'],
+    mutate: (dir) => {
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('— **해결 → D42–D46.**', ''))
+      write('src/sillok/_probe.py', 'sub.add_parser("mcp")' + NL)(dir)
+    },
   },
   {
     id: '13 APIRouter(prefix) + 상대 경로',
@@ -331,6 +352,35 @@ const CASES = [
     mutate: append('docs/spec.md', NL + 'CONFLICT 는 예약. v1은 발신하지 않는다.' + NL),
   },
   {
+    // D47. 가상환경은 우리 문서가 아니다 — 서드파티의 끊긴 링크로 게이트가 붉어졌던 자리다.
+    // 복사본에는 .venv 가 없으므로 여기서 만들어 넣는다.
+    id: '25e .venv 안의 깨진 링크는 무시한다',
+    expect: 'pass',
+    mutate: (dir) => {
+      mkdirSync(join(dir, '.venv/pkg'), { recursive: true })
+      writeFileSync(
+        join(dir, '.venv/pkg/NOTICE.md'),
+        '# 서드파티' + NL + '[없는 파일](../../License.txt)' + NL,
+        'utf8'
+      )
+    },
+  },
+  {
+    // 그 건너뛰기가 실제로 무는지. 목록에서 .venv 를 빼면 같은 주입이 붉어져야 한다.
+    id: '25f 건너뛰기를 끄면 그 링크가 걸린다',
+    expect: 'fail',
+    mentions: ['끊긴 링크'],
+    mutate: (dir) => {
+      mkdirSync(join(dir, '.venv/pkg'), { recursive: true })
+      writeFileSync(
+        join(dir, '.venv/pkg/NOTICE.md'),
+        '# 서드파티' + NL + '[없는 파일](../../License.txt)' + NL,
+        'utf8'
+      )
+      edit(dir, 'scripts/check-layout.mjs', (s) => s.replace("'.venv', ", ''))
+    },
+  },
+  {
     // 7단계가 구현되면서 낡은 문장. 6단계에서 이미 한 번 난 부류라 문구마다 등록한다.
     id: '25c 7단계가 폐기한 "아직 404" 문구',
     expect: 'fail',
@@ -379,9 +429,11 @@ const CASES = [
   {
     // 가장 흔한 실수는 하나만 고치는 것이 아니라 **셋을 한 번에 틀리게 고치는 것**이다.
     // 일치만 보는 검사는 여기서 초록불을 준다. Q 게이트에서 N 을 유도하는 이유다.
+    // 막는 Q 가 남아 있을 때는 사유가 "n단계를 막는 Q" 이고, 다 풀린 뒤에는
+    // "하나도 남지 않았다" 다. 사유 문구를 박지 않는다 — 박으면 Q 가 닫힐 때마다 낡는다.
     id: '27d 셋이 사이좋게 틀린 단계를 말해도 운다',
     expect: 'fail',
-    mentions: [`Q 게이트로는 1–${STAGE_NOW}단계다`, `${STAGE_NOW + 1}단계를 막는 Q`],
+    mentions: [`Q 게이트로는 1–${STAGE_NOW}단계다`, '문장이 아니라 Q 를 먼저 본다'],
     mutate: (dir) => {
       for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
         edit(dir, f, (s) => s.replaceAll(CLAIM_NOW, CLAIM_OFF))
@@ -398,15 +450,16 @@ const CASES = [
   {
     // 마지막 Q 가 닫히는 날 유도가 멈추면(예전 코드) 검사의 절반이 조용히 은퇴하고
     // "셋이 사이좋게 틀림" 이 다시 통과한다. Q17 이 닫히는 순간 — v1 이 끝나기 전이다.
-    id: '27g Q 가 다 풀리면 마지막 단계까지 올려야 한다',
+    // Q 가 다 풀린 지금은 반대 방향으로 주입한다 — 주장을 한 단계 **내리면** 운다.
+    // (예전에는 열린 Q 를 전부 닫아 주장이 낮은 것을 드러냈다. 이제는 그것이 기본 상태다.)
+    id: '27g Q 가 다 풀렸는데 주장이 낮으면 운다',
     expect: 'fail',
     mentions: ['Q 게이트로는 1–10단계다', '막는 Q 가 하나도 남지 않았다'],
-    mutate: (dir) =>
-      edit(dir, 'docs/open-questions.md', (t) =>
-        t.replace(/^(\*\*Q\d+\.[^\n]*)$/gm, (line) =>
-          line.includes('해결 →') ? line : line + ' — **해결 → D99**'
-        )
-      ),
+    mutate: (dir) => {
+      for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
+        edit(dir, f, (s) => s.replaceAll(CLAIM_NOW, claim(STAGE_NOW - 1)))
+      }
+    },
   },
   {
     // 마지막 단계를 §7 의 번호 목록에서 읽는다. 목록을 못 읽으면 N 을 정할 수 없는데
@@ -430,6 +483,8 @@ const CASES = [
     // lastStep 은 **막힌 단계가 없을 때만** 쓰인다. 펜스만 주입하면 그 가지에 닿지 못하고
     // stripCode 를 빼도 초록이다 — 실측으로 확인했다. Q 를 전부 닫아 그 가지로 들어간 뒤에 본다.
     // 기대 메시지가 1–10 인 것이 요점이다: 펜스 안의 11 을 세면 1–11 이 되고 이 케이스가 운다.
+    // 펜스 안의 `11.` 이 세어지면 게이트가 1–11 을 요구한다. 세지 않으므로 1–10 을 요구하고,
+    // 주장을 1–11 로 올려 둔 이 복사본은 **그 차이 때문에** 운다.
     id: '27j §7 펜스 안의 번호는 마지막 단계로 세지 않는다',
     expect: 'fail',
     mentions: ['Q 게이트로는 1–10단계다'],
@@ -437,11 +492,9 @@ const CASES = [
       edit(dir, 'docs/plan.md', (t) =>
         t.replace(NL + '10. 스모크', NL + '10. 스모크' + NL + NL + F3 + 'text' + NL + '11. 예시일 뿐이다' + NL + F3)
       )
-      edit(dir, 'docs/open-questions.md', (t) =>
-        t.replace(/^(\*\*Q\d+\.[^\n]*)$/gm, (line) =>
-          line.includes('해결 →') ? line : line + ' — **해결 → D99**'
-        )
-      )
+      for (const f of ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']) {
+        edit(dir, f, (s) => s.replaceAll(CLAIM_NOW, CLAIM_OFF))
+      }
     },
   },
   {

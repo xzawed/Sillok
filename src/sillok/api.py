@@ -6,16 +6,17 @@
 무엇이 오든 공통 봉투로 답한다 — FastAPI 기본 응답 `{"detail": ...}`은
 service-and-mcp.md 계약 위반이므로 전부 덮는다.
 
-붙어 있는 업무 라우트는 4단계의 셋, 5단계의 ingest, 6단계의 검색 둘, 7단계의 단건·제안 셋이다.
-MCP는 아직 없고 그 경로들은 정직하게 404다 (8단계는 Q17이 막고 있다) —
+붙어 있는 업무 라우트는 4단계의 셋, 5단계의 ingest, 6단계의 검색 둘, 7단계의 단건·제안 셋이고,
+8단계의 MCP 전송이 `POST /mcp`·`POST /mcp/` 둘로 붙는다 (D43).
+`GET /v1/docs`는 §7이 어느 단계에도 넣지 않았으므로 여기서 단계를 발명하지 않는다 (Q30).
 뜨기만 하는 스텁을 §9 판정 대상에 올리지 않는다.
-`GET /v1/docs`는 §7이 어느 단계에도 넣지 않았으므로 여기서 단계를 발명하지 않는다.
 """
 
 from __future__ import annotations
 
 import logging
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
@@ -25,6 +26,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.routing import Route
 
 from . import service
 from .config import Config
@@ -67,15 +69,15 @@ NOT_FOUND_MESSAGES = frozenset(
 )
 
 
-def ok(data: object = None) -> JSONResponse:
-    return JSONResponse({"ok": True, "data": data if data is not None else {}})
+def envelope_ok(data: object = None) -> dict[str, Any]:
+    """성공 봉투. **모양이 한 곳에만 있어야 두 얼굴이 같은 문자열을 낸다** (D46)."""
+    return {"ok": True, "data": data if data is not None else {}}
 
 
-def error(code: str, message: str) -> JSONResponse:
-    """실패 응답은 **반드시 이 함수를 지난다.**
+def envelope_error(code: str, message: str) -> tuple[dict[str, Any], int]:
+    """실패 봉투와 그 상태코드. **실패 응답은 반드시 이 함수를 지난다.**
 
-    4단계 이후 라우트가 JSONResponse 로 봉투를 직접 만들면 여기의 고정 장치가
-    통째로 우회된다. 봉투를 손으로 조립하지 않는다.
+    라우트나 MCP 도구가 봉투를 손으로 조립하면 여기의 고정 장치가 통째로 우회된다.
     """
     status = STATUS_FOR_CODE.get(code)
     if status is None:
@@ -91,9 +93,44 @@ def error(code: str, message: str) -> JSONResponse:
             log.error("INTERNAL 메시지를 버렸다: %r", message)
         message = INTERNAL_MESSAGE
 
-    return JSONResponse(
-        {"ok": False, "error": {"code": code, "message": message}}, status_code=status
-    )
+    return {"ok": False, "error": {"code": code, "message": message}}, status
+
+
+def classify(exc: BaseException) -> tuple[str, str]:
+    """예외를 계약의 코드와 문구로 접는다.
+
+    **HTTP 핸들러와 MCP 도구가 같은 이것을 쓴다** (D46). 두 얼굴이 매핑을 따로 가지면
+    한쪽만 고쳐지는 날이 온다 — 이 저장소의 재발 1위 부류다.
+    """
+    if isinstance(exc, service.ValidationFailed):
+        # D21: VALIDATION 만 메시지를 그대로 돌려준다. 클라이언트가 고쳐야 하는 것이라서다.
+        return ErrorCode.VALIDATION, str(exc)
+    if isinstance(exc, service.NotFound):
+        # D35: 없는 id 와 남의 id 는 같은 응답이다. 문구는 service 의 세 상수뿐이고,
+        # **그 목록 밖이면 버린다** — 이 분기만 예외 문구를 그대로 흘리므로 나중에
+        # NotFound(f"...{exc}") 가 하나 들어오면 경로나 DSN 이 그 길로 샌다.
+        # **없는 경로**의 404 는 여기로 오지 않는다 (그쪽은 StarletteHTTPException 이다).
+        message = str(exc)
+        if message not in NOT_FOUND_MESSAGES:
+            log.error("계약에 없는 NOT_FOUND 문구를 버렸다: %r", message)
+            message = NOT_FOUND_FALLBACK
+        return ErrorCode.NOT_FOUND, message
+    if isinstance(exc, service.BaseHashMismatch):
+        # CONFLICT 의 둘째 발신자다 (D38). D32 의 문구를 쓰지 않는다 — 원인이 다르다.
+        return ErrorCode.CONFLICT, service.BASE_HASH_MESSAGE
+    if isinstance(exc, service.IngestLocked):
+        # D32 가 만든 첫 발신자. 이 분기가 없으면 락 거절이 409 가 아니라 500 이 된다.
+        return ErrorCode.CONFLICT, service.LOCKED_MESSAGE
+    return ErrorCode.INTERNAL, INTERNAL_MESSAGE
+
+
+def ok(data: object = None) -> JSONResponse:
+    return JSONResponse(envelope_ok(data))
+
+
+def error(code: str, message: str) -> JSONResponse:
+    body, status = envelope_error(code, message)
+    return JSONResponse(body, status_code=status)
 
 
 def _code_for_status(status: int) -> str:
@@ -176,7 +213,23 @@ def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or Config(
         database_url="", host="", port=0, workspace="", bearer_token="", openai_api_key=""
     )
+
+    # **여기서 부른다.** mcp_server 가 이 파일의 봉투와 매핑을 쓰므로 (D46) 모듈 층에서
+    # 서로를 import 하면 순환이 된다. cli.py 가 uvicorn 을 늦게 부르는 것과 같은 이유다.
+    from . import mcp_server as mcp_tools
+
+    mcp = mcp_tools.build(cfg)
+    mcp_transport = mcp_tools.transport(mcp)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        # 이것을 돌리지 않으면 /mcp 가 "Task group is not initialized" 로 죽는다.
+        # 마운트한 앱의 lifespan 은 Starlette 이 돌려 주지 않고, 우리는 마운트도 하지 않는다 (D43).
+        async with mcp.session_manager.run():
+            yield
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Sillok",
         version="0.0.1",
         # D12: 사람이 볼 웹 페이지는 v1 비범위. openapi_url 까지 꺼야 한다 —
@@ -207,38 +260,25 @@ def create_app(config: Config | None = None) -> FastAPI:
         log.exception("처리되지 않은 예외: %s %s", request.method, request.url.path)
         return error(ErrorCode.INTERNAL, INTERNAL_MESSAGE)
 
-    @app.exception_handler(service.ValidationFailed)
-    async def _service_validation(_: Request, exc: service.ValidationFailed) -> JSONResponse:
-        # D21: VALIDATION 만 메시지를 그대로 돌려준다. 클라이언트가 고쳐야 하는 것이라서다.
-        return error(ErrorCode.VALIDATION, str(exc))
+    async def _service_failure(_: Request, exc: Exception) -> JSONResponse:
+        # 매핑은 classify 하나뿐이다 — MCP 도구가 같은 것을 쓴다 (D46).
+        return error(*classify(exc))
 
-    @app.exception_handler(service.NotFound)
-    async def _not_found(_: Request, exc: service.NotFound) -> JSONResponse:
-        # D35: 지목한 조회에 답이 없다. 없는 id 와 남의 id 는 같은 응답이다 —
-        # 메시지도 service 가 고정 문구로 준다. 그 목록 밖이면 버리고 로그에만 남긴다.
-        message = str(exc)
-        if message not in NOT_FOUND_MESSAGES:
-            log.error("계약에 없는 NOT_FOUND 문구를 버렸다: %r", message)
-            message = NOT_FOUND_FALLBACK
-        return error(ErrorCode.NOT_FOUND, message)
-
-    @app.exception_handler(service.BaseHashMismatch)
-    async def _base_hash(_: Request, exc: service.BaseHashMismatch) -> JSONResponse:
-        # CONFLICT 의 둘째 발신자다 (D38). D32 의 문구를 쓰지 않는다 — 원인이 다르다.
-        return error(ErrorCode.CONFLICT, service.BASE_HASH_MESSAGE)
-
-    @app.exception_handler(service.IngestLocked)
-    async def _ingest_locked(_: Request, exc: service.IngestLocked) -> JSONResponse:
-        # D32 가 만든 CONFLICT 발신자다 (D38 의 base_hash 불일치가 둘째다).
-        # 이 핸들러가 없으면 포괄 예외에 걸려
-        # 락 거절이 409 가 아니라 500 으로 나간다. 문구는 고정이다.
-        return error(ErrorCode.CONFLICT, service.LOCKED_MESSAGE)
+    for failure in (
+        service.ValidationFailed,
+        service.NotFound,
+        service.BaseHashMismatch,
+        service.IngestLocked,
+    ):
+        app.add_exception_handler(failure, _service_failure)
 
     _mount_v1(app, cfg)
+    _mount_mcp(app, mcp_transport)
     return app
 
 
-def _since(raw: str | None) -> datetime | None:
+def since_filter(raw: str | None) -> datetime | None:
+    """`since` 질의 인자를 시각으로 바꾼다. **두 얼굴이 같은 것을 쓴다** (D46)."""
     if raw is None:
         return None
     return service.parse_timestamp(raw, "since")
@@ -255,7 +295,7 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
     async def event_stats(
         project: str, module: str | None = None, since: str | None = None
     ) -> JSONResponse:
-        return ok(service.event_stats(cfg.database_url, project, module, _since(since)))
+        return ok(service.event_stats(cfg.database_url, project, module, since_filter(since)))
 
     @app.get("/v1/status")
     async def kb_status(project: str) -> JSONResponse:
@@ -294,11 +334,27 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
         return ok(service.get_event(cfg.database_url, event_id, project))
 
     @app.get("/v1/files")
-    async def get_file(project: str, path: str, offset: int = 0) -> JSONResponse:
+    async def get_file(project: str, path: str, offset: int | None = None) -> JSONResponse:
         # 뿌리는 하나다 (D37). project 는 원장의 라벨이지 경로 성분이 아니다.
+        # offset 의 기본값(0)은 **Service 한 곳에만** 둔다 — 두 얼굴이 같은 값을 쓰게 (D36·D46).
         return ok(service.get_file(cfg.database_url, project, path, offset, cfg.workspace))
 
     @app.post("/v1/docs/proposals")
     async def save_doc(body: dict[str, Any]) -> JSONResponse:
         # v1 은 제안 본문과 diff 만 돌려준다. Git 에 쓰지 않는다 (D3·D38).
         return ok(service.save_doc(cfg.database_url, body, cfg.workspace))
+
+
+def _mount_mcp(app: FastAPI, transport: object) -> None:
+    """8단계 (D43). **마운트하지 않는다** — 정확히 두 경로만 잇는다.
+
+    뿌리에 마운트하면 라우트에 걸리지 않은 모든 경로가 MCP 앱으로 흘러 D21 의 봉투가 깨지고,
+    `/mcp` 에 마운트하면 `redirect_slashes` 를 끈 탓에 맨 `/mcp` 가 잡히지 않는다 (둘 다 실측).
+    두 경로만 이으면 `/mcp/아무거나` 는 이 앱의 404 봉투로 돌아온다.
+    """
+    from . import mcp_server as mcp_tools
+
+    for path in (mcp_tools.MCP_PATH, mcp_tools.MCP_PATH + "/"):
+        app.router.routes.append(
+            Route(path, endpoint=transport, methods=["GET", "POST", "DELETE"])
+        )

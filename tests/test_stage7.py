@@ -51,7 +51,7 @@ def test_other_base_hash_shapes_are_validation(bad):
 # --- offset 과 path (D36) ----------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", [-1, "0", 1.0, True, None])
+@pytest.mark.parametrize("bad", [-1, "0", 1.0, True])
 def test_offset_must_be_a_non_negative_integer(bad):
     with pytest.raises(service.ValidationFailed):
         service._require_offset(bad)
@@ -60,6 +60,15 @@ def test_offset_must_be_a_non_negative_integer(bad):
 def test_offset_defaults_are_integers():
     assert service._require_offset(0) == 0
     assert service._require_offset(4000) == 4000
+
+
+def test_an_absent_offset_is_zero():
+    """D36 가장자리 표: 생략은 0 이다.
+
+    기본값이 **Service 한 곳에만** 있어야 두 얼굴이 같은 값을 쓴다 (D46) —
+    MCP 도구에서는 이 인자를 비울 수 있다 (D42).
+    """
+    assert service._require_offset(None) == 0
 
 
 @pytest.mark.parametrize("path", ["", "docs/plan.md/", "docs//plan.md", "./docs/plan.md"])
