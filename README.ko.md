@@ -153,7 +153,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 | 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 팔이 비는데 그것이 설계상 정상이다 |
 | `get_event` · `get_file` · `save_doc` | 된다. `get_file`은 색인된 행만 열고 4000자 창으로 답하며, `save_doc`은 제안만 돌려주고 Git을 건드리지 않는다 |
 | 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다 |
-| MCP 도구 | **아직이다 — 도구 표면 자체가 없다** |
+| MCP 도구 | 된다. `POST /mcp` 와 stdio(`sillok mcp`)로 여덟 개. 각 도구는 HTTP 얼굴과 같은 봉투로 답한다 |
 
 > 진행 상태의 정본은 [docs/plan.md](docs/plan.md) §7·§9입니다.
 

@@ -1,6 +1,6 @@
 """sillok CLI.
 
-`migrate`(D17) · `serve`(D8·3단계) · `ingest`(D8·5단계) 셋이다.
+`migrate`(D17) · `serve`(D8·3단계) · `ingest`(D8·5단계) · `mcp`(D45·8단계) 넷이다.
 Q6·Q7·Q10 이 D30–D32 로 닫히기 전까지 `ingest` 는 만들지 않았다 —
 동작하지 않는 명령이 있으면 계약이 구현된 것처럼 보인다.
 
@@ -49,6 +49,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # SILLOK_WORKSPACE 와 **같은 나무**여야 한다 (D37). 다르면 거절한다 —
     # 저쪽을 색인해 두면 get_file 이 이 나무를 저쪽의 path 로 연다.
     ingest.add_argument("--workspace", default=None, help="기본값: SILLOK_WORKSPACE (달라선 안 된다)")
+
+    # D45. 편의 플래그가 아니라 D6 이 요구한 두 전송 중 하나다.
+    # serve 에 --stdio 를 붙이지 않는다 — 한 명령이 stdout 의 의미를 바꾸게 된다.
+    sub.add_parser("mcp", help="MCP 도구를 stdio 로 연다 (D6·D45)")
     return parser
 
 
@@ -67,7 +71,9 @@ def _force_utf8_output() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_output()
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # stream 을 못 박는다. 기본값도 stderr 이지만, `mcp` 의 stdout 은 프로토콜 채널이라
+    # 로그가 한 줄이라도 그리로 가면 클라이언트가 JSON-RPC 를 못 읽는다 (D45).
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     args = _build_parser().parse_args(argv)
 
     if args.command == "migrate":
@@ -139,6 +145,25 @@ def main(argv: list[str] | None = None) -> int:
         # ok 에만 0 이다. partial·failed·락 거절은 1 이고, 셋의 구분은
         # 종료 코드가 아니라 stderr 문구와 run 행이 한다 (D32).
         return 0 if run["status"] == "ok" else 1
+
+    if args.command == "mcp":
+        import anyio
+
+        from . import mcp_server
+
+        cfg = config.load()
+
+        # D17 과 같은 이유로 먼저 적용한다 — 스키마 없이 도구를 여는 것은 같은 상태다.
+        # **보고는 stderr 로만 간다.** stdout 은 JSON-RPC 채널이다 (D45).
+        try:
+            applied = migrations.apply(cfg.database_url)
+        except migrations.ConnectionFailed as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"마이그레이션 {len(applied)}건 실행", file=sys.stderr)
+
+        anyio.run(mcp_server.build(cfg).run_stdio_async)
+        return 0
 
     raise AssertionError(f"처리되지 않은 명령: {args.command}")
 

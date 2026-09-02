@@ -39,9 +39,12 @@ const problems = []
 const fail = (m) => problems.push(m)
 
 const rel = (p) => relative(ROOT, p).split(sep).join('/')
+// D47. ingest 의 _SKIP_DIRS 와 **같은 목록**이어야 한다. 정본은 ADR 이다 —
+// 게이트는 JS 이고 ingest 는 파이썬이라 코드로 공유할 수 없다.
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.pytest_cache'])
 function walk(dir, acc = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '.git' || e.name === 'node_modules') continue
+    if (SKIP_DIRS.has(e.name)) continue
     const p = join(dir, e.name)
     e.isDirectory() ? walk(p, acc) : acc.push(p)
   }
@@ -256,7 +259,7 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
     ['/v1/status', 4],
     ['/v1/files', 7],
   ]
-  const CLI_STEP = { ingest: 5 }
+  const CLI_STEP = { ingest: 5, mcp: 8 }
   const TRACKED_STEPS = [...new Set([...SURFACE.map((s) => s[1]), ...Object.values(CLI_STEP), 8])]
 
   const stepOf = (path) => {
@@ -435,6 +438,12 @@ const RETIRED = [
   ['아직이다 — 그 경로는 정직하게 404다', 'get_file·save_doc 은 7단계에서 생겼다'],
   ['those routes honestly return 404', 'get_file·save_doc 은 7단계에서 생겼다'],
   ['그 형태로 도는지는 실행해 보지 않았다', 'compose exec api sillok ingest 는 2026-09-02 에 확인했다'],
+  // 8단계가 붙으면서 낡은 문장들.
+  ['1–7단계까지 구현돼 있고', '8단계가 구현됐다'],
+  ['MCP 경로는 정직하게 404다', 'POST /mcp 가 생겼다'],
+  ['아직이다 — 도구 표면 자체가 없다', 'MCP 도구 여덟이 생겼다'],
+  ['Not yet — the tool surface does not exist', 'MCP 도구 여덟이 생겼다'],
+  ['MCP는 아직 없고', '8단계가 구현됐다'],
 ]
 const textish = all.filter(
   (p) =>

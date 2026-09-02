@@ -80,4 +80,4 @@ def test_registered_commands_are_exactly_the_implemented_ones():
     """
     parser = cli._build_parser()
     actions = [a for a in parser._actions if a.dest == "command"]
-    assert sorted(actions[0].choices) == ["ingest", "migrate", "serve"]
+    assert sorted(actions[0].choices) == ["ingest", "mcp", "migrate", "serve"]
