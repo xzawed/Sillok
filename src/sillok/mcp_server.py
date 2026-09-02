@@ -45,8 +45,10 @@ def _text(call: Callable[[], Any]) -> str:
             # 클라이언트에는 고정 문구만 가고, 무엇이 터졌는지는 서버 로그에 남는다 (D21).
             log.exception("MCP 도구에서 처리되지 않은 예외")
         body, _status = api.envelope_error(code, message)
-    # ensure_ascii=False: 한국어 문서를 \uXXXX 로 부풀리지 않는다.
-    return json.dumps(body, ensure_ascii=False)
+    # **Starlette 의 JSONResponse 와 같은 인자다.** ensure_ascii=False 는 한국어를
+    # \uXXXX 로 부풀리지 않기 위한 것이고, separators 는 두 얼굴의 문자열을
+    # 바이트까지 같게 만든다 — D44 가 `같은 문자열` 이라고 했다 (Grok 지적).
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"))
 
 
 def build(cfg: Config) -> MCPServer:

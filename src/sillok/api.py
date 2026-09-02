@@ -354,7 +354,8 @@ def _mount_mcp(app: FastAPI, transport: object) -> None:
     """
     from . import mcp_server as mcp_tools
 
+    # **POST 뿐이다** (D43). 세션이 없으므로 DELETE 로 끝낼 것이 없고, GET 은 SSE 를 여는데
+    # 우리는 요청-응답만 쓴다. 열어 두면 계약에 없는 표면이 둘 늘어난다 (Grok 지적).
+    # 다른 메서드는 이 앱의 405 를 D21 이 접어 봉투로 내보낸다.
     for path in (mcp_tools.MCP_PATH, mcp_tools.MCP_PATH + "/"):
-        app.router.routes.append(
-            Route(path, endpoint=transport, methods=["GET", "POST", "DELETE"])
-        )
+        app.router.routes.append(Route(path, endpoint=transport, methods=["POST"]))

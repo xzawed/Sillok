@@ -124,6 +124,26 @@ def test_kb_status_matches(client):
     assert body["ok"] is True and body["data"]["documents"] == 1
 
 
+def test_the_two_faces_agree_byte_for_byte(client):
+    """D44 는 `같은 문자열` 이라고 했다. 파싱해서 같은 것으로는 부족하다 —
+
+    한쪽이 들여쓰기를 바꾸면 그 문장이 조용히 거짓이 된다 (Grok 지적).
+    """
+    http = client.get(f"/v1/status?project={PROJECT}", headers=HEADERS)
+    rpc = client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "kb_status", "arguments": {"project": PROJECT}},
+        },
+        headers=HEADERS,
+    )
+    text = rpc.json()["result"]["content"][0]["text"]
+    assert text == http.text
+
+
 def test_event_stats_matches(client, event):
     compare(
         client,

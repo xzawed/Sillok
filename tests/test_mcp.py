@@ -161,6 +161,18 @@ def test_both_paths_are_the_same_handler(client):
         assert len(response.json()["result"]["tools"]) == len(TOOL_NAMES)
 
 
+@pytest.mark.parametrize("method", ["GET", "DELETE", "PUT"])
+def test_only_post_reaches_the_transport(client, method):
+    """D43 은 `POST /mcp` 라고만 했다. GET 은 SSE 를 열고 DELETE 는 세션을 끝내는데
+
+    우리는 세션을 두지 않고 요청-응답만 쓴다 — 열어 두면 계약에 없는 표면이 는다.
+    다른 메서드는 이 앱의 405 를 D21 이 접어 봉투로 내보낸다.
+    """
+    response = client.request(method, "/mcp", headers=HEADERS)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION"
+
+
 def test_below_mcp_is_this_app_not_the_sdk(client):
     """마운트했다면 여기서 SDK 의 맨 `Not Found` 가 나온다 (D43)."""
     response = client.get("/mcp/nope", headers=HEADERS)
