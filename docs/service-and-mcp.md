@@ -326,6 +326,48 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 | `kb_status` | `GET /v1/status` | |
 
 노출하지 않음: 임의 SQL, 대량 export, 문서 전체 덤프, 이벤트 일괄 삭제.
+**resources·prompts·notifications도 v1에 없다.** 도구 여덟뿐이다 (D42–D46).
+
+### 표면과 전송 (D43 · D45)
+
+| 전송 | 표면 |
+|---|---|
+| Streamable HTTP | `POST /mcp` 와 `POST /mcp/` — **같은 핸들러다.** 그 둘 말고는 없다 |
+| stdio | CLI `sillok mcp`. bind 플래그를 갖지 않고 **stdout은 프로토콜 채널**이라 로그는 stderr로 간다 |
+
+`/mcp` 아래의 본문은 JSON-RPC이고 **`{ok, data|error}` 봉투 계약 밖이다.** 봉투는 `/v1`의 본문 계약이다.
+`/mcp/아무거나`는 MCP가 아니라 **이 앱의 404 봉투**로 돌아온다 — 마운트가 아니라 두 경로만 이었기 때문이다.
+D7 게이트는 앱 미들웨어라 `/mcp`도 덮는다. stdio는 부모 프로세스의 파이프라 토큰이 없다.
+
+### 인자 (D42)
+
+**전부 선택이다.** 필수 판정은 Service가 하고, 그래야 `save_event`의 거절 문구가 모델에게 그대로 간다.
+기본값을 여기 복제하지 않는다 — `top_k`를 비우면 Service가 D33의 기본값을 쓴다.
+
+| 도구 | 인자 |
+|---|---|
+| `search_docs` | `project` · `query` · `top_k` · `doc_type` · `status` · `module` |
+| `search_events` | `project` · `query` · `kind` · `module` · `since` · `until` · `top_k` |
+| `get_event` | `event_id` · `project` |
+| `get_file` | `project` · `path` · `offset` |
+| `save_event` | 저장 계약의 필드 그대로 (`project`…`created_by`) |
+| `save_doc` | `project` · `path` · `body` · `base_hash` |
+| `event_stats` | `project` · `module` · `since` |
+| `kb_status` | `project` |
+
+**타입을 어긴 호출은 예외다.** 값의 타입이 스키마와 다르면 SDK가 도구를 부르기 전에 거절하고
+그 본문은 봉투가 아니다. 전송 계층의 일이며, HTTP 얼굴에서 FastAPI가 `offset=x`를 먼저 거절하는 것과
+같은 자리다 — 다른 점은 그쪽은 D21이 봉투로 덮고 이쪽은 덮지 못한다는 것뿐이다.
+
+### 결과 (D44)
+
+성공이든 실패든 **정상 결과**이고, 내용은 텍스트 한 덩이이며, 그 텍스트는
+HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를 함께 내보내지 않는다.
+`VALIDATION`·`NOT_FOUND`·`CONFLICT`를 프로토콜 오류로 접지 않는다 — 셋을 나눠 둔 이유가 사라지고
+모델이 같은 인자로 재시도한다. `INTERNAL`은 여기서도 고정 문구다.
+`UNAUTHORIZED`는 HTTP 얼굴에만 있다.
+
+**같은 인자면 두 얼굴의 봉투가 같아야 한다** (D46). 그 대조는 검사가 한다.
 
 ## 반환 크기
 
