@@ -35,6 +35,10 @@ def test_missing_base_hash_is_not_checked():
         "sha1:" + "a" * 64,
         "sha256:",
         f" sha256:{'a' * 64}",
+        # 끝의 개행. `^…$` + match 는 이것을 통과시키고 개행이 digest 에 남아
+        # **영원한 CONFLICT** 가 된다 — 입력 문제가 충돌로 보고되는 자리다 (Grok 지적).
+        "sha256:" + "a" * 64 + "\n",
+        "sha256:" + "a" * 64 + "\n" + "sha256:" + "b" * 64,
         123,
     ],
 )
@@ -65,6 +69,20 @@ def test_path_is_not_normalized(path):
     여기서 다듬으면 허용 목록을 느슨하게 만드는 손잡이가 생긴다.
     """
     assert service._require_path(path) == path
+
+
+def test_path_with_a_nul_is_validation_not_internal():
+    """Postgres 의 text 는 NUL 을 담지 못한다 — 그대로 넘기면 드라이버 예외가 500 이 된다.
+
+    클라이언트 입력 문제가 서버 결함으로 보고되는 자리다 (D25 가 project 에서 이미 막았다).
+    실측으로 `path=docs/plan.md%00.txt` 가 `INTERNAL` 을 냈다 (Grok 이 라이브에서 찾았다).
+    """
+    with pytest.raises(service.ValidationFailed):
+        service._require_path("docs/plan.md\x00.txt")
+    with pytest.raises(service.ValidationFailed):
+        service.get_file(DEAD_DSN, "sillok", "docs/plan.md\x00.txt", 0, ".")
+    with pytest.raises(service.ValidationFailed):
+        service.save_doc(DEAD_DSN, {"project": "sillok", "path": "a\x00b", "body": "본문"}, ".")
 
 
 # --- diff (D38 · D41) --------------------------------------------------------

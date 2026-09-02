@@ -916,7 +916,10 @@ NOT_FOUND_DOC = "document not found"
 # D38. D32 의 문구를 쓰지 않는다 — 발신자가 둘이고 원인이 다르다.
 BASE_HASH_MESSAGE = "document changed since base_hash"
 # D40. 받아들이는 형식은 하나다. 접두사를 관대하게 벗기면 "무엇이 같은 해시인가" 규칙이 생긴다.
-_BASE_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
+# **fullmatch 로 본다.** `$` 는 끝의 개행 **앞**에서도 맞으므로 `^…$` + match 는
+# 뒤에 개행이 붙은 값을 통과시키고, 그 개행이 digest 에 남아 영원한 CONFLICT 가 된다 —
+# 클라이언트 입력 문제가 VALIDATION 이 아니라 충돌로 보고되는 것이다 (Grok 지적).
+_BASE_HASH = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class NotFound(Exception):
@@ -936,6 +939,13 @@ def _require_path(raw: object) -> str:
     """
     if not isinstance(raw, str):
         raise ValidationFailed("path must be a string")
+    # NUL 만 예외다. **정규화가 아니라 물어볼 수 없는 질문을 거절하는 것이다** —
+    # Postgres 의 text 는 NUL 을 담지 못하므로 그런 행은 존재할 수 없고,
+    # 그대로 넘기면 드라이버 예외가 D21 의 포괄 예외에 걸려 INTERNAL 500 이 된다.
+    # 클라이언트 입력 문제가 서버 결함으로 보고되는 자리다 (D25 가 project 에서 이미 막았다).
+    # 실측: `path=docs/plan.md%00.txt` 가 500 을 냈다 (Grok 이 라이브에서 찾았다).
+    if "\x00" in raw:
+        raise ValidationFailed("path must not contain NUL")
     return raw
 
 
@@ -952,7 +962,7 @@ def _require_base_hash(raw: object) -> str | None:
     """D40. `sha256:` + 소문자 16진 64자. 없으면 검사하지 않는다 (D38)."""
     if raw is None:
         return None
-    if not isinstance(raw, str) or not _BASE_HASH.match(raw):
+    if not isinstance(raw, str) or not _BASE_HASH.fullmatch(raw):
         raise ValidationFailed("base_hash must be sha256: followed by 64 lowercase hex digits")
     return raw.split(":", 1)[1]
 

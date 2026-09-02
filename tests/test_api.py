@@ -290,6 +290,14 @@ def test_save_doc_validation_reaches_the_client(payload, fragment):
     assert fragment in r.json()["error"]["message"]
 
 
+def test_nul_in_path_is_validation_over_http():
+    """살아 있는 Service 에서 이것이 INTERNAL 500 이었다 (Grok 이 라이브에서 찾았다)."""
+    client = _client(database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    r = client.get("/v1/files", params={"project": "sillok", "path": "docs/plan.md\x00.txt"})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION"
+
+
 def test_ingest_refuses_another_workspace_over_http(tmp_path):
     """D37: 같은 거절이 HTTP 얼굴에도 걸린다 — CLI 에만 걸면 이 문으로 우회된다."""
     client = _client(

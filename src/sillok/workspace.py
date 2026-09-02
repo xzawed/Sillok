@@ -78,25 +78,41 @@ def open_regular(root: str, rel_path: str) -> int:
     if not rel_path or any(part in ("", ".", "..") for part in parts):
         raise OpenFailed(f"열 수 없는 경로 성분: {rel_path!r}")
 
+    # **닫는 순서가 소유권이다.** 새 fd 를 먼저 변수에 넣고 옛 것을 닫는다 —
+    # 반대로 하면 close 가 실패하는 순간 finally 가 이미 닫힌 fd 를 또 닫고
+    # (재사용된 남의 fd 를 닫을 수 있다) 방금 연 것은 아무도 닫지 않는다 (Grok 지적).
     dirfd = os.open(root, os.O_RDONLY | directory | cloexec)
     try:
         for name in parts[:-1]:
             nxt = os.open(name, os.O_RDONLY | directory | nofollow | cloexec, dir_fd=dirfd)
-            os.close(dirfd)
-            dirfd = nxt
+            dirfd, previous = nxt, dirfd
+            _close_quietly(previous)
         fd = os.open(parts[-1], os.O_RDONLY | nofollow | cloexec, dir_fd=dirfd)
     except OSError as exc:
         # ENOENT(없다) · ELOOP(링크다) · ENOTDIR(성분이 디렉터리가 아니다) 를 구분하지 않는다.
         # 구분해 알려 주면 뿌리 안의 배치를 응답으로 훑을 수 있다.
         raise OpenFailed(f"{rel_path}: {exc.strerror}") from exc
     finally:
-        os.close(dirfd)
+        _close_quietly(dirfd)
 
-    # 경로가 아니라 **서술자**를 본다 (D36 4번).
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
-        os.close(fd)
-        raise OpenFailed(f"{rel_path}: 정규 파일이 아니다")
+    try:
+        # 경로가 아니라 **서술자**를 본다 (D36 4번).
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OpenFailed(f"{rel_path}: 정규 파일이 아니다")
+    except BaseException:
+        # fstat 이 터져도 연 파일은 여기서 닫는다. 이 자리를 비워 두면
+        # 거절된 요청 하나가 서술자를 하나씩 남기고, 장수 프로세스에서 그것이 쌓인다.
+        _close_quietly(fd)
+        raise
     return fd
+
+
+def _close_quietly(fd: int) -> None:
+    """닫기 실패로 **다른 fd 를 잃지 않는다.** 읽기 전용 서술자라 close 실패가 알려 주는 것이 없다."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
 
 
 def _check_offset(offset: int, total_bytes: int) -> None:

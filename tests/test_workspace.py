@@ -172,6 +172,28 @@ def test_absolute_path_is_refused(tmp_path):
 
 
 @posix_only
+def test_failed_opens_do_not_leak_descriptors(tmp_path):
+    """거절된 요청 하나가 서술자를 남기면 장수 프로세스(`serve`)에서 그것이 쌓인다.
+
+    Grok 이 짚은 자리다. 여기 오는 다섯 경로는 **fd 를 연 뒤 거절되는 것**을 포함한다 —
+    디렉터리는 열리고 나서 `fstat` 에서 걸린다.
+    """
+    fd_dir = "/proc/self/fd"
+    if not os.path.isdir(fd_dir):
+        pytest.skip("/proc 가 없어 서술자를 셀 수 없다")
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "sub").mkdir()
+    (tmp_path / "docs" / "link.md").symlink_to(tmp_path / "docs" / "sub")
+
+    before = len(os.listdir(fd_dir))
+    for path in ("docs/none.md", "docs/sub", "docs/link.md", "docs/../docs/sub", "/etc/hostname"):
+        with pytest.raises(workspace.OpenFailed):
+            workspace.open_regular(str(tmp_path), path)
+    assert len(os.listdir(fd_dir)) == before, "거절 경로가 서술자를 남긴다"
+
+
+@posix_only
 def test_window_walks_the_whole_file_in_order(tmp_path):
     """창을 이어 붙이면 파일 전체다 — `next_offset` 이 건너뛰지 않는다는 증거다."""
     (tmp_path / "docs").mkdir()
