@@ -453,3 +453,109 @@ def test_non_ascii_token_still_accepts_the_right_value():
     # 클라이언트가 실제로 보내는 것은 UTF-8 바이트다.
     r = client.get("/v1/nope", headers={"Authorization": "Bearer 비밀토큰".encode()})
     assert r.status_code == 404  # 게이트는 통과, 라우트가 없어 404
+
+
+# --- 7단계 라우트의 HTTP 층 (D21 · D35 · D38) --------------------------------
+#
+# service 층 검사는 `tests/test_stage7_db.py` 가 한다. **여기는 어댑터다** —
+# 핸들러가 등록되지 않으면 저쪽은 초록인 채 여기서만 500 이 된다 (Grok 지적).
+
+_STAGE7 = [
+    ("GET", "/v1/events/1?project=sillok", "get_event", None),
+    ("GET", "/v1/files?project=sillok&path=docs/plan.md", "get_file", None),
+    ("POST", "/v1/docs/proposals", "save_doc", {"project": "sillok", "path": "docs/plan.md", "body": "x"}),
+]
+_NOT_FOUND_MESSAGE = {
+    "get_event": service.NOT_FOUND_EVENT,
+    "get_file": service.NOT_FOUND_FILE,
+    "save_doc": service.NOT_FOUND_DOC,
+}
+
+
+def _hit(method, path, payload, **overrides):
+    return _client(**overrides).request(method, path, json=payload)
+
+
+def _raiser(exc):
+    def _raise(*args, **kwargs):
+        raise exc
+
+    return _raise
+
+
+@pytest.mark.parametrize(("method", "path", "func", "payload"), _STAGE7)
+def test_service_not_found_becomes_404(monkeypatch, method, path, func, payload):
+    """D35 의 404 는 **없는 경로**가 아니라 없는 행이다. 핸들러가 없으면 500 이 된다."""
+    message = _NOT_FOUND_MESSAGE[func]
+    monkeypatch.setattr(service, func, _raiser(service.NotFound(message)))
+    r = _hit(method, path, payload)
+    assert r.status_code == 404
+    assert r.json() == {"ok": False, "error": {"code": "NOT_FOUND", "message": message}}
+
+
+def test_not_found_text_outside_the_contract_is_dropped(monkeypatch):
+    """이 핸들러만 `str(exc)` 를 흘린다 — 계약 밖 문구는 버린다 (D21 이 INTERNAL 에 건 이유)."""
+    monkeypatch.setattr(
+        service, "get_file", _raiser(service.NotFound("postgresql://u:hunter2@h/db 없다"))
+    )
+    r = _hit("GET", "/v1/files?project=sillok&path=docs/plan.md", None)
+    assert r.status_code == 404
+    assert "hunter2" not in r.text
+    assert r.json()["error"]["message"] == api.NOT_FOUND_FALLBACK
+
+
+def test_base_hash_mismatch_becomes_409_with_the_fixed_message(monkeypatch):
+    """CONFLICT 의 둘째 발신자다 (D38). D32 의 문구를 쓰지 않고 예외 문구도 싣지 않는다."""
+    monkeypatch.setattr(
+        service,
+        "save_doc",
+        _raiser(service.BaseHashMismatch("postgresql://u:hunter2@h/db " + service.LOCKED_MESSAGE)),
+    )
+    r = _hit("POST", "/v1/docs/proposals", _STAGE7[2][3])
+    assert r.status_code == 409
+    assert r.json()["error"] == {"code": "CONFLICT", "message": service.BASE_HASH_MESSAGE}
+    assert "hunter2" not in r.text
+    assert service.LOCKED_MESSAGE not in r.text
+
+
+@pytest.mark.parametrize(("method", "path", "func", "payload"), _STAGE7)
+def test_stage7_routes_do_not_leak_exception_text(monkeypatch, method, path, func, payload):
+    """psycopg 예외는 DSN 을 품는다. 라우트가 늘 때마다 이 자리가 새로 생긴다 (D21)."""
+    monkeypatch.setattr(service, func, _raiser(RuntimeError("postgresql://u:hunter2@h/db")))
+    r = _hit(method, path, payload)
+    assert r.status_code == 500
+    assert r.json() == {"ok": False, "error": {"code": "INTERNAL", "message": "internal error"}}
+    assert "hunter2" not in r.text
+
+
+@pytest.mark.parametrize(("method", "path", "func", "payload"), _STAGE7)
+def test_stage7_routes_answer_through_the_envelope(monkeypatch, method, path, func, payload):
+    """성공도 봉투다. 라우트가 dict 를 그대로 돌려주면 계약 밖으로 나간다 (D21)."""
+    monkeypatch.setattr(service, func, lambda *a, **k: {"x": 1})
+    r = _hit(method, path, payload)
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "data": {"x": 1}}
+
+
+@pytest.mark.parametrize(("method", "path", "func", "payload"), _STAGE7)
+def test_stage7_routes_are_behind_the_bearer_gate(method, path, func, payload):
+    """D7 게이트는 미들웨어라 모든 요청을 덮는다 — 라우트가 늘어도 그래야 한다.
+
+    라우트 의존성으로 옮기면 이 검사만 붉어진다. 인자가 유효해도 401 이 먼저다.
+    """
+    r = _hit(method, path, payload, bearer_token="secret-token")
+    assert r.status_code == 401
+    assert r.json()["error"] == {"code": "UNAUTHORIZED", "message": "bearer required"}
+
+
+@pytest.mark.parametrize(("method", "path", "func", "payload"), _STAGE7)
+def test_stage7_failures_stay_inside_the_error_table(method, path, func, payload):
+    """D21 의 코드 표는 닫혀 있다. 새 코드를 발명하면 여기서 걸린다 (D35 의 FORBIDDEN 도)."""
+    # DSN 이 죽어 있으므로 이 셋은 전부 실패한다. 무엇으로 실패하든 표 안이어야 한다.
+    r = _hit(method, path, payload, database_url="postgresql://sillok:x@127.0.0.1:1/sillok")
+    body = r.json()
+    assert body["ok"] is False
+    code = body["error"]["code"]
+    assert code in api.STATUS_FOR_CODE
+    assert r.status_code == api.STATUS_FOR_CODE[code]
+    assert isinstance(body["error"]["message"], str)

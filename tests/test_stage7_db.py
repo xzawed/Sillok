@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import psycopg
 import pytest
 from psycopg.rows import dict_row
@@ -51,8 +53,13 @@ def clean(db):
 
 @pytest.fixture
 def ws(tmp_path, clean):
-    """작은 workspace 를 만들어 실제로 색인한다. 이 트리가 곧 뿌리다 (D37)."""
+    """작은 workspace 를 만들어 실제로 색인한다. 이 트리가 곧 뿌리다 (D37).
+
+    D9 의 세 갈래를 **전부** 담는다 — `docs/**` 만 두면 `docs/` 접두사를 요구하는
+    구현이 통과한다. 줄 끝 셋(LF·CRLF·홀로 있는 CR)과 BOM, 0바이트도 여기서 만든다.
+    """
     (tmp_path / "docs").mkdir()
+    (tmp_path / "adr").mkdir()
     (tmp_path / "docs" / "one.md").write_text(ONE, encoding="utf-8")
     (tmp_path / "docs" / "big.md").write_text(
         FM + "".join(f"{i}번째 줄 가나다\n" for i in range(900)), encoding="utf-8"
@@ -60,7 +67,19 @@ def ws(tmp_path, clean):
     (tmp_path / "docs" / "crlf.md").write_bytes(
         (FM + "# 씨알엘에프\n\n줄 끝이 다르다\n").replace("\n", "\r\n").encode("utf-8")
     )
-    service.ingest(DSN, PROJECT, str(tmp_path))
+    # 선행 BOM 과 홀로 있는 CR — D30 정규화의 나머지 둘이다 (D41).
+    (tmp_path / "docs" / "bom.md").write_bytes(
+        "\ufeff".encode("utf-8") + (FM + "# 봄\n\n본문\n").encode("utf-8")
+    )
+    (tmp_path / "docs" / "cr.md").write_bytes(
+        (FM + "# 시알\n\n본문\n").replace("\n", "\r").encode("utf-8")
+    )
+    (tmp_path / "adr" / "0001-t.md").write_text(FM + "# 결정\n\n본문\n", encoding="utf-8")
+    # 루트 README* 는 front matter 를 갖지 않는다 (D29). 메타는 경로와 첫 H1 에서 나온다.
+    (tmp_path / "README.md").write_text("# 루트 리드미\n\n본문\n", encoding="utf-8")
+    (tmp_path / "README.empty.md").write_bytes(b"")
+    run = service.ingest(DSN, PROJECT, str(tmp_path))
+    assert run["status"] == "ok", run
     return tmp_path
 
 
@@ -146,12 +165,62 @@ def test_windows_tile_the_whole_file(ws):
     assert all(len(part) <= workspace.WINDOW_CHARS for part in parts)
 
 
-def test_a_row_that_became_a_symlink_is_not_found(ws):
-    """행은 낡을 수 있다 (D36). 걸음이 열지 못할 뿐 행은 남는다."""
+def test_a_row_that_became_a_symlink_is_not_found(ws, db):
+    """행은 낡을 수 있다 (D36). 걸음이 열지 못할 뿐 **행은 남는다**."""
     (ws / "secret.txt").write_text("비밀", encoding="utf-8")
     target = ws / "docs" / "one.md"
     target.unlink()
     target.symlink_to(ws / "secret.txt")
+    with pytest.raises(service.NotFound):
+        read_file(ws, "docs/one.md")
+    row = db.execute(
+        "SELECT path FROM kb_documents WHERE project = %s AND path = %s",
+        (PROJECT, "docs/one.md"),
+    ).fetchone()
+    assert row is not None, "D36 이 말한 낡은 행이다 — 404 와 행이 없는 것은 다르다"
+
+
+def test_a_valid_md_that_was_never_indexed_is_not_found(ws):
+    """허용 목록은 경로 규칙이 아니라 **행**이다 (D36).
+
+    D9 경로 아래의 `.md` 이고 파일도 실제로 있다 — 규칙을 요청 문자열 위에서 다시
+    구현한 구현은 이것을 열어 준다. 색인이 곧 허용 목록이므로 없는 것이다.
+    """
+    (ws / "docs" / "fresh.md").write_text(FM + "# 새 문서\n\n색인 뒤에 생겼다\n", encoding="utf-8")
+    with pytest.raises(service.NotFound):
+        read_file(ws, "docs/fresh.md")
+
+
+def test_another_projects_path_is_not_found(ws):
+    """허용 목록은 `(project, path)` 쌍이다 (D36). path 하나로 남의 나무를 읽지 않는다."""
+    with pytest.raises(service.NotFound):
+        service.get_file(DSN, PROJECT + "_other", "docs/one.md", 0, str(ws))
+
+
+def test_root_readme_and_adr_open_too(ws):
+    """`docs/` 접두사를 요구하지 않는다 — D9 는 셋을 색인한다."""
+    assert read_file(ws, "README.md")["text"].startswith("# 루트 리드미")
+    assert read_file(ws, "adr/0001-t.md")["text"].endswith("# 결정\n\n본문\n")
+
+
+def test_zero_byte_file_is_the_end_not_an_error(ws):
+    """D36 가장자리 표의 0바이트 줄 — 허용 목록부터 창까지 전부 지나서 그렇게 나와야 한다."""
+    assert read_file(ws, "README.empty.md") == {
+        "project": PROJECT,
+        "path": "README.empty.md",
+        "text": "",
+        "offset": 0,
+        "next_offset": 0,
+        "total_bytes": 0,
+        "truncated": False,
+    }
+
+
+def test_an_indexed_path_that_became_a_directory_is_not_found(ws):
+    """신원은 경로가 아니라 서술자다 (D36 4번) — 디렉터리는 열린 뒤 `fstat` 에서 걸린다."""
+    target = ws / "docs" / "one.md"
+    target.unlink()
+    target.mkdir()
     with pytest.raises(service.NotFound):
         read_file(ws, "docs/one.md")
 
@@ -197,6 +266,65 @@ def test_crlf_file_and_lf_body_are_the_same_content(ws):
     normalized = ingest_rules.normalize(raw, "docs/crlf.md")
     got = propose(ws, "docs/crlf.md", normalized, f"sha256:{ingest_rules.content_hash(normalized)}")
     assert got["diff"] == "", "정규화가 한쪽에만 걸리면 전 줄이 바뀐 것으로 보인다"
+
+
+def test_the_body_is_normalized_too(ws):
+    """한쪽만 정규화하면 자기모순이 방향만 바꿔 돌아온다 (D41).
+
+    앞의 검사는 **이미 LF 인** 본문을 보냈다. 여기서는 파일도 본문도 CRLF 다 —
+    파일만 정규화하는 구현은 여기서 전 줄이 바뀐 diff 를 낸다 (Grok 지적).
+    """
+    raw = (ws / "docs" / "crlf.md").read_bytes()
+    normalized = ingest_rules.normalize(raw, "docs/crlf.md")
+    got = propose(
+        ws, "docs/crlf.md", raw.decode("utf-8"), f"sha256:{ingest_rules.content_hash(normalized)}"
+    )
+    assert got["diff"] == ""
+    assert got["body"] == normalized, "응답의 body 는 정규화를 지난 제안이다"
+
+
+@pytest.mark.parametrize("path", ["docs/bom.md", "docs/cr.md"])
+def test_bom_and_lone_cr_are_the_same_content(ws, path):
+    """D30 정규화는 셋이다 — 선행 BOM 제거, CRLF 와 **홀로 있는 CR** 을 LF 로 (D41)."""
+    normalized = ingest_rules.normalize((ws / path).read_bytes(), path)
+    got = propose(ws, path, normalized, f"sha256:{ingest_rules.content_hash(normalized)}")
+    assert got["diff"] == "", path
+
+
+def test_a_symlinked_file_is_absence_too(ws):
+    """부재는 사라진 것만이 아니다 — 걸음이 열지 못하는 것도 부재다 (D41)."""
+    (ws / "secret.txt").write_text("비밀", encoding="utf-8")
+    target = ws / "docs" / "one.md"
+    target.unlink()
+    target.symlink_to(ws / "secret.txt")
+
+    got = propose(ws, "docs/one.md", "새 본문\n")
+    assert got["exists"] is False
+    assert got["diff"].startswith("--- /dev/null\n")
+    assert "비밀" not in got["diff"], "링크 너머의 내용이 제안에 실리면 안 된다"
+    with pytest.raises(service.BaseHashMismatch):
+        propose(ws, "docs/one.md", "새 본문\n", f"sha256:{ingest_rules.content_hash(ONE)}")
+
+
+def test_the_skill_heuristic_is_not_a_rejection_rule(ws):
+    """D38: 기계적으로 판정할 수 없는 것은 계약에서 뺐다.
+
+    `날짜별 시도가 3건 이상` 은 Skill 의 **안내**이고 API 는 그것으로 거절하지 않는다.
+    거절하면 그 임의가 곧 계약처럼 인용된다.
+    """
+    tries = "".join(f"- 2026-09-0{i} 시도 {i}: 실패\n" for i in (1, 2, 3))
+    got = propose(ws, "docs/one.md", ONE + tries)
+    assert got["exists"] is True
+    assert "+- 2026-09-01 시도 1: 실패" in got["diff"]
+
+
+def test_the_proposal_echoes_the_request_and_the_whole_body(ws):
+    """`body` 는 문서 전체다 — 조각을 보내도 서버가 파일에 붙이지 않는다 (D38)."""
+    fragment = "# 조각만 보낸다\n"
+    got = propose(ws, "docs/one.md", fragment)
+    assert got["project"] == PROJECT and got["path"] == "docs/one.md"
+    assert got["body"] == fragment
+    assert "-# 하나" in got["diff"], "서버가 조각을 붙이면 삭제가 보이지 않는다"
 
 
 def test_changed_body_produces_a_unified_diff(ws):
@@ -311,3 +439,46 @@ def test_another_projects_event_reads_like_a_missing_one(event):
 def test_get_event_requires_a_project(event):
     with pytest.raises(service.ValidationFailed):
         service.get_event(DSN, event, None)
+
+
+def test_an_empty_project_is_validation_not_a_miss(event):
+    """빈 문자열은 라벨이 아니다 (D25). 404 로 접으면 **project 를 안 줬다**와
+    **남의 것이다**가 같은 답이 되어 D35 가 지키려던 구분이 사라진다."""
+    with pytest.raises(service.ValidationFailed):
+        service.get_event(DSN, event, "")
+
+
+def test_get_event_carries_every_saved_field(clean):
+    """D39: 저장 계약의 필드 + `id` + `created_at`.
+
+    기대 목록을 **구현 상수에서 가져오지 않는다** — 둘이 함께 빠지면 검사가
+    아무것도 보지 않는다 (Grok 지적).
+    """
+    body = {
+        "project": PROJECT,
+        "module": "auth",
+        "kind": "incident",
+        "title": "제목",
+        "summary": "요약",
+        "root_cause": "원인",
+        "resolution": "조치",
+        "result": "partial",
+        "severity": "critical",
+        "occurred_at": "2026-08-31T09:00:00Z",
+        "resolved_at": "2026-08-31T10:30:00Z",
+        "source": "manual",
+        "related_doc_path": "docs/one.md",
+        "payload": {"k": [1, 2]},
+        "created_by": "claude",
+    }
+    got = service.get_event(DSN, service.save_event(DSN, body)["id"], PROJECT)
+
+    assert set(got) == set(body) | {"id", "created_at"}
+    for field, value in body.items():
+        if field in ("occurred_at", "resolved_at"):
+            continue
+        assert got[field] == value, field
+    # 시각은 ISO-8601 문자열이고 UTC 로 정규화돼 있다 (D25 가 오프셋을 요구한다).
+    assert got["occurred_at"] == "2026-08-31T09:00:00+00:00"
+    assert got["resolved_at"] == "2026-08-31T10:30:00+00:00"
+    assert datetime.fromisoformat(got["created_at"]).tzinfo is not None

@@ -95,7 +95,12 @@ def test_truncated_is_exactly_the_inequality():
 
 
 def test_window_bytes_leaves_room_for_a_split_sequence():
-    """`4000*4 + 3` 은 D36 이 못 박은 값이다."""
+    """`4000*4 + 3` 은 D36 이 못 박은 값이다.
+
+    창 크기도 **숫자로** 못 박는다. 상수끼리만 비교하면 4000 을 8000 으로 바꿔도
+    검사가 전부 초록이다 — 큰 파일은 여전히 쪼개지므로 타일링 검사도 통과한다 (Grok 지적).
+    """
+    assert workspace.WINDOW_CHARS == 4000
     assert workspace.WINDOW_BYTES == workspace.WINDOW_CHARS * 4 + 3
 
 
