@@ -99,9 +99,10 @@ docker compose up -d --wait
 docker compose build test
 ```
 
-잊어도 조용하지 않다 — `tests/test_dependencies.py`가 설치된 버전과 `uv.lock`을 대조한다.
-**호스트에서는 `uv run`이 잠금 파일을 조용히 되돌리므로** 그 검사의 진짜 자리는 컨테이너다
-(거기서는 `--no-sync`로 돈다).
+잊어도 조용하지 않다 — `tests/test_dependencies.py`가 **설치된 것 전부**를 `uv.lock`과 대조한다.
+**호스트에서는 그 검사가 갈라짐을 볼 수 없다.** `uv run`은 돌기 전에 잠금과 환경을 맞추므로
+손으로 고친 잠금 파일이 그 과정에서 다시 풀려 되돌아온다(실측).
+컨테이너는 `--no-sync`로 돌기 때문에 그 자리가 진짜다.
 
 ## 마이그레이션이 실패할 때
 
