@@ -103,6 +103,9 @@ const results = STEPS.map((step) => ({ step, ...runStep(step) }))
 // 반대로 리눅스 호스트 + 5432 오버라이드에서는 두 쪽이 같아져 거짓 실패가 난다.
 //
 // **사유로 본다.** `dbcheck` 의 그 문구는 DB 에 못 붙었을 때만 나온다. 수치가 아니라 원인이다.
+// **이 판정은 두 가지에 기댄다** — 위 단계가 `-rs` 를 주는 것과, pytest 가 그 사유를
+// stdout 에 적는 것. 둘 중 하나가 바뀌면 이 게이트는 붉어지지 않고 **조용해진다**.
+// 성공 경로의 out 은 stdout 뿐이다 (execFileSync). 바꿀 때 이 줄을 함께 본다.
 const DB_SKIP_REASON = 'Postgres 에 붙을 수 없다'
 const withDb = results.find((r) => r.step.name.startsWith('DB 포함'))
 if (withDb?.ok && (withDb.out || '').includes(DB_SKIP_REASON)) {
