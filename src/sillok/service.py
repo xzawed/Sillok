@@ -16,6 +16,7 @@ Postgres 예외가 되고 D21이 그것을 `INTERNAL 500`으로 접기 때문이
 from __future__ import annotations
 
 import difflib
+import json
 import logging
 import os
 import re
@@ -51,6 +52,11 @@ _PROJECT_FORBIDDEN = (" ", "\t", "\n", "\r", "/", "\\", "\x00")
 # D23. Skill 의 "2회 이상" 이 임계값이고, 상한은 검색 최대치와 같은 값이다.
 REPEAT_MIN_COUNT = 2
 REPEAT_LIMIT = 12
+
+# D58. 모델이 읽는 응답에만 천장을 준다. 경계는 MCP 노출이다 —
+# `ingest` 의 `skipped[]` 에 천장이 없는 것은 그것이 도구가 아니기 때문이고, 그것도 결정이다.
+BY_MODULE_LIMIT = 12
+PAYLOAD_MAX = 2000
 
 
 class ValidationFailed(Exception):
@@ -142,6 +148,15 @@ def _optional_text(body: dict[str, Any], field: str) -> str | None:
     return value
 
 
+def _payload_text(payload: dict[str, Any]) -> str:
+    """`payload` 의 길이를 재는 **한 가지** 방법 (D58).
+
+    구분자를 적지 않으면 기본값이 공백을 넣어 **같은 객체가 재는 사람에 따라 갈린다.**
+    저장된 `jsonb` 는 Postgres 가 정규화하므로 이 수는 *입력*을 재는 것이다.
+    """
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _enum(body: dict[str, Any], field: str, allowed: frozenset[str]) -> str | None:
     value = _optional_text(body, field)
     if value is not None and value not in allowed:
@@ -186,6 +201,8 @@ def build_event(body: dict[str, Any]) -> Event:
     payload = body.get("payload")
     if payload is not None and not isinstance(payload, dict):
         raise ValidationFailed("payload must be an object")
+    if payload is not None and len(_payload_text(payload)) > PAYLOAD_MAX:
+        raise ValidationFailed(f"payload longer than {PAYLOAD_MAX}")
 
     return Event(
         project=project,
@@ -273,17 +290,30 @@ def event_stats(
         head = cur.fetchone()
 
         buckets: dict[str, dict[str, int]] = {}
+        omitted = 0   # module 갈래가 채운다. 초기값을 두어 이름이 루프에 매이지 않게 한다
         for field, key in (("kind", "by_kind"), ("result", "by_result"), ("module", "by_module")):
+            # `kind`·`result` 는 닫힌 enum 이라 천장이 필요 없다. `module` 만 열려 있다 (D58).
+            # 정렬은 SQL 이 한다 — 파이썬에서 자르면 어느 열둘인지가 로케일에 따라 흔들린다.
+            # 정렬만 SQL 이 한다. **LIMIT 을 걸지 않는다** — 걸면 몇 개가 떨어졌는지
+            # 셀 수 없고, `by_module_omitted` 가 "천장이 걸렸다" 로만 줄어든다 (실측으로 드러났다).
+            # module 수는 운영자가 고르는 값이지 요청이 부풀릴 수 있는 값이 아니다.
+            order = (
+                f' ORDER BY count(*) DESC, {field} COLLATE "C" ASC' if field == "module" else ""
+            )
             cur.execute(
                 f"SELECT {field} AS bucket, count(*) AS n FROM kb_events"
-                f" WHERE {where} GROUP BY {field}",
+                f" WHERE {where} GROUP BY {field}{order}",
                 params,
             )
             # module 이 NULL 인 행의 키는 넣지 않는다 — JSON 키는 null 일 수 없고
             # "null" 은 실제 모듈명과 충돌한다. 그 행들은 total 에 그대로 남는다 (D23).
-            buckets[key] = {
-                row["bucket"]: row["n"] for row in cur.fetchall() if row["bucket"] is not None
-            }
+            rows = [r for r in cur.fetchall() if r["bucket"] is not None]
+            if field == "module":
+                # 떨어진 **키 수**다. 떨어진 키들의 *행 수*는 알 수 없고, 그것까지 알려면
+                # 목록 표면이 필요하다 — v1 은 만들지 않는다 (D58).
+                omitted = max(0, len(rows) - BY_MODULE_LIMIT)
+                rows = rows[:BY_MODULE_LIMIT]
+            buckets[key] = {row["bucket"]: row["n"] for row in rows}
 
         cur.execute(
             f"""
@@ -306,6 +336,10 @@ def event_stats(
     return {
         "total": head["total"],
         **buckets,
+        # D58. `0` 이면 `sum(by_module) <= total` 의 차이가 D23 의 뜻 그대로다.
+        # `0` 이 아니면 천장이 걸린 것이고, **떨어진 키들의 행 수는 알 수 없다** —
+        # 그것까지 알려면 목록 표면이 필요하고 v1 은 만들지 않는다.
+        "by_module_omitted": omitted,
         "repeat_causes": repeat_causes,
         # 전부 미해결이면 0 이 아니라 null 이다 (D23).
         "avg_resolution_seconds": int(avg) if avg is not None else None,
@@ -988,6 +1022,9 @@ def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> di
     for row in rows:
         item = {k: row[k] for k in fields.split(", ")}
         item["occurred_at"] = item["occurred_at"].isoformat()
+        # D58. `excerpt` 와 **같은 함수**를 쓴다 — 두 벌로 만들면 한쪽이 801자가 된다.
+        # 원문은 `get_event` 가 그대로 준다 (D39).
+        item["summary"] = search.clip_excerpt(item["summary"])
         # 목록이 하나뿐이라 RRF 는 그 순위의 단조 재표기다 (D33 §7).
         item["score"] = (
             None if query is None else round(1.0 / (search.RRF_K + row["rk"]), search.SCORE_DIGITS)

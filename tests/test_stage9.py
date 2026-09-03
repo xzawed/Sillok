@@ -257,3 +257,48 @@ def test_blank_optional_text_is_stored_as_given():
 
     _where, params = service._event_search_filters({"project": "p", "module": "  x  "}, "p")
     assert params["module"] == "x"  # 검색은 접는다 — 그래서 위 행을 못 찾는다
+
+
+# --- D58 천장 (순수 부분) -----------------------------------------------------
+
+
+def test_payload_length_is_measured_one_way():
+    """구분자를 적지 않으면 기본값이 공백을 넣어 **같은 객체가 재는 사람에 따라 갈린다** (D58)."""
+    payload = {"a": 1, "b": [1, 2]}
+    assert service._payload_text(payload) == '{"a":1,"b":[1,2]}'
+    # 기본 구분자였다면 공백이 들어가 더 길다.
+    import json
+
+    assert len(service._payload_text(payload)) < len(json.dumps(payload, ensure_ascii=False))
+
+
+def test_payload_over_the_cap_is_rejected_with_the_d25_wording():
+    """거절 문구는 D25 의 형태를 따른다 — `payload longer than 2000`."""
+    body = {
+        "project": "sillok",
+        "kind": "failure",
+        "title": "제목",
+        "summary": "요약",
+        "occurred_at": "2026-01-01T00:00:00Z",
+        "result": "failure",
+        "payload": {"blob": "가" * 2000},
+    }
+    with pytest.raises(service.ValidationFailed) as exc:
+        service.build_event(body)
+    assert str(exc.value) == f"payload longer than {service.PAYLOAD_MAX}"
+
+
+def test_payload_at_the_cap_passes():
+    """경계는 통과다. 상한을 넘을 때만 거절한다."""
+    filler = "x" * (service.PAYLOAD_MAX - len('{"blob":""}'))
+    body = {
+        "project": "sillok",
+        "kind": "failure",
+        "title": "제목",
+        "summary": "요약",
+        "occurred_at": "2026-01-01T00:00:00Z",
+        "result": "failure",
+        "payload": {"blob": filler},
+    }
+    event = service.build_event(body)
+    assert len(service._payload_text(event.payload)) == service.PAYLOAD_MAX
