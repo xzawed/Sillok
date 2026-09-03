@@ -381,9 +381,12 @@ HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를
 
 ## 반환 크기
 
-- excerpt / summary: 800자에서 자른다. 원문은 `get_file` / `get_event` (D33·D58).
-- `payload`: `json.dumps(payload, ensure_ascii=False)`가 2000자를 넘으면 `VALIDATION` (D58).
+- excerpt / summary: **799자 + `…` 로 합 800자**다 (D33 §8). 원문은 `get_file` / `get_event`.
+- `payload`: `json.dumps(payload, ensure_ascii=False, separators=(",", ":"))`가 2000자를 넘으면
+  `VALIDATION` 이고 문구는 `payload longer than 2000` 이다 (D58).
+  **구분자를 빼면 기본값이 공백을 넣어 같은 객체가 재는 사람에 따라 갈린다.**
   `summary`와 같은 숫자다 — `get_event`가 행을 통째로 돌려주므로 같은 이유가 걸린다.
+  저장된 `jsonb`는 Postgres가 정규화하므로 이 수는 **입력을 재는 것**이다.
 - `ingest`의 `skipped[]`에는 천장이 없다 (D58). MCP 도구가 아니고 운영자는 목록 전체를 원한다.
 - 목록은 8개가 기본.
 - 빈 결과는 `{ "results": [] }`. 모델이 채울 문장을 넣지 않음.

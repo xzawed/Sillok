@@ -2798,7 +2798,7 @@ D5 는 v1 에 **project** 를 여럿 준 것이지 repo 를 여럿 준 적이 �
 | `superseded` | 다른 문서가 그 자리를 대신했다 | `superseded_by:` — 아래가 정하는 한 경로 |
 | `stale` | 사실이 낡았는데 아직 못 고쳤다 | `stale_since: YYYY-MM-DD` — 오늘보다 뒤면 실패한다 |
 
-**`superseded_by` 의 값은 게이트의 색인 목록에 있는 경로다.** `색인 대상` 이라는 말은 이 저장소에
+**`superseded_by` 의 값은 게이트가 `색인 대상` 으로 세는 그 목록에 있는 경로다.** `색인 대상` 이라는 말은 이 저장소에
 네 벌이 있다 — 게이트의 `INCLUDE`, ingest 의 `scan()`, 게이트의 `MUST_EXCLUDE`, `kb_documents` 의 행.
 **게이트가 검사하므로 게이트의 것이다**: `INCLUDE` 에 걸리고 `MUST_EXCLUDE` 에 걸리지 않는 `.md`.
 형식은 D30 의 `path` 와 같다 — 레포 루트 기준 상대 경로, 구분자는 슬래시, 선행 `./` 없음.
