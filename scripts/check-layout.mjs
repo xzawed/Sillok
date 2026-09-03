@@ -540,6 +540,9 @@ const STAGE_CLAIM = /1[–-](\d+)단계를 이제 검증할 수 있다/g
 const STAGE_CLAIM_FILES = ['docs/plan.md', 'CLAUDE.md', 'docs/open-questions.md']
 const stageClaims = []
 for (const p of STAGE_CLAIM_FILES) {
+  // 없는 파일에서 던지면 **앞선 검사들이 모은 보고가 통째로 사라진다** — 화면에는 스택만 남는다.
+  // 게이트는 무엇이 틀렸는지 말하고 끝나야 한다 (고장 주입 34 가 이 자리를 드러냈다).
+  if (!existsSync(join(ROOT, p))) { fail(`${p} : 없다 — 단계 주장을 대조할 수 없다.`); continue }
   // 펜스·코드 스팬은 검사 8·10·11 과 같은 이유로 뺀다 — 예시로 옛 문장을 보여 줄 수 있어야 한다.
   // 빼지 않으면 인용 하나가 N 을 정하고, 산문의 진짜 주장이 가려진다.
   const { prose } = stripCode(readFileSync(join(ROOT, p), 'utf8'))

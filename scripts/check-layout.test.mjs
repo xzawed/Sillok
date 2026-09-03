@@ -65,6 +65,9 @@ const edit = (dir, rel, fn) => {
 const append = (rel, text) => (dir) => edit(dir, rel, (s) => s + text)
 const prepend = (rel, text) => (dir) => edit(dir, rel, (s) => text + s)
 const write = (rel, text) => (dir) => writeFileSync(join(dir, rel), text, 'utf8')
+const remove = (...rels) => (dir) => {
+  for (const rel of rels) rmSync(join(dir, rel), { recursive: true, force: true })
+}
 
 // 검사 12 가 지우게 한 바로 그 덩어리. 되살려 넣는 것이 주입이다 (D29).
 const FM = '---\ntitle: X\ndoc_type: readme\nstatus: current\nmodule: null\n---\n\n'
@@ -565,6 +568,78 @@ const CASES = [
     expect: 'pass',
     mutate: prepend('README.md', FM.replace('---\n', '----\n')),
   },
+
+  // --- 주입이 없던 검사들. 통과 출력만 보고 살아 있다고 믿던 자리다 ---
+  {
+    // 검사 1. 이전 배치의 실제 실패 모드다 — D9 패턴에 걸리는 문서가 하나도 없는 상태.
+    id: '34 색인 대상이 0개면 운다',
+    expect: 'fail',
+    mentions: ['색인 대상이 0개다'],
+    mutate: remove('docs', 'adr', 'README.md', 'README.ko.md'),
+  },
+  {
+    // 검사 2. 이름이 같으면 어디 있든 색인되면 안 된다 (docs/CLAUDE.md 같은 사본).
+    id: '35 색인 밖 이름이 색인 경로에 나타나면 운다',
+    expect: 'fail',
+    mentions: ['색인 대상이 아니어야 하는데'],
+    mutate: write('docs/CLAUDE.md', FM + '# 사본'),
+  },
+  {
+    // 검사 2 의 다른 갈래. 있어야 할 파일이 사라진 것도 잡아야 한다.
+    id: '36 색인 밖 파일이 아예 없어지면 운다',
+    expect: 'fail',
+    mentions: ['AGENTS.md 가 없다'],
+    mutate: remove('AGENTS.md'),
+  },
+  {
+    // 검사 3 의 taxonomy 갈래.
+    id: '37 doc_type 이 taxonomy 밖이면 운다',
+    expect: 'fail',
+    mentions: ['taxonomy 밖'],
+    mutate: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('doc_type: other', 'doc_type: 없는종류')),
+  },
+  {
+    // 검사 3 의 status 갈래. doc_type 과 다른 enum 이라 따로 민다.
+    id: '38 status 가 enum 밖이면 운다',
+    expect: 'fail',
+    mentions: ['가 enum 밖'],
+    mutate: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('status: current', 'status: 없는상태')),
+  },
+  {
+    // 검사 3 의 module 갈래. 값은 null 이어도 되지만 **키는 있어야 한다.**
+    id: '39 module 키가 없으면 운다',
+    expect: 'fail',
+    mentions: ['module 키 없음'],
+    mutate: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('module: null', '')),
+  },
+  {
+    // 검사 5. 색인은 되는데 진입점에서 못 닿는 문서 — 고아다.
+    id: '40 진입점에서 못 닿는 문서가 생기면 운다',
+    expect: 'fail',
+    mentions: ['도달 불가'],
+    mutate: write('docs/orphan.md', FM + '# 고아'),
+  },
+  {
+    // 검사 6. 재배선 전의 파일명이 되살아나는 것.
+    id: '41 구 파일명 참조가 되살아나면 운다',
+    expect: 'fail',
+    mentions: ['구 파일명'],
+    mutate: append('docs/spec.md', NL + '옛 이름 01-SPEC 을 다시 가리킨다.' + NL),
+  },
+  {
+    // 검사 7 의 연속성 갈래. 번호가 끊기면 다른 문서의 참조가 조용히 허공을 가리킨다.
+    id: '42 Q 번호가 끊기면 운다',
+    expect: 'fail',
+    mentions: ['번호가 연속되지 않는다'],
+    mutate: (dir) => edit(dir, 'docs/open-questions.md', (t) => t.replace('**Q2. ', '**Q2 ')),
+  },
+  {
+    // 검사 9 의 파싱 갈래. 문장은 있는데 못 읽으면 Q 게이트가 조용히 비어도 통과한다.
+    id: '43 §7 게이트 문장을 읽지 못하면 운다',
+    expect: 'fail',
+    mentions: ['건만 읽었다'],
+    mutate: (dir) => edit(dir, 'docs/plan.md', (t) => t.replace('9단계 전에 Q32', '9단계 전에 Q없음')),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
@@ -611,6 +686,21 @@ const META = [
     id: 'M6 검사 3(front matter 필수)을 끄면 docs 문서의 결손이 통과한다',
     disable: (s) => s.replace('\nfor (const p of indexed) {', '\nfor (const p of []) {'),
     inject: dropFM('docs/spec.md'),
+  },
+  {
+    id: 'M8 검사 4(끊긴 링크)를 끄면 끊긴 링크가 통과한다',
+    disable: (s) => s.replace('if (!existsSync(resolve(ROOT, dirname(p), t))) fail(', 'if (false) fail('),
+    inject: append('docs/spec.md', NL + '[없는 것](./아무데도-없다.md)' + NL),
+  },
+  {
+    id: 'M9 검사 7(Q 참조)을 끄면 없는 Q 참조가 통과한다',
+    disable: (s) => s.replace('if (!defined.has(n)) fail(', 'if (false) fail('),
+    inject: append('docs/spec.md', NL + '없는 Q999 를 가리킨다.' + NL),
+  },
+  {
+    id: 'M10 검사 13(pg_trgm)을 끄면 trgm 사용이 통과한다',
+    disable: (s) => s.replace('for (const [needle, what] of TRGM) {', 'for (const [needle, what] of []) {'),
+    inject: append('src/sillok/search.py', NL + '# gin_trgm_ops' + NL),
   },
 ]
 

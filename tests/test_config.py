@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from sillok import config
@@ -52,3 +54,48 @@ def test_bad_port_is_rejected_or_defaulted(raw):
         return
     with pytest.raises(ValueError):
         config.load({"SILLOK_PORT": raw})
+
+
+# --- D16 사본 대조 (.env.example) --------------------------------------------
+
+
+def _env_example() -> dict[str, str]:
+    """`.env.example` 의 `NAME=value` 를 읽는다. 주석과 빈 줄은 버린다."""
+    path = Path(__file__).resolve().parents[1] / ".env.example"
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        out[name.strip()] = value.strip()
+    return out
+
+
+def test_env_example_holds_exactly_the_six_names():
+    """D16 이 이름 여섯을 못 박았다. `.env.example` 은 그 사본이다 (ADR 의 복제 표).
+
+    `POSTGRES_*` 셋은 compose 가 소유한다 — D16 의 여섯이 아니므로 여기서 뺀다.
+    지금까지 이 대조를 하는 검사가 없었고, 실제로 그 파일의 한 대목이 낡아 있었다.
+    """
+    names = {k for k in _env_example() if not k.startswith("POSTGRES_")}
+    assert names == {
+        "DATABASE_URL",
+        "SILLOK_HOST",
+        "SILLOK_PORT",
+        "SILLOK_WORKSPACE",
+        "SILLOK_BEARER_TOKEN",
+        "OPENAI_API_KEY",
+    }
+
+
+def test_env_example_defaults_match_config():
+    """사본의 기본값이 구현과 갈라지면 안 된다. 갈라지면 **사본이 틀린 것**이다 (D16)."""
+    env = _env_example()
+    assert env["DATABASE_URL"] == config.DEFAULT_DATABASE_URL
+    assert env["SILLOK_HOST"] == config.DEFAULT_HOST
+    assert env["SILLOK_PORT"] == str(config.DEFAULT_PORT)
+    assert env["SILLOK_WORKSPACE"] == config.DEFAULT_WORKSPACE
+    # 비밀은 기본값이 없다 — 비어 있는 것이 계약이다 (D7·D2).
+    assert env["SILLOK_BEARER_TOKEN"] == ""
+    assert env["OPENAI_API_KEY"] == ""

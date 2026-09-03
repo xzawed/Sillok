@@ -88,6 +88,27 @@ function runStep(step) {
 
 const results = STEPS.map((step) => ({ step, ...runStep(step) }))
 
+// Q26 이 막으려던 실패 모드: **DB 검사가 전부 skip 됐는데 통과로 적히는 것.**
+// 종료 코드만 보면 그 상태가 PASS 다. 그런데 `skip 0` 을 요구할 수도 없다 —
+// 컨테이너에는 *그 플랫폼이 D36 을 지원할 때* 건너뛰는 뒤집힌 검사가 하나 있다.
+// 그래서 두 단계를 **서로 비교한다.** 수치를 박지 않으므로 검사가 늘어도 낡지 않는다.
+const counts = (line) => ({
+  passed: Number((/(\d+) passed/.exec(line || '') || [])[1] ?? -1),
+  skipped: Number((/(\d+) skipped/.exec(line || '') || [])[1] ?? 0),
+})
+const host = results.find((r) => r.step.name === '호스트 테스트')
+const withDb = results.find((r) => r.step.name.startsWith('DB 포함'))
+if (host?.ok && withDb?.ok) {
+  const a = counts(host.line)
+  const b = counts(withDb.line)
+  if (!(b.passed > a.passed && b.skipped < a.skipped)) {
+    withDb.ok = false
+    withDb.line =
+      `${withDb.line} — 호스트(${a.passed}/${a.skipped}) 보다 나아지지 않았다. ` +
+      'DB 에 붙지 못한 채 전부 skip 된 실행일 수 있다 (Q26).'
+  }
+}
+
 console.log('## 검증 (실측)\n')
 console.log('```text')
 for (const { step, ok, line } of results) {
