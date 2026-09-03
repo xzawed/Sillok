@@ -470,6 +470,8 @@ const RETIRED = [
   ['가상환경 경로를 PATH 에 넣지 않는다', '2026-09-02 에 고쳤고 지금은 그대로 돈다'],
   ['project -> 경로 매핑은 아직 미정이다', 'D37 이 Q20 을 닫았다 — 매핑은 만들지 않는다'],
   ['기준일 2026-08-30', 'SKILL 은 그 뒤로 두 번 더 고쳤다'],
+  // 이 둘은 등록할 수 없다 — 취소선으로 ADR 에 그대로 남겨 두었고, RETIRED 는 코드 스팬만
+  // 비켜 가므로 자기가 자기를 문다. D42–D46 의 `마지막 단계 게이트` 와 같은 자리다.
   // 날짜 자체는 참이다. 거짓인 것은 목록이 거기서 끝난다는 것이다 (Grok 재검토).
   ['D35–D41은 2026-09-02 확정. 임의로 뒤집지 않는다', 'D42–D46 도 같은 날이고 D47–D52 가 뒤에 있다'],
 ]
@@ -595,12 +597,21 @@ for (const [p, n] of stageClaims) {
 //     `check-index-parity.mjs` 는 D9 필터를 통과한 뒤의 목록을 비교하므로 원리상 이 갈라짐을 못 본다 —
 //     건너뛴 디렉터리 안의 파일은 양쪽 모두에서 애초에 목록에 없다.
 const ingestPath = 'src/sillok/ingest.py'
-if (existsSync(join(ROOT, ingestPath))) {
+if (!existsSync(join(ROOT, ingestPath))) {
+  // 파일이 없다고 넘어가면 D47 이 조용히 강제되지 않는다 (Grok 재검토).
+  fail(`${ingestPath} : 없다 — D47 의 두 walk 을 대조할 수 없다.`)
+} else {
   const py = readFileSync(join(ROOT, ingestPath), 'utf8')
-  const m = /_SKIP_DIRS\s*=\s*\{([^}]*)\}/.exec(py)
-  if (!m) {
-    fail(`${ingestPath} : _SKIP_DIRS 를 찾지 못했다 — D47 의 두 walk 을 대조할 수 없다.`)
+  // 대입이 둘이면 어느 쪽이 사는지 여기서 알 수 없다 — 주석 처리된 옛 대입이 위에 있으면
+  // 첫 개만 읽고 통과할 수 있다. 그 자체를 실패로 본다.
+  const hits = [...py.matchAll(/_SKIP_DIRS\s*(?::[^=\n]*)?=\s*(?:frozenset\()?\{([^}]*)\}/g)]
+  if (hits.length !== 1) {
+    fail(
+      `${ingestPath} : _SKIP_DIRS 대입을 ${hits.length}개 찾았다 (하나여야 한다) — ` +
+        'D47 의 두 walk 을 대조할 수 없다.'
+    )
   } else {
+    const m = hits[0]
     const theirs = new Set([...m[1].matchAll(/"([^"]+)"|'([^']+)'/g)].map((x) => x[1] ?? x[2]))
     const mine = SKIP_DIRS
     const onlyMine = [...mine].filter((d) => !theirs.has(d))
@@ -615,20 +626,25 @@ if (existsSync(join(ROOT, ingestPath))) {
 
 // 16. 두 README 가 구조적으로 갈라지지 않는가 (D27 · D29).
 //     영문이 정본이고 한국어가 사본인데 **그 둘을 대조하는 것이 아무것도 없었다.**
-//     본문을 번역 대조할 수는 없으므로 *구조*를 본다 — 절 제목 수, 표 행 수, 코드 펜스 수.
-//     conventions.md 가 "두 파일의 산문 블록 수와 문단 구조를 맞춘다" 고 요구하는 그 자리다.
+//     본문을 번역 대조할 수는 없으므로 *구조*를 본다 — `##`·`###` 수, 표 수, 표 행 수, 펜스 수.
+//     **문단까지 세지는 않는다.** conventions.md 의 "산문 블록 수" 요구를 이 검사가 다 덮지는 못한다.
 const READMES = ['README.md', 'README.ko.md']
 if (READMES.every((p) => existsSync(join(ROOT, p)))) {
   const shape = (p) => {
     const s = readFileSync(join(ROOT, p), 'utf8')
+    // 깊이를 눌러 세면 `###` 하나가 `##` 로 올라가고 다른 하나가 사라져도 총합이 같다.
+    // 표의 **구분 행**(`|---|`)은 행 수가 아니라 표 개수를 세는 것이라 따로 뺀다.
+    const lines = s.split(/\r?\n/)
     return {
-      headings: (s.match(/^#{2,}\s/gm) || []).length,
-      rows: (s.match(/^\|/gm) || []).length,
-      fences: (s.match(/^```/gm) || []).length,
+      h2: lines.filter((l) => /^##\s/.test(l)).length,
+      h3: lines.filter((l) => /^###\s/.test(l)).length,
+      tables: lines.filter((l) => /^\|[\s\-:|]+\|\s*$/.test(l)).length,
+      rows: lines.filter((l) => /^\|/.test(l) && !/^\|[\s\-:|]+\|\s*$/.test(l)).length,
+      fences: lines.filter((l) => l.startsWith('```')).length,
     }
   }
   const [en, ko] = READMES.map(shape)
-  for (const k of ['headings', 'rows', 'fences']) {
+  for (const k of ['h2', 'h3', 'tables', 'rows', 'fences']) {
     if (en[k] !== ko[k]) {
       fail(
         `두 README 의 구조가 갈라졌다 — ${k}: README.md=${en[k]} vs README.ko.md=${ko[k]}. ` +

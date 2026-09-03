@@ -754,7 +754,7 @@ const META = [
   },
   {
     id: 'M17 검사 16(두 README)을 끄면 갈라진 구조가 통과한다',
-    disable: (s) => s.replace("for (const k of ['headings', 'rows', 'fences']) {", 'for (const k of []) {'),
+    disable: (s) => s.replace("for (const k of ['h2', 'h3', 'tables', 'rows', 'fences']) {", 'for (const k of []) {'),
     inject: append('README.ko.md', NL + '## 사본에만 있는 절' + NL),
   },
 ]

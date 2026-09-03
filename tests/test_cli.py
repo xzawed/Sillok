@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
 from sillok import cli
@@ -86,7 +89,7 @@ def test_registered_commands_are_exactly_the_implemented_ones():
 # --- stdio (D45). `sillok mcp` 는 지금까지 검사가 하나도 없었다 ----------------
 
 
-def test_mcp_reports_a_dead_db_on_stderr_and_leaves_stdout_clean(capsys, monkeypatch):
+def test_mcp_reports_a_dead_db_on_stderr_and_leaves_stdout_clean(capfd, monkeypatch):
     """**stdout 은 JSON-RPC 채널이다** (D45). 한 글자라도 새면 클라이언트가 파싱에 실패한다.
 
     D17 과 같은 이유로 마이그레이션을 먼저 돌리므로 붙지 못하면 여기서 멈춘다.
@@ -94,7 +97,8 @@ def test_mcp_reports_a_dead_db_on_stderr_and_leaves_stdout_clean(capsys, monkeyp
     """
     monkeypatch.setenv("DATABASE_URL", "postgresql://sillok:secret@127.0.0.1:1/sillok")
     assert cli.main(["mcp"]) == 1
-    captured = capsys.readouterr()
+    # `capfd` 다 — 파이썬의 print 뿐 아니라 임포트 중 fd 1 로 나가는 것까지 본다 (Grok 재검토).
+    captured = capfd.readouterr()
     assert captured.out == ""  # 프로토콜 채널은 비어 있어야 한다
     assert "DB 에 붙을 수 없다" in captured.err
     assert "secret" not in captured.err  # 비밀은 어느 스트림에도 가지 않는다 (D21)
@@ -104,6 +108,16 @@ def test_mcp_does_not_import_the_server_until_it_runs():
     """`mcp` 의 무거운 임포트는 그 분기 안에 있다 (cli.py).
 
     모듈 최상단으로 올리면 `sillok migrate` 하나가 MCP SDK 전체를 끌고 온다.
+
+    **이름 유무가 아니라 `sys.modules` 를 본다.** `from .mcp_server import build` 처럼
+    별칭으로 올리면 속성 검사는 통과한다 (Grok 재검토). 새 프로세스에서 확인해야
+    이 파일의 다른 검사가 이미 올려 둔 모듈에 속지 않는다.
     """
-    assert not hasattr(cli, "mcp_server")
-    assert not hasattr(cli, "anyio")
+    probe = "import sillok.cli, sys; print(int(any(m.endswith('mcp_server') or m == 'anyio' for m in sys.modules)))"
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert out == "0", f"cli 를 임포트하는 것만으로 MCP 쪽이 올라왔다: {out}"
