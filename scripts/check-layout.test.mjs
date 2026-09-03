@@ -655,6 +655,32 @@ const CASES = [
     mentions: ['두 README 의 구조가 갈라졌다'],
     mutate: append('README.ko.md', NL + '## 사본에만 있는 절' + NL),
   },
+  {
+    // 검사 17. 공개 저장소다 (D56). 지금까지 1회성 실측뿐이었다.
+    id: '46 OpenAI 키 모양이 들어오면 운다',
+    expect: 'fail',
+    mentions: ['OpenAI 키 모양'],
+    mutate: append('docs/spec.md', NL + 'sk-abcdefghijklmnop0123456789' + NL),
+  },
+  {
+    id: '47 비밀이 든 DSN 이 들어오면 운다',
+    expect: 'fail',
+    mentions: ['비밀이 든 DSN'],
+    mutate: append('docs/spec.md', NL + 'postgresql://sillok:hunter2@db:5432/sillok' + NL),
+  },
+  {
+    // 같은 문자열이 tests/ 에 있으면 **울지 않는다.** 그 파일들은 redact_dsn 이
+    // 그것을 가리는지 증명하려고 가짜 비밀을 일부러 담는다.
+    id: '48 tests 의 가짜 DSN 은 울지 않는다',
+    expect: 'pass',
+    mutate: append('tests/test_config.py', NL + '# postgresql://sillok:hunter2@db:5432/sillok' + NL),
+  },
+  {
+    id: '49 사설 키가 들어오면 운다',
+    expect: 'fail',
+    mentions: ['사설 키'],
+    mutate: append('docs/spec.md', NL + '-----BEGIN RSA PRIVATE KEY-----' + NL),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
@@ -756,6 +782,11 @@ const META = [
     id: 'M17 검사 16(두 README)을 끄면 갈라진 구조가 통과한다',
     disable: (s) => s.replace("for (const k of ['h2', 'h3', 'tables', 'rows', 'fences']) {", 'for (const k of []) {'),
     inject: append('README.ko.md', NL + '## 사본에만 있는 절' + NL),
+  },
+  {
+    id: 'M18 검사 17(비밀)을 끄면 키 모양이 통과한다',
+    disable: (s) => s.replace('for (const [pattern, what, scope] of SECRETS) {', 'for (const x of []) {'),
+    inject: append('docs/spec.md', NL + 'sk-abcdefghijklmnop0123456789' + NL),
   },
 ]
 

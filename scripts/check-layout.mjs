@@ -655,6 +655,37 @@ if (READMES.every((p) => existsSync(join(ROOT, p)))) {
 }
 
 
+// 17. 비밀이 저장소에 들어오지 않았는가 (D56).
+//     공개 저장소인데 지금까지 **1회성 실측**뿐이었다. 매번 보는 자리를 만든다.
+//     모양만 본다 — 새로 발명되는 형식은 못 잡는다. `.env` 는 .gitignore 가 막고
+//     예외로 새는 것은 D21 이 막는다. 셋이 겹쳐야 하는 것이지 하나가 다 하지 않는다.
+const SECRETS = [
+  [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}/, 'OpenAI 키 모양', 'all'],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '사설 키', 'all'],
+  // **비밀번호가 든 DSN 은 `tests/` 를 보지 않는다.** 그 파일들은 `hunter2` 같은 가짜 비밀을
+  // 일부러 담는다 — `redact_dsn` 이 그것을 가리는지 증명하는 것이 그 검사의 일이다.
+  // 여기서 잡으면 "비밀을 가리는지 보는 검사"가 "비밀이 있다"로 붉어진다.
+  // 기본 DSN 의 비밀번호는 `sillok` 이고 그것은 D16 이 정한 **계약 값**이다 — 비밀이 아니다.
+  // 문서·설정이 그 값을 그대로 보여 주는 것이 계약이므로 그 하나만 비켜 간다.
+  [/postgres(?:ql)?:\/\/[^\s:/@]+:(?!sillok@)[^\s:/@]{3,}@/, '비밀이 든 DSN', 'not-tests'],
+]
+// **주입 하네스만 비켜 간다.** 그 파일은 이 검사를 밀기 위해 needle 을 들고 있어야 한다 —
+// 검사 11(폐기 문구)이 `scripts/` 를 통째로 비켜 가는 것과 같은 이유이고, 여기서는
+// 한 파일만 빼서 나머지 스크립트는 계속 본다.
+const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
+const scanned = all.filter(
+  (p) => p !== SECRET_SCAN_EXEMPT && /\.(md|py|mjs|js|yml|yaml|sql|toml|example|txt|json)$/.test(p)
+)
+for (const p of scanned) {
+  const body = readFileSync(join(ROOT, p), 'utf8')
+  for (const [pattern, what, scope] of SECRETS) {
+    if (scope === 'not-tests' && p.startsWith('tests/')) continue
+    const hit = pattern.exec(body)
+    if (hit) fail(`${p} : ${what} 이 보인다 — 공개 저장소다 (D56). 조각: ${hit[0].slice(0, 12)}…`)
+  }
+}
+
+
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
