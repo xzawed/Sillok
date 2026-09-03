@@ -11,7 +11,7 @@ module: null
 
 > 이 파일은 엔드포인트·도구·요청/응답 JSON의 정본이다.
 > 주소·인증·`top_k`·색인 경로의 정본은 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)다.
-> 계약 구멍은 [open-questions.md](open-questions.md) C절에 있었고 전부 닫혔다 (D58·D59가 마지막이다).
+> 계약 구멍은 [open-questions.md](open-questions.md) C절에 있었고 전부 닫혔다 (D58–D64).
 
 Knowledge Service가 DB의 유일한 문이다.  
 MCP와 사람용 UI는 이 HTTP API만 호출한다.
@@ -117,7 +117,8 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 응답 `data.results[]`: `id`, `title`, `summary`, `kind`, `result`, `module`, `occurred_at`, `score`
 
-**`summary`는 800자에서 자르고 잘렸으면 `…`을 붙인다** (D58). `excerpt`와 같은 천장이다 —
+**`summary`는 `excerpt`와 같은 방식으로 자른다** (D58) — 799자 + `…` 로 합 800자다 (D33 §8).
+같은 함수를 쓴다. 두 벌로 만들면 한쪽이 801자가 된다 —
 원문은 `get_event`에서 본다. 자르지 않으면 한 응답이 `top_k` × 2000자가 된다.
 
 **이벤트 검색은 키워드만이다** — v1은 이벤트를 임베딩하지 않는다 (D34).
