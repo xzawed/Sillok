@@ -395,3 +395,11 @@ def test_the_mcp_face_widens_types_where_http_rejects(client):
     )
     assert http.status_code == 422
     assert http.json()["error"]["code"] == "VALIDATION"
+
+    # **`"8"` 하나로는 넓힘을 증명하지 못한다** — SDK 가 그 인자를 *버려도* Service 는
+    # 기본값 8 을 써서 같은 결과를 낸다 (D33 의 TOP_K_DEFAULT). 두 갈래가 구별되지 않는
+    # 유일한 값이다 (Grok 적대 리뷰). 범위 밖 문자열은 갈라진다 —
+    # 넓히면 Service 가 99 를 보고 거절하고, 버리면 기본값으로 성공한다.
+    widened = call(client, "search_docs", {"project": PROJECT, "query": "가나다", "top_k": "99"})
+    assert widened["ok"] is False, "버려졌다면 기본값 8 로 성공했을 것이다"
+    assert widened["error"]["code"] == "VALIDATION"

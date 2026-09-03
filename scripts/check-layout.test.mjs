@@ -12,7 +12,7 @@
 //
 // 사용: node scripts/check-layout.test.mjs
 
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -681,6 +681,21 @@ const CASES = [
     mentions: ['사설 키'],
     mutate: append('docs/spec.md', NL + '-----BEGIN RSA PRIVATE KEY-----' + NL),
   },
+  {
+    // D30 이 "다음 후보" 로 적어 둔 출력. 실패가 아니라 **보이는가** 가 계약이다.
+    id: '50 D9 경로의 not-md 파일이 제외 목록에 보인다',
+    expect: 'pass',
+    expectOut: ['docs/example.json (not-md)'],
+    mutate: write('docs/example.json', '{}'),
+  },
+  {
+    // ingest 는 심볼릭 링크를 `symlink` 으로 건너뛴다 (D30). 게이트도 같아야
+    // 두 walk 이 같은 집합을 본다 — 아니면 `.md` 링크가 한쪽에서만 색인 대상이 된다.
+    id: '51 D9 경로의 심볼릭 링크가 제외 목록에 보인다',
+    expect: 'pass',
+    expectOut: ['docs/link.md (symlink)'],
+    mutate: (dir) => symlinkSync('spec.md', join(dir, 'docs', 'link.md')),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
@@ -813,6 +828,14 @@ for (const c of CASES) {
     const got = code === 0 ? 'pass' : 'fail'
     let ok = got === c.expect
     const missing = []
+    // 통과하면서 **무엇을 출력하는가**가 계약인 자리가 있다 (색인 제외 목록).
+    // 종료 코드만 보면 그 줄을 지워도 초록이다.
+    for (const m of c.expectOut || []) {
+      if (!out.includes(m)) {
+        ok = false
+        missing.push(m)
+      }
+    }
     if (ok && c.expect === 'fail') {
       for (const m of c.mentions || []) {
         if (!out.includes(m)) {
