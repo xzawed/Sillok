@@ -110,6 +110,9 @@ services:
       # D28 가 예고한 자리다 — "SQL 만 더하는 변경"이 오면 구운 migrations/ 가 조용히 낡는다.
       # 003 을 더한 뒤 실측하니 이미지 안에는 001·002 뿐이었고 검사는 그대로 통과했다.
       - ./migrations:/app/migrations:ro
+      # D16 의 사본이다. 이미지에는 없으므로(.dockerignore) 마운트하지 않으면
+      # 그 사본을 대조하는 검사가 컨테이너에서만 죽는다 — 실제로 그렇게 한 번 났다.
+      - ./.env.example:/app/.env.example:ro
 
 volumes:
   db_data:
