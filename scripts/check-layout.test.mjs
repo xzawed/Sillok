@@ -693,6 +693,7 @@ const CASES = [
     // 두 walk 이 같은 집합을 본다 — 아니면 `.md` 링크가 한쪽에서만 색인 대상이 된다.
     id: '51 D9 경로의 심볼릭 링크가 제외 목록에 보인다',
     expect: 'pass',
+    optional: true,   // 윈도우에서는 심볼릭 권한이 없을 수 있다
     expectOut: ['docs/link.md (symlink)'],
     mutate: (dir) => symlinkSync('spec.md', join(dir, 'docs', 'link.md')),
   },
@@ -812,6 +813,13 @@ for (const c of CASES) {
     try {
       c.mutate(dir)
     } catch (e) {
+      // 권한이 있어야 만들 수 있는 주입(심볼릭 링크)은 그 자리에서 건너뛴다.
+      // 없는 권한을 BAD 로 적으면 다른 머신에서 늘 붉은불이고, 진짜 실패가 묻힌다 —
+      // `tests/test_ingest.py` 가 같은 이유로 skip 한다 (Grok 재검토).
+      if (c.optional) {
+        console.log(`SKIP ${c.id}  이 머신에서는 주입할 수 없다: ${e.code ?? e.message}`)
+        continue
+      }
       // 주입이 실패하면 그 케이스만 BAD 로 두고 나머지는 계속 돌린다.
       failures++
       console.log(`BAD  ${c.id}  주입 실패: ${e.message}`)
