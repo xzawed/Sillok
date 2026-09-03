@@ -181,7 +181,7 @@ def test_hit_paths_are_built_inside_the_try(caplog):
 # --- D25 · D33 이 서로 다른 정규화를 요구하는 자리 ----------------------------
 
 
-def test_event_fields_are_not_trimmed(monkeypatch):
+def test_event_fields_are_not_trimmed():
     """D25 는 정규화를 `project` 에만 건다. 이벤트 필드는 받은 그대로다.
 
     같은 이름의 함수 둘 중 나중 것이 이겨 `build_event` 가 `module` 을 트리밍하고
@@ -218,8 +218,42 @@ def test_blank_severity_is_rejected_not_swallowed():
 
 
 def test_search_filters_still_trim():
-    """검색 필터는 반대다 — 공백뿐이면 거르지 않는다 (D33 §1). 두 규칙이 한 이름을 쓰면 안 된다."""
+    """검색 필터는 반대다 — 공백뿐이면 거르지 않는다 (D33 §1). 두 규칙이 한 이름을 쓰면 안 된다.
+
+    **두 빌더를 다 본다.** 하나만 보면 나머지가 조용히 되돌아가도 초록이다 (Grok 재검토).
+    """
     _where, params = service._doc_filters({"project": "p", "status": "  current  "}, "p")
     assert params["status"] == "current"
     _w2, p2 = service._doc_filters({"project": "p", "status": "   "}, "p")
     assert "status" not in p2
+
+    _w3, p3 = service._event_search_filters({"project": "p", "kind": "  failure  "}, "p")
+    assert p3["kind"] == "failure"
+    _w4, p4 = service._event_search_filters({"project": "p", "module": "   "}, "p")
+    assert "module" not in p4
+
+
+def test_blank_optional_text_is_stored_as_given():
+    """빈 문자열과 공백은 **그대로 저장된다** — D25 가 그 자리를 다루지 않는다.
+
+    바뀐 동작이므로 잠근다. 저장은 받은 그대로이고 검색 필터는 트리밍하므로,
+    공백째 저장한 `module` 은 트리밍된 필터로 찾지 못한다. 둘 다 의도된 규칙이고
+    그 둘이 만나는 자리를 ADR 이 미결로 적어 두었다.
+    """
+    event = service.build_event(
+        {
+            "project": "sillok",
+            "kind": "failure",
+            "title": "제목",
+            "summary": "요약",
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "result": "failure",
+            "module": "",
+            "root_cause": "  까닭  ",
+        }
+    )
+    assert event.module == ""
+    assert event.root_cause == "  까닭  "
+
+    _where, params = service._event_search_filters({"project": "p", "module": "  x  "}, "p")
+    assert params["module"] == "x"  # 검색은 접는다 — 그래서 위 행을 못 찾는다
