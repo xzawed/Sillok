@@ -113,6 +113,12 @@ services:
       # D16 의 사본이다. 이미지에는 없으므로(.dockerignore) 마운트하지 않으면
       # 그 사본을 대조하는 검사가 컨테이너에서만 죽는다 — 실제로 그렇게 한 번 났다.
       - ./.env.example:/app/.env.example:ro
+      # D28 이 예고한 자리. `.venv` 는 이미지에 구워져 있어서 의존성을 바꾸고 다시 굽지 않으면
+      # 검사가 **옛 라이브러리로** 돈다. 잠금 파일을 넣어 그 갈라짐을 검사가 보게 한다 —
+      # 새 임포트는 ImportError 로 시끄럽고, 버전 상향과 제거는 이 마운트가 있어야만 드러난다 —
+      # **이 두 줄을 지우면 이미지 안의 잠금과 이미지 안의 venv 를 비교해 언제나 통과한다.**
+      - ./uv.lock:/app/uv.lock:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
 
 volumes:
   db_data:
