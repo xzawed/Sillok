@@ -265,7 +265,9 @@ D17이 `세 번째 컨테이너 없음`으로 마이그레이션 전용 컨테�
 ### D22가 닫지 않는 것
 
 - 테스트가 제품 `db_data` 볼륨을 함께 쓴다. 격리는 정하지 않았다
-- 5단계 ingest 검사는 workspace 파일이 필요한데 `test` 이미지에는 `docs/`·`adr/`가 없다. 그때 더한다
+- ~~5단계 ingest 검사는 workspace 파일이 필요한데 `test` 이미지에는 `docs/`·`adr/`가 없다. 그때 더한다~~
+  → **다른 답으로 해결됐다.** 검사가 `tmp_path` 로 자기 workspace 를 만든다 (D30 이 경로 규칙을 소유하므로
+  실제 레포일 필요가 없다). 이미지에는 여전히 `docs/`·`adr/` 가 없고, 그것으로 충분하다
 - ~~**Q20 · Q10 · Q6–Q9 · Q12–Q19 · Q21 · Q23–Q25**는 그대로 열려 있다~~ — 2026-08-31 D22 시점의 목록이다.
   D30–D34가 Q6–Q10을 닫으면서 낡았다. **여기에 최신 목록을 다시 적지 않는다** — 사본이라서 낡은 것이고,
   새로 적으면 같은 자리에서 또 낡는다. 열린 질문의 정본은 [open-questions.md](../docs/open-questions.md) 하나다
@@ -446,6 +448,15 @@ D26이 열어 둔 자리를 채운다. 아무도 의존하기 전인 지금이 �
 - **Q12** `get_event`의 404 대 빈 결과, 프로젝트 경계 — 7단계
 - **Q22 · Q23 · Q25** `repo` 의미, front matter 규칙(**절반은 D29 가 답했다**), Skill 사본 노후
 - D24는 재시도 부풀림을 **해결하지 않고 받아들인다**
+- **빈 문자열을 다루지 않는다.** 선택 필드에 `""` 가 오면 그대로 저장된다 —
+  `by_module` 이 NULL 키를 만들지 않는다는 규칙(D23)과 만나면 `""` 는 키가 된다.
+  2026-09-03 에 이 자리를 확인했고, 값을 발명하지 않으려고 그대로 둔다
+
+> **2026-09-03 실측: 구현이 D25 를 어기고 있었다.** `service.py` 에 같은 이름의 함수가 둘이었고
+> 파이썬이 나중 정의로 덮어, `build_event` 가 `module` 을 트리밍하고 공백뿐인 `severity` 를
+> 조용히 `None` 으로 삼켰다 — D25 는 정규화를 `project` 에만 걸고, D10 은 관대하게 채우지 말라고 한다.
+> 이름을 `_filter_text` 로 나눠 고쳤다(검색 필터 쪽은 D33 §1 대로 트리밍이 맞다).
+> **결정을 바꾼 것이 아니라 코드를 결정에 맞춘 것이다.**
 
 ### D16–D20이 닫지 않는 것
 
@@ -2648,6 +2659,10 @@ N 은 §7 번호 목록의 마지막인 10 그대로이고, 세 문서의 `1–1
 | [migrations/002_schema.sql](../migrations/002_schema.sql) | `kb_ingest_runs.status` 값 주석 (D32) |
 | [AGENTS.md](../AGENTS.md) | 확정 전제 요약 블록 |
 | [.env.example](../.env.example) | D16 환경변수 이름과 기본값 |
+| [README.md](../README.md) · [README.ko.md](../README.ko.md) | `5432` 미게시(D16), CLI 이름, 상태표 |
+| [docker-compose.yml](../docker-compose.yml) | 서비스 둘(D13), `5432` 미게시(D16), `test` 프로파일(D22) |
+| [Dockerfile](../Dockerfile) | 파이썬 버전·uv(D18), runtime 의 PATH |
+| [compose.override.example.yml](../compose.override.example.yml) | 호스트에서 `5432` 를 여는 예 (D16 의 예외) |
 
 ## 나중에 바꿔도 되는 것 (v1 비범위)
 

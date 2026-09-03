@@ -176,3 +176,50 @@ def test_hit_paths_are_built_inside_the_try(caplog):
         )
     # 죽은 DSN 도 같은 머리말로 경고한다. 그래서 **연결 실패가 낼 수 없는 문구**를 본다 (Grok 재검토).
     assert any("'path'" in r.getMessage() for r in caplog.records)
+
+
+# --- D25 · D33 이 서로 다른 정규화를 요구하는 자리 ----------------------------
+
+
+def test_event_fields_are_not_trimmed(monkeypatch):
+    """D25 는 정규화를 `project` 에만 건다. 이벤트 필드는 받은 그대로다.
+
+    같은 이름의 함수 둘 중 나중 것이 이겨 `build_event` 가 `module` 을 트리밍하고
+    공백뿐인 `severity` 를 조용히 None 으로 삼키고 있었다 (Grok 적대 리뷰가 잡았다).
+    """
+    event = service.build_event(
+        {
+            "project": " sillok ",
+            "kind": "failure",
+            "title": "제목",
+            "summary": "요약",
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "result": "failure",
+            "module": "  auth  ",
+        }
+    )
+    assert event.project == "sillok"  # project 만 정규화한다 (D25)
+    assert event.module == "  auth  "  # 나머지는 받은 그대로다
+
+
+def test_blank_severity_is_rejected_not_swallowed():
+    """`관대하게 채우지 않는다` (D10). 공백뿐인 enum 은 거절이지 None 이 아니다."""
+    body = {
+        "project": "sillok",
+        "kind": "failure",
+        "title": "제목",
+        "summary": "요약",
+        "occurred_at": "2026-01-01T00:00:00Z",
+        "result": "failure",
+        "severity": "   ",
+    }
+    with pytest.raises(service.ValidationFailed):
+        service.build_event(body)
+
+
+def test_search_filters_still_trim():
+    """검색 필터는 반대다 — 공백뿐이면 거르지 않는다 (D33 §1). 두 규칙이 한 이름을 쓰면 안 된다."""
+    _where, params = service._doc_filters({"project": "p", "status": "  current  "}, "p")
+    assert params["status"] == "current"
+    _w2, p2 = service._doc_filters({"project": "p", "status": "   "}, "p")
+    assert "status" not in p2

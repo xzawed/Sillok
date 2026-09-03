@@ -12,8 +12,8 @@
 #   uv run sillok migrate
 #
 # 색인은 `docker compose exec api sillok ingest --project <name>` 로
-# 컨테이너 안에서 부를 수 있다. sillok ingest 는 5단계에서 생겼지만 그 형태가 도는지는
-# 확인하지 않았다 — Dockerfile 이 가상환경 경로를 PATH 에 넣지 않는다 (D30 이 지적한 자리).
+# 컨테이너 안에서 부를 수 있다. 그 형태는 2026-09-02 에 확인했다 —
+# runtime 스테이지가 `/app/.venv/bin` 을 PATH 에 넣도록 고쳤고 지금은 그대로 돈다.
 # **호스트에서** pytest 의 DB 검사를 돌릴 때만 이 오버라이드가 필요하다.
 # 컨테이너 안에서 돌리는 길은 이미 있다 (D22): docker compose --profile test run --rm test
 # 그쪽은 5432 를 열지 않고 내부 네트워크로 붙는다.

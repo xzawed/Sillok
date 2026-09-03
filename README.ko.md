@@ -133,7 +133,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 [3] 출구                    MCP 도구 · Skill · JSON 현황 API
 ```
 
-[1]과 [2]는 서 있고 [3]은 지금 JSON API만 있습니다.
+[1]과 [2]는 서 있고 [3]은 JSON API와 MCP 도구 여덟을 함께 냅니다.
 
 - **불변식의 단위는 Service 함수이지 HTTP가 아닙니다.** MCP와 사람용 UI는 HTTP API를 통해야 하고,
   CLI는 같은 함수를 인프로세스로 부릅니다.
@@ -222,7 +222,7 @@ docker compose build \
 | `migrations/` | 버전 붙인 raw SQL. 서버가 bind하기 전에 적용된다 |
 | `src/sillok/service.py` | DB를 만지는 유일한 문. 검증은 DDL 제약이 아니라 여기 있다 |
 | `src/sillok/api.py` | HTTP 어댑터 — 공통 봉투와 Bearer 게이트. SQL을 갖지 않는다 |
-| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` |
+| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` · `sillok mcp` |
 | `scripts/` | 문서 게이트, 그 게이트의 고장 주입, 증거 수집기, 10단계 스모크 |
 | `tests/` | pytest |
 

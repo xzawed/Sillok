@@ -134,7 +134,7 @@ so an all-unresolved window returns `null` rather than `0`.
 [3] Exits                   MCP tools · Skill · JSON status API
 ```
 
-Layers 1 and 2 are running. Layer 3 currently exposes the JSON API only.
+Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP tools.
 
 - **The unit of the invariant is the Service function, not HTTP.**
   MCP and any human UI must go through the HTTP API; the CLI calls the same functions in-process.
@@ -222,7 +222,7 @@ It is an environment problem, so it is never baked into the image.
 | `migrations/` | Versioned raw SQL, applied before the server binds |
 | `src/sillok/service.py` | The only door to the database. Validation lives here, not in DDL constraints |
 | `src/sillok/api.py` | The HTTP adapter — the common envelope and the bearer gate. Holds no SQL |
-| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` |
+| `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` · `sillok mcp` |
 | `scripts/` | Documentation gate, its fault-injection harness, evidence collector, stage-10 smoke |
 | `tests/` | pytest |
 
