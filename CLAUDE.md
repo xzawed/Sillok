@@ -86,7 +86,7 @@ Sillok은 RAG 플랫폼이 아니라 **저장 위치를 강제하는 지식 원�
 | 런타임 | CPython 3.12, uv, pytest (D18) |
 | 환경변수 | `DATABASE_URL` + `SILLOK_HOST`·`SILLOK_PORT`·`SILLOK_WORKSPACE`·`SILLOK_BEARER_TOKEN` + `OPENAI_API_KEY` (D16) |
 | 마이그레이션 | 버전 붙인 raw `.sql`, `serve` 기동 시 bind 전 멱등 적용 (D17) |
-| CLI | `sillok ingest`, `sillok serve` (+ 마이그레이션 러너 `sillok migrate`) |
+| CLI | `sillok ingest`, `sillok serve` (+ 러너 `sillok migrate`, stdio `sillok mcp`) |
 | ingest 경로 | CLI가 Service 함수를 인프로세스 호출. CLI는 자기 SQL을 갖지 않는다 (D19) |
 | 색인 경로 | `docs/**`, 루트 `README*`, `adr/**` — 이 셋만 |
 | 사람 UI | JSON 현황 API만. **웹 페이지는 v1 비범위** |

@@ -665,8 +665,14 @@ def _top_k(raw: object) -> int:
     return raw
 
 
-def _optional_text(body: dict[str, Any], field: str) -> str | None:
-    """필드가 없거나 null 이면 거르지 않는다 (D33 §1)."""
+def _filter_text(body: dict[str, Any], field: str) -> str | None:
+    """검색 **필터**의 값을 읽는다. 없거나 null 이거나 공백뿐이면 거르지 않는다 (D33 §1).
+
+    **`_optional_text` 와 이름이 겹치면 안 된다.** 파이썬은 나중 정의로 덮으므로
+    이 파일에서 먼저 정의된 쪽을 쓰는 `build_event` 가 조용히 이 함수를 부르게 된다 —
+    실제로 그렇게 나 있었고, `module`·`severity` 가 D25 에 없는 트리밍을 받고 있었다.
+    같은 경고가 바로 아래 `_event_search_filters` 에 이미 적혀 있었는데 되풀이했다.
+    """
     raw = body.get(field)
     if raw is None:
         return None
@@ -681,7 +687,7 @@ def _doc_filters(body: dict[str, Any], project: str) -> tuple[str, dict[str, Any
     where = ["d.project = %(project)s"]
     params: dict[str, Any] = {"project": project}
     for field in ("module", "doc_type", "status"):
-        value = _optional_text(body, field)
+        value = _filter_text(body, field)
         if value is not None:
             where.append(f"d.{field} = %({field})s")
             params[field] = value
@@ -741,7 +747,7 @@ def _log_filters(params: dict[str, Any]) -> dict[str, Any]:
     """`filters` 는 **실제로 SQL 에 걸린 것만**이다 (D49).
 
     두 필터 빌더가 돌려준 `params` 가 곧 그 목록이다 — 값이 없는 필터는 애초에 키가 없다.
-    요청의 `null` 도, MCP 얼굴이 채워 넘기는 `None` 도 `_optional_text` 에서 같이 사라지므로
+    요청의 `null` 도, MCP 얼굴이 채워 넘기는 `None` 도 `_filter_text` 에서 같이 사라지므로
     **같은 질의는 어느 얼굴로 들어와도 같은 `filters` 를 남긴다.**
 
     `project` 는 자기 컬럼이 있어 빼고, 시각은 `parse_timestamp` 를 통과한 UTC 의 `isoformat()` 이다 —
@@ -927,7 +933,7 @@ def _event_search_filters(body: dict[str, Any], project: str) -> tuple[str, dict
     where = ["project = %(project)s"]
     params: dict[str, Any] = {"project": project}
     for field in ("kind", "module"):
-        value = _optional_text(body, field)
+        value = _filter_text(body, field)
         if value is not None:
             where.append(f"{field} = %({field})s")
             params[field] = value

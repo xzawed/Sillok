@@ -125,6 +125,7 @@ MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
 추가로 CLI: `sillok ingest`, `sillok serve`. 인자 계약은 D19 — 색인 경로는 플래그가 아니라 항상 D9다.
 `POST /v1/ingest`는 삭제 대상이 아니라 같은 함수의 HTTP 얼굴이다 (D20). 운영자 진입점은 CLI.
 마이그레이션 러너 `sillok migrate`는 D17이 정한 별도 명령이고 D8이 정한 CLI 두 개에 포함되지 않는다.
+stdio 표면 `sillok mcp` 도 마찬가지다 — D45가 정한 별도 명령이고 그 둘에 들어가지 않는다.
 
 금지: 임의 SQL 도구, 전체 덤프, 기본 `top_k` > 8 (최대 12), 통계에 벡터.
 
