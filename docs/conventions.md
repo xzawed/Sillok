@@ -23,7 +23,7 @@ module: null
 | [../adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md) | 확정 결정 | `adr` | **모든 확정값** (스택, 차원, 경로, 인증, 범위, 에러 코드↔HTTP 매핑, 라이선스) |
 | [conventions.md](conventions.md) | 저장소 규약 | `other` | **문서 지도, 충돌 판정, 정본 표기, README 어조·개행, 자기 색인, 문서 게이트** |
 | [spec.md](spec.md) | 문제·목표·비목표·세 층 | `other` | 세 층 구조, 비목표, 은유 |
-| [data-model.md](data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
+| [data-model.md](data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값, **질의 로그 컬럼 의미** (D48–D52 사본, 정본은 ADR) |
 | [service-and-mcp.md](service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, 에러 코드 enum |
 | [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
 | [open-questions.md](open-questions.md) | 아직 답이 없는 것 | `other` | 미해결 질문 전체 |
