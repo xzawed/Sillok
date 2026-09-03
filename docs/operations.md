@@ -91,6 +91,18 @@ docker compose up -d --wait
 
 프록시가 필요한 환경이면 `--build-arg HTTP_PROXY=… --build-arg HTTPS_PROXY=…`를 붙인다.
 
+## 의존성을 바꾼 뒤
+
+`test` 이미지에도 `.venv`가 구워져 있다. 다시 굽지 않으면 **검사가 옛 라이브러리로 돈다.**
+
+```bash
+docker compose build test
+```
+
+잊어도 조용하지 않다 — `tests/test_dependencies.py`가 설치된 버전과 `uv.lock`을 대조한다.
+**호스트에서는 `uv run`이 잠금 파일을 조용히 되돌리므로** 그 검사의 진짜 자리는 컨테이너다
+(거기서는 `--no-sync`로 돈다).
+
 ## 마이그레이션이 실패할 때
 
 `serve`는 bind 전에 적용하고 실패하면 **뜨지 않는다** (D17). 그것이 맞는 동작이다 —
