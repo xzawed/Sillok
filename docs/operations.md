@@ -40,21 +40,31 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 
 ## 복원
 
-```bash
-docker compose up -d --wait            # 마이그레이션이 bind 전에 적용된다 (D17)
-docker compose exec -T db psql -U sillok -d sillok < kb_events.sql
-docker compose exec api sillok ingest --project <name>   # 문서 인덱스를 다시 만든다
-```
-
-**순서가 이렇다.** 스키마가 먼저 서고, 원장을 붓고, 재생성 가능한 것을 다시 만든다.
-
-`kb_events.id`는 `bigserial`이다. 데이터만 부으면 시퀀스가 따라오지 않으므로
-복원 뒤 첫 `save_event`가 중복 키로 죽을 수 있다. 시퀀스를 맞춘다:
+**2026-09-03 에 이 순서로 실제로 돌렸다.** 이벤트 셋이 그대로 돌아왔고 시퀀스도 따라왔다.
 
 ```bash
-docker compose exec -T db psql -U sillok -d sillok \
-  -c "SELECT setval('kb_events_id_seq', COALESCE((SELECT max(id) FROM kb_events), 1));"
+docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
+docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
+docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;"
+docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 < kb_events.sql
+docker compose start api
+docker compose exec -T api sillok ingest --project <name>   # 문서 인덱스를 다시 만든다
 ```
+
+**세 가지가 없으면 조용히 실패한다. 실측으로 확인했다.**
+
+- **`TRUNCATE`** — 행이 남아 있으면 `COPY` 가 기본 키에서 걸린다
+- **`ON_ERROR_STOP=1`** — 없으면 `psql` 이 그 오류를 찍고 **계속 간 뒤 종료 코드 0 으로 끝난다.**
+  실측: 기존 행 셋이 있는 채로 그냥 부었더니 행 수는 그대로인데 종료 코드가 0 이었다
+- **`stop api`** — 붓는 사이에 들어온 `save_event` 하나가 시퀀스를 앞질러 간다
+
+**시퀀스를 손으로 맞추지 않는다.** `pg_dump --data-only --table=kb_events` 는 그 테이블이 소유한
+시퀀스의 `setval` 을 **덤프 안에 함께 넣는다** (실측: 복원 뒤 `last_value` 가 따라왔다).
+따로 `setval` 을 돌리면 덤프가 정한 값을 사람이 다시 정하는 것이 된다.
+
+`-T` 는 셋 다 필요하다 — TTY 를 붙이면 `COPY` 의 표준입력이 막히고, 스크립트에서
+`the input device is not a TTY` 로 죽는다.
+
 
 ## 재기동
 
@@ -95,15 +105,21 @@ docker compose up -d --wait
 ## 검사가 쓰는 DB
 
 `--profile test`는 **제품과 같은 Postgres, 같은 볼륨**을 쓴다 (D55).
-격리는 이름으로 한다 — 검사는 `t_`로 시작하는 `project` 밖을 건드리지 않으며,
-그 불변식은 검사 하나가 지킨다 (`tests/test_conventions.py`).
+격리는 이름으로 한다 — 검사는 `t_`로 시작하는 `project` 밖을 건드리지 않는다.
+`tests/test_conventions.py`가 그것을 **파이썬 소스에서** 지킨다 — `PROJECT` 상수,
+`project` 값, `_wipe(...)` 인자, SQL `VALUES` 의 첫 칸을 본다.
+**계산해서 만든 project 는 그 그물 밖이다.** 그런 것을 쓰려면 이 검사를 함께 넓힌다.
 
 지우려면 그 접두사만 지운다:
 
 ```bash
-docker compose exec -T db psql -U sillok -d sillok \
-  -c "DELETE FROM kb_query_logs WHERE project LIKE 't\\_%'; \
-      DELETE FROM kb_documents WHERE project LIKE 't\\_%'; \
-      DELETE FROM kb_ingest_runs WHERE project LIKE 't\\_%'; \
-      DELETE FROM kb_events WHERE project LIKE 't\\_%';"
+docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM kb_query_logs  WHERE left(project, 2) = 't_'; \
+   DELETE FROM kb_documents   WHERE left(project, 2) = 't_'; \
+   DELETE FROM kb_ingest_runs WHERE left(project, 2) = 't_'; \
+   DELETE FROM kb_events      WHERE left(project, 2) = 't_';"
 ```
+
+`LIKE` 의 이스케이프를 쓰지 않는 것은 **셸마다 백슬래시가 다르게 먹히기 때문**이다 —
+같은 문자열이 PowerShell 에서는 아무것도 지우지 않는 무해한 no-op 이 된다.
+`left()` 에는 이스케이프가 없다. `kb_chunks` 는 `ON DELETE CASCADE` 로 따라온다.
