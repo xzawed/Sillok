@@ -42,6 +42,13 @@ const STEPS = [
     summary: (out) => lastMatch(out, /\d+ (passed|failed|skipped|error)[^\n]*/),
   },
   {
+    // 스모크 자신은 살아 있는 api 를 요구하므로 여기 없다 (D53).
+    // **그 스모크가 무는지 보는 주입은 여기 있다** — DB 도 도커도 필요 없다.
+    name: '스모크 주입 (D53)',
+    cmd: ['node', ['scripts/smoke.test.mjs']],
+    summary: (out) => lastMatch(out, /전부 기대와 일치|불일치 \d+건/),
+  },
+  {
     // 게이트와 ingest 가 같은 집합을 보는가 (D30). 규칙이 두 언어에 있어
     // 단위 검사로는 대조할 수 없다 — 둘 다 실제로 돌려 맞춘다.
     name: '색인 목록 대조 (D30)',

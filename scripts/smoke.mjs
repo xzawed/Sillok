@@ -70,14 +70,21 @@ const CHECKS = [
         return { ok: false, line: `ingest 가 실패했다: ${ingest.status} ${ingest.text.slice(0, 120)}` }
       }
       const run = ingest.json.data
+      // **`ok: true` 는 색인이 성공했다는 뜻이 아니다.** 실패한 run 도 행이 생기면
+      // 봉투는 성공이고 `status` 만 `failed` 다 (D32·D21). 그것을 보지 않으면
+      // *실패한 색인 + 낡은 인덱스의 히트* 가 통과로 나온다 (Grok 적대 리뷰가 잡았다).
+      const indexed = run?.status === 'ok' && run?.files_seen > 0
+
       const found = await call('POST', '/v1/search/docs', { project: PROJECT, query: QUERY })
-      const hits = found.json?.data?.results ?? []
+      const hits = Array.isArray(found.json?.data?.results) ? found.json.data.results : null
+      const searched = found.status === 200 && found.json?.ok === true && hits !== null && hits.length > 0
       return {
-        // 색인이 돌았는데 한 건도 안 나오면 색인이 비어 있다는 뜻이다.
-        ok: found.status === 200 && found.json?.ok === true && hits.length > 0,
+        // 색인이 이번에 돌았고, 그 색인에서 한 건 이상 나와야 한다. 둘 중 하나만으로는 부족하다.
+        ok: indexed && searched,
         line:
           `run ${run.run_id} ${run.status} · 본 ${run.files_seen} · 바뀐 ${run.files_changed}` +
-          ` → 검색 ${hits.length}건 (첫 행 ${hits[0]?.path ?? '없음'})`,
+          ` → 검색 ${hits === null ? '(목록 아님)' : hits.length + '건'}` +
+          ` (첫 행 ${hits?.[0]?.path ?? '없음'})`,
       }
     },
   },
@@ -87,7 +94,13 @@ const CHECKS = [
       // D23. 벡터를 쓰지 않는다 — 필터 + COUNT/AVG 다.
       const { status, json } = await call('GET', `/v1/stats/events?project=${PROJECT}`)
       const data = json?.data
-      const ok = status === 200 && json?.ok === true && typeof data?.total === 'number'
+      // `total` 하나만 보면 봉투가 아닌 응답도 지나간다. 계약이 약속한 모양을 본다.
+      const shaped =
+        typeof data?.total === 'number' &&
+        data?.by_kind !== null &&
+        typeof data?.by_kind === 'object' &&
+        typeof data?.by_result === 'object'
+      const ok = status === 200 && json?.ok === true && shaped
       const kinds = Object.keys(data?.by_kind ?? {}).length
       return { ok, line: `${status} · total ${data?.total} · by_kind ${kinds}종` }
     },
