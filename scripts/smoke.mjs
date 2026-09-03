@@ -99,6 +99,7 @@ const CHECKS = [
         typeof data?.total === 'number' &&
         data?.by_kind !== null &&
         typeof data?.by_kind === 'object' &&
+        data?.by_result !== null &&
         typeof data?.by_result === 'object'
       const ok = status === 200 && json?.ok === true && shaped
       const kinds = Object.keys(data?.by_kind ?? {}).length

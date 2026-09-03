@@ -36,7 +36,9 @@ const CASES = [
   // 봉투는 성공이고 `status` 만 `failed` 다 (D32·D21). 낡은 인덱스가 히트를 내주면 초록이 된다.
   {
     name: 'ingest 가 failed 인데 검색이 히트하면 운다',
-    patch: { ingest: { status: 200, body: { ok: true, data: { run_id: 2, status: 'failed', files_seen: 0, files_changed: 0 } } } },
+    // `files_seen` 을 살려 둔다. 0 으로 두면 이 케이스가 `status` 가 아니라 그쪽으로 걸려
+    // 무엇을 잠갔는지 알 수 없다 (Grok 재검토).
+    patch: { ingest: { status: 200, body: { ok: true, data: { run_id: 2, status: 'failed', files_seen: 10, files_changed: 3 } } } },
     expect: 'fail',
   },
   {
