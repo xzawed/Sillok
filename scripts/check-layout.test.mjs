@@ -640,6 +640,21 @@ const CASES = [
     mentions: ['건만 읽었다'],
     mutate: (dir) => edit(dir, 'docs/plan.md', (t) => t.replace('9단계 전에 Q32', '9단계 전에 Q없음')),
   },
+  {
+    // 검사 15. 두 walk 의 목록이 갈라지는 것 — 정본은 ADR 이고 구현이 둘이다 (D47).
+    id: '44 두 walk 의 건너뛰기 목록이 갈라지면 운다',
+    expect: 'fail',
+    mentions: ['건너뛰기 목록이 갈라졌다'],
+    mutate: (dir) =>
+      edit(dir, 'src/sillok/ingest.py', (t) => t.replace('".venv", "venv", ', '')),
+  },
+  {
+    // 검사 16. 영문이 정본이고 한국어가 사본인데 그 둘을 대조하는 것이 없었다 (D27).
+    id: '45 두 README 의 구조가 갈라지면 운다',
+    expect: 'fail',
+    mentions: ['두 README 의 구조가 갈라졌다'],
+    mutate: append('README.ko.md', NL + '## 사본에만 있는 절' + NL),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
@@ -731,6 +746,16 @@ const META = [
     id: 'M10 검사 13(pg_trgm)을 끄면 trgm 사용이 통과한다',
     disable: (s) => s.replace('for (const [needle, what] of TRGM) {', 'for (const [needle, what] of []) {'),
     inject: append('src/sillok/search.py', NL + '# gin_trgm_ops' + NL),
+  },
+  {
+    id: 'M16 검사 15(두 walk)를 끄면 갈라진 목록이 통과한다',
+    disable: (s) => s.replace('if (onlyMine.length || onlyTheirs.length) {', 'if (false) {'),
+    inject: (dir) => edit(dir, 'src/sillok/ingest.py', (t) => t.replace('".venv", "venv", ', '')),
+  },
+  {
+    id: 'M17 검사 16(두 README)을 끄면 갈라진 구조가 통과한다',
+    disable: (s) => s.replace("for (const k of ['headings', 'rows', 'fences']) {", 'for (const k of []) {'),
+    inject: append('README.ko.md', NL + '## 사본에만 있는 절' + NL),
   },
 ]
 

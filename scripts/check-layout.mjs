@@ -589,6 +589,56 @@ for (const [p, n] of stageClaims) {
   }
 }
 
+// 15. 두 walk 이 같은 목록을 건너뛰는가 (D47).
+//     게이트는 JS 이고 ingest 는 파이썬이라 코드로 공유할 수 없다. 정본은 ADR 이고
+//     두 구현이 그것을 따르는데, **지금까지 그 둘을 대조하는 것이 아무것도 없었다.**
+//     `check-index-parity.mjs` 는 D9 필터를 통과한 뒤의 목록을 비교하므로 원리상 이 갈라짐을 못 본다 —
+//     건너뛴 디렉터리 안의 파일은 양쪽 모두에서 애초에 목록에 없다.
+const ingestPath = 'src/sillok/ingest.py'
+if (existsSync(join(ROOT, ingestPath))) {
+  const py = readFileSync(join(ROOT, ingestPath), 'utf8')
+  const m = /_SKIP_DIRS\s*=\s*\{([^}]*)\}/.exec(py)
+  if (!m) {
+    fail(`${ingestPath} : _SKIP_DIRS 를 찾지 못했다 — D47 의 두 walk 을 대조할 수 없다.`)
+  } else {
+    const theirs = new Set([...m[1].matchAll(/"([^"]+)"|'([^']+)'/g)].map((x) => x[1] ?? x[2]))
+    const mine = SKIP_DIRS
+    const onlyMine = [...mine].filter((d) => !theirs.has(d))
+    const onlyTheirs = [...theirs].filter((d) => !mine.has(d))
+    if (onlyMine.length || onlyTheirs.length) {
+      fail(
+        `D47 두 walk 의 건너뛰기 목록이 갈라졌다 — 게이트만: [${onlyMine}] · ingest 만: [${onlyTheirs}]`
+      )
+    }
+  }
+}
+
+// 16. 두 README 가 구조적으로 갈라지지 않는가 (D27 · D29).
+//     영문이 정본이고 한국어가 사본인데 **그 둘을 대조하는 것이 아무것도 없었다.**
+//     본문을 번역 대조할 수는 없으므로 *구조*를 본다 — 절 제목 수, 표 행 수, 코드 펜스 수.
+//     conventions.md 가 "두 파일의 산문 블록 수와 문단 구조를 맞춘다" 고 요구하는 그 자리다.
+const READMES = ['README.md', 'README.ko.md']
+if (READMES.every((p) => existsSync(join(ROOT, p)))) {
+  const shape = (p) => {
+    const s = readFileSync(join(ROOT, p), 'utf8')
+    return {
+      headings: (s.match(/^#{2,}\s/gm) || []).length,
+      rows: (s.match(/^\|/gm) || []).length,
+      fences: (s.match(/^```/gm) || []).length,
+    }
+  }
+  const [en, ko] = READMES.map(shape)
+  for (const k of ['headings', 'rows', 'fences']) {
+    if (en[k] !== ko[k]) {
+      fail(
+        `두 README 의 구조가 갈라졌다 — ${k}: README.md=${en[k]} vs README.ko.md=${ko[k]}. ` +
+          '영문이 정본이다 (D27).'
+      )
+    }
+  }
+}
+
+
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
