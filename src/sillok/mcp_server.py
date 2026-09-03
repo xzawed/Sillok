@@ -74,7 +74,13 @@ def build(cfg: Config) -> MCPServer:
             "status": status,
             "module": module,
         }
-        return _text(lambda: service.search_docs(cfg.database_url, body, cfg.openai_api_key))
+        # D49. 얼굴을 원장에 남긴다. 인자가 아니라 호출자가 자기를 밝히는 값이라
+        # 도구 스키마에도 body 에도 넣지 않는다 — 넣으면 HTTP 호출자가 mcp 를 위장한다.
+        return _text(
+            lambda: service.search_docs(
+                cfg.database_url, body, cfg.openai_api_key, client="mcp"
+            )
+        )
 
     @mcp.tool(
         name="search_events",
@@ -99,7 +105,7 @@ def build(cfg: Config) -> MCPServer:
             "until": until,
             "top_k": top_k,
         }
-        return _text(lambda: service.search_events(cfg.database_url, body))
+        return _text(lambda: service.search_events(cfg.database_url, body, client="mcp"))
 
     @mcp.tool(name="get_event", description="이벤트 원문 하나", structured_output=False)
     def get_event(event_id: int | None = None, project: str | None = None) -> str:

@@ -3,6 +3,7 @@
 여기 있는 함수만 SQL을 안다. HTTP 어댑터(`api.py`)와 CLI는 이 함수들을 부를 뿐이다.
 4단계(plan §7)의 세 가지(`save_event` · `event_stats` · `kb_status`)에서 시작해
 5단계 `ingest`, 6단계 검색 둘, 7단계 단건·제안 셋까지 같은 자리에 있다.
+9단계는 새 함수를 더하지 않는다 — 검색 둘이 돌아가는 길에 질의 원장을 남긴다 (D48–D52).
 
 **파일을 여는 걸음은 여기 없다.** D36 의 `openat` 걸음은 `workspace.py` 가 갖고,
 *무엇을 열어도 되는가*(= `kb_documents` 에 행이 있는가)만 이 파일이 판정한다.
@@ -18,6 +19,7 @@ import difflib
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -325,7 +327,7 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
               -- 실패한 run 은 세지 않는다 (D32) — 세면 실패가 마지막 색인으로 보고된다.
               (SELECT max(finished_at) FROM kb_ingest_runs
                  WHERE project = %(p)s AND status = ANY(%(counted)s)) AS last_ingest_at,
-              -- 9단계 전까지 0.
+              -- D48–D52. 검색 둘이 여기에 쓴다. 이 질의 자신은 쓰지 않는다 (D48).
               (SELECT count(*) FROM kb_query_logs
                  WHERE project = %(p)s AND hit_count = 0) AS zero_hit_queries,
               -- D31. 키 없이 색인한 상태가 오류가 아니라 정상이므로 현황에 드러낸다.
@@ -735,8 +737,85 @@ def _vector_arm(cur, where: str, params: dict[str, Any], vector: str) -> list[se
     ]
 
 
-def search_docs(dsn: str, body: dict[str, Any], api_key: str = "") -> dict[str, Any]:
-    """문서 검색 (D33). 빈 결과는 오류가 아니다 — 200 에 `{"results": []}` 다 (D21)."""
+def _log_filters(params: dict[str, Any]) -> dict[str, Any]:
+    """`filters` 는 **실제로 SQL 에 걸린 것만**이다 (D49).
+
+    두 필터 빌더가 돌려준 `params` 가 곧 그 목록이다 — 값이 없는 필터는 애초에 키가 없다.
+    요청의 `null` 도, MCP 얼굴이 채워 넘기는 `None` 도 `_optional_text` 에서 같이 사라지므로
+    **같은 질의는 어느 얼굴로 들어와도 같은 `filters` 를 남긴다.**
+
+    `project` 는 자기 컬럼이 있어 빼고, 시각은 `parse_timestamp` 를 통과한 UTC 의 `isoformat()` 이다 —
+    `Z` 와 `+00:00` 이 같은 순간인데 문자열이 다르면 원장이 같은 질의를 둘로 센다.
+    """
+    return {
+        key: value.isoformat() if isinstance(value, datetime) else value
+        for key, value in params.items()
+        if key != "project"
+    }
+
+
+def _log_query(
+    dsn: str,
+    *,
+    client: str,
+    tool: str,
+    project: str,
+    query: str | None,
+    filters: dict[str, Any],
+    hit_paths: list[str] | None,
+    hit_count: int,
+    started: float,
+) -> None:
+    """질의 하나를 원장에 남긴다 (D48–D52).
+
+    **검색 연결과 다른 연결이다.** 같은 연결에 쓰면 INSERT 실패가 검색 트랜잭션을 중단시키고
+    psycopg 는 롤백 전까지 그 연결의 모든 문장을 거절한다 — 그러면 실패를 삼킬 수가 없다 (D50).
+
+    **삼키는 범위는 값 만들기까지다.** `filters` 나 `hit_paths` 를 만들다 난 버그가
+    500 이 되면 안 된다. 원장이 자기가 기록하는 것을 죽일 수 있으면 안 된다는 것이 규칙이고,
+    그 규칙은 쓰기 한 줄이 아니라 이 함수 전체에 걸린다.
+
+    경고에 DSN 을 싣지 않는다 (D21·D50). 이 저장소는 예외 경로로 DSN 을 흘린 적이 이미 있다.
+    """
+    try:
+        # 로그 쓰기 자체는 재지 않는다 (D49). 벽시계가 아니라 단조 시계다.
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        # **값을 먼저 만든다.** 연결을 열기 전이라 값 만들다 난 버그가 연결을 쓰지 않고,
+        # 검사도 DB 없이 그 자리를 밀 수 있다 (D50 의 `값 만들기까지 감싼다`).
+        params = {
+            "project": project,
+            "client": client,
+            "tool": tool,
+            "query": query,
+            "filters": psycopg.types.json.Jsonb(filters),
+            "hit_paths": hit_paths,
+            "hit_count": hit_count,
+            "latency_ms": latency_ms,
+        }
+        with connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO kb_query_logs
+                    (project, client, tool, query, filters, hit_paths, hit_count, latency_ms)
+                VALUES (%(project)s, %(client)s, %(tool)s, %(query)s, %(filters)s,
+                        %(hit_paths)s, %(hit_count)s, %(latency_ms)s)
+                """,
+                params,
+            )
+    except Exception as exc:  # noqa: BLE001 - 원장이 질의를 죽이면 안 된다 (D50)
+        log.warning("질의 로그를 남기지 못했다 (tool=%s): %s", tool, _clip(exc))
+
+
+def search_docs(
+    dsn: str, body: dict[str, Any], api_key: str = "", *, client: str = "http"
+) -> dict[str, Any]:
+    """문서 검색 (D33). 빈 결과는 오류가 아니다 — 200 에 `{"results": []}` 다 (D21).
+
+    `client` 는 **키워드 전용**이다 (D49). `api_key` 뒤에 위치 인자로 두면 HTTP 얼굴이
+    실수로 넘길 수 있다. 값은 `http`·`mcp` 둘뿐이고 검증하지 않는다 —
+    클라이언트 입력이 아니라 호출자가 자기를 밝히는 값이다.
+    """
+    started = time.perf_counter()
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
     project = normalize_project(body.get("project"))
@@ -761,7 +840,23 @@ def search_docs(dsn: str, body: dict[str, Any], api_key: str = "") -> dict[str, 
         matched = {r.key for r in keyword}
         results = _decorate(cur, picked, query, matched)
 
-    return {"results": results}
+    data = {"results": results}
+    # D50. 쓰는 자리는 하나다 — `with` 가 닫히고 **돌려줄 dict 가 만들어진 뒤**다.
+    # 둘 중 하나만 지키면 두 검색 함수 중 하나에서 어긋난다 (search_events 는 모양이 반대다).
+    _log_query(
+        dsn,
+        client=client,
+        tool="search_docs",
+        project=project,
+        query=query,
+        filters=_log_filters(params),
+        # D49. 돌려준 행의 path 를 결과 순서대로, 중복을 접지 않는다 —
+        # 문서당 상한이 2라 같은 문서의 청크 둘이 들어올 수 있고, 그것이 곧 이 질의의 행 집합이다.
+        hit_paths=[row["path"] for row in results],
+        hit_count=len(results),
+        started=started,
+    )
+    return data
 
 
 def _decorate(cur, picked: list[dict], query: str, matched: set) -> list[dict[str, Any]]:
@@ -837,8 +932,12 @@ def _event_search_filters(body: dict[str, Any], project: str) -> tuple[str, dict
     return " AND ".join(where), params
 
 
-def search_events(dsn: str, body: dict[str, Any]) -> dict[str, Any]:
-    """이벤트 검색 (D33 · D34). **v1 은 이벤트를 임베딩하지 않는다** — 키워드만이다."""
+def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> dict[str, Any]:
+    """이벤트 검색 (D33 · D34). **v1 은 이벤트를 임베딩하지 않는다** — 키워드만이다.
+
+    `client` 는 `search_docs` 와 같은 규칙이다 (D49).
+    """
+    started = time.perf_counter()
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
     project = normalize_project(body.get("project"))
@@ -881,7 +980,23 @@ def search_events(dsn: str, body: dict[str, Any]) -> dict[str, Any]:
             None if query is None else round(1.0 / (search.RRF_K + row["rk"]), search.SCORE_DIGITS)
         )
         results.append(item)
-    return {"results": results}
+
+    data = {"results": results}
+    # 여기가 `with` 뒤이면서 dict 가 생긴 뒤다. 이 함수는 `with` 가 닫힌 **뒤에** 행을 변환하므로
+    # `with 뒤`만 지키면 아직 결과가 없다 — D50 이 두 조건을 함께 적은 이유다.
+    _log_query(
+        dsn,
+        client=client,
+        tool="search_events",
+        project=project,
+        query=query,
+        filters=_log_filters(params),
+        # D49. 이벤트 히트는 경로가 아니라 id 다. 한 text[] 에 두 종류의 식별자를 섞지 않는다.
+        hit_paths=None,
+        hit_count=len(results),
+        started=started,
+    )
+    return data
 
 
 # --- 7단계 단건·제안 (D35–D41) ----------------------------------------------

@@ -210,7 +210,11 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
       같은 인자로 두 얼굴을 태워 **봉투를 글자까지 대조**하는 검사가 판정한다 (D46).
       성공과 `VALIDATION`·`NOT_FOUND`·`CONFLICT`·`INTERNAL` 을 덮는다.
       `POST /mcp` 는 살아 있는 스택에서도 도구 여덟을 돌려주었다
-- [ ] 검색 0건이 `kb_query_logs`에 `hit_count=0`으로 남는다
+- [x] 검색 0건이 `kb_query_logs`에 `hit_count=0`으로 남는다 — 2026-09-03 실측.
+      살아 있는 8080 에 0건 확정 질의를 던지니 `{"results": []}` 였고 `zero_hit_queries` 가 0 에서 1 이 됐다.
+      행은 `hit_count=0` · `hit_paths={}` · `filters={}` 였다. 히트 있는 질의에서는
+      `hit_paths` 에 `README.md` 가 **두 번** 들어온다 — 문서당 상한이 2이고 중복을 접지 않기 때문이다 (D49).
+      MCP 얼굴로 같은 인자를 보내면 `client` 만 `mcp` 로 다르고 `filters`·`hit_count` 는 같다
 
 이 저장소 자신이 색인 경로 규칙을 따르므로, **첫 ingest 스모크는 이 레포를 대상으로 돌린다.**
 
