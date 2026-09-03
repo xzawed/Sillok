@@ -15,7 +15,7 @@ MCP 도구 표면 · 질의 원장 기록 · CLI `migrate`/`serve`/`ingest`/`mcp
 `GET /v1/events/{id}` · `GET /v1/files` · `POST /v1/docs/proposals`.
 **MCP 는 `POST /mcp`(와 `/mcp/`) 하나이고 stdio 는 `sillok mcp` 다** (D43·D45).
 그 아래 다른 경로는 정직하게 404다. 스텁을 만들지 않는다.
-없는 것: `GET /v1/docs`(§7이 어느 단계에도 넣지 않았다, Q30) — 그 표면을 건드리기 전에 답한다.
+**열린 Q 는 없다** — D58–D64 가 마지막 일곱을 닫았다. `GET /v1/docs` 는 만들지 않기로 정했다 (D64).
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -38,8 +38,9 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 ### 아직 답이 없는 것
 
-[docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
-추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D54 이후로 기록한다.
+[docs/open-questions.md](docs/open-questions.md)에 **지금 열린 질문은 하나도 없다** —
+D58–D64가 마지막 일곱을 닫았다. 새 공백을 발견하면 추측으로 채우지 말고
+거기에 다음 번호로 열고, 답을 ADR에 D65 이후로 적는다.
 
 A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**,
 B절은 Q6·Q7·Q10이 **D30–D32**로, Q8·Q9가 **D33–D34**로,
@@ -50,8 +51,8 @@ Q17이 **D42–D46**(8단계 MCP 표면)으로 마감되면서
 **2026-09-03 현재 그 열 단계의 구현도 끝났다** (진행 상태 정본은 §7·§9다).
 **단계를 막는 Q는 하나도 남지 않았다.**
 
-**G절은 그 7단계를 검증하다 열렸다** — Q31(전체 스캔의 walk)은 같은 날 **D47**로 닫혔고,
-**Q30(`GET /v1/docs`의 단계·계약)은 열려 있다.** 단계를 막지는 않지만 그 표면을 건드리기 전에 답한다.
+**G절은 그 7단계를 검증하다 열렸다** — Q31은 **D47**, Q30은 **D64**로 닫혔다.
+**C·D절에 남아 있던 Q13·Q14·Q22·Q23·Q24·Q25도 D58–D63으로 닫혔다** — 열린 Q 는 하나도 없다.
 
 **H절의 Q32는 9단계를 막았고 D48–D52로 닫혔다** — 다섯 결정이 `kb_query_logs` 를 그 자리로 미뤄 뒀었다.
 로그를 남기는 표면은 검색 둘, `client` 는 `http`·`mcp`, `hit_count` 는 돌려준 행 수다.
@@ -118,7 +119,7 @@ API와 MCP 도구는 **같은 Service 함수를 탄다** (도구별로 로직을
 | `event_stats` | `GET /v1/stats/events` |
 | `kb_status` | `GET /v1/status` |
 
-MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
+MCP에 노출하지 않는 HTTP: `POST /v1/ingest` 하나다 (D64).
 `POST /v1/ingest`는 삭제 대상이 아니라 CLI와 **같은 Service 함수의 HTTP 얼굴**이다. 운영자 진입점은 CLI (D20).
 입출력 JSON 전문은 [docs/service-and-mcp.md](docs/service-and-mcp.md). MCP 도구 설명문은 짧게 — 길면 모델이 도구를 안 고른다.
 

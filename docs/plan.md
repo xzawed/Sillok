@@ -121,7 +121,7 @@ Knowledge Service FastAPI. DB의 유일한 문 — 단위는 함수지 HTTP가 �
 | `event_stats` | `GET /v1/stats/events` |
 | `kb_status` | `GET /v1/status` |
 
-MCP에 노출하지 않는 HTTP: `GET /v1/docs`, `POST /v1/ingest`.
+MCP에 노출하지 않는 HTTP: `POST /v1/ingest` 하나다 (D64 가 `GET /v1/docs` 를 뺐다).
 
 추가로 CLI: `sillok ingest`, `sillok serve`. 인자 계약은 D19 — 색인 경로는 플래그가 아니라 항상 D9다.
 `POST /v1/ingest`는 삭제 대상이 아니라 같은 함수의 HTTP 얼굴이다 (D20). 운영자 진입점은 CLI.

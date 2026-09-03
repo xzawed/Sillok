@@ -11,7 +11,7 @@ module: null
 
 > 이 파일은 엔드포인트·도구·요청/응답 JSON의 정본이다.
 > 주소·인증·`top_k`·색인 경로의 정본은 [adr/0001-v1-stack-decisions.md](../adr/0001-v1-stack-decisions.md)다.
-> 미해결 계약 구멍은 [open-questions.md](open-questions.md) C절.
+> 계약 구멍은 [open-questions.md](open-questions.md) C절에 있었고 전부 닫혔다 (D58·D59가 마지막이다).
 
 Knowledge Service가 DB의 유일한 문이다.  
 MCP와 사람용 UI는 이 HTTP API만 호출한다.
@@ -117,6 +117,9 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 응답 `data.results[]`: `id`, `title`, `summary`, `kind`, `result`, `module`, `occurred_at`, `score`
 
+**`summary`는 800자에서 자르고 잘렸으면 `…`을 붙인다** (D58). `excerpt`와 같은 천장이다 —
+원문은 `get_event`에서 본다. 자르지 않으면 한 응답이 `top_k` × 2000자가 된다.
+
 **이벤트 검색은 키워드만이다** — v1은 이벤트를 임베딩하지 않는다 (D34).
 키워드는 `title`·`summary`·`root_cause`·`resolution` 네 필드를 이은 `tsv`에 건다.
 **뒤의 둘로 걸린 히트는 응답만 보고 설명할 수 없다** — 그 두 필드가 응답에 없다.
@@ -127,7 +130,6 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 ### 단건
 
-- `GET /v1/docs?project=&path=` — 인덱스 메타 + 원문이 있으면 excerpt 또는 저장본 없음(Git을 열라는 힌트)
 - `GET /v1/events/{id}?project=` — `project`는 **필수**다. 없으면 `VALIDATION`,
   행의 `project`와 다르면 `NOT_FOUND`다. 없는 id와 남의 id는 같은 응답이다 (D35)
 - `GET /v1/files?project=&path=&offset=` — 설정된 workspace에서 원문 읽기 (D4 확정).
@@ -237,6 +239,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
   "by_kind": { "failure": 7, "success": 4, "incident": 1 },
   "by_result": { "failure": 6, "success": 5, "partial": 1 },
   "by_module": { "auth": 4, "billing": 2 },
+  "by_module_omitted": 0,
   "repeat_causes": [{ "module": "auth", "root_cause": "pool exhausted", "count": 3 }],
   "avg_resolution_seconds": 3600
 }
@@ -249,6 +252,8 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 - `root_cause`가 없는 행은 제외. **2회 이상만**, `count` 내림차순 → `root_cause` 오름차순 → `module` 오름차순(NULL 은 마지막), **최대 12개**
 - `module`이 없는 반복도 `"module": null`로 나간다. `by_module`이 NULL 키를 못 만드는 것과 다르다 — 여기는 필드다
 - `by_module`은 `module`이 없는 행의 키를 넣지 않는다. 그 행들은 `total`에 남아 있으므로 `sum(by_module) <= total`이다. 0인 키도 넣지 않는다
+- **`by_module`은 12개까지다** — `count` 내림 → 키 오름 (D58). 잘라 낸 키 수는 `by_module_omitted`로 나간다.
+  그 숫자가 없으면 위 부등식이 *module 없는 행*과 *천장에 잘린 키* 두 가지를 한꺼번에 뜻하게 된다
 - `avg_resolution_seconds`는 정수 초 또는 `null`. `resolved_at`이 없는 행은 평균에서 빠지고, 전부 미해결이면 `0`이 아니라 `null`이다
 
 ### 상태
@@ -375,7 +380,10 @@ HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를
 
 ## 반환 크기
 
-- excerpt / summary: 800자 절단 가능. 원문은 `get_file` / `get_event`.
+- excerpt / summary: 800자에서 자른다. 원문은 `get_file` / `get_event` (D33·D58).
+- `payload`: `json.dumps(payload, ensure_ascii=False)`가 2000자를 넘으면 `VALIDATION` (D58).
+  `summary`와 같은 숫자다 — `get_event`가 행을 통째로 돌려주므로 같은 이유가 걸린다.
+- `ingest`의 `skipped[]`에는 천장이 없다 (D58). MCP 도구가 아니고 운영자는 목록 전체를 원한다.
 - 목록은 8개가 기본.
 - 빈 결과는 `{ "results": [] }`. 모델이 채울 문장을 넣지 않음.
 
