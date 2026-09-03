@@ -255,7 +255,7 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
 
   // 단계별 표면. 정본은 plan.md §5 와 docs/service-and-mcp.md 다.
   // 긴 접두사부터 본다 — /v1/events/{id}(7단계 get_event)가 /v1/events(4단계)보다 먼저다.
-  // GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다. 여기서 단계를 발명하지 않는다.
+  // GET /v1/docs 는 만들지 않기로 정했다 (D64). SURFACE 에 넣을 것이 없다.
   const SURFACE = [
     ['/v1/search/docs', 6],
     ['/v1/search/events', 6],

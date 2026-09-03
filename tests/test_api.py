@@ -212,7 +212,7 @@ def test_http_exception_5xx_does_not_leak_detail():
 @pytest.mark.parametrize(
     "path",
     [
-        # GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다 — 여기서 단계를 발명하지 않는다 (Q30).
+        # GET /v1/docs 는 만들지 않기로 정했다 (D64). 이 404 가 답의 전부다.
         "/v1/docs",
         # MCP 는 /mcp 하나다 (D43). 접두사를 붙인 자리는 없다.
         "/v1/mcp",
@@ -220,7 +220,7 @@ def test_http_exception_5xx_does_not_leak_detail():
         "/mcp/nope",
     ],
 )
-def test_unbuilt_routes_do_not_exist_yet(path):
+def test_unbuilt_routes_stay_unbuilt(path):
     """뒤 단계의 계약 경로가 통과하는 것처럼 보이면 안 된다.
 
     `app.routes` 를 훑는 대신 **실제로 때린다.** 라우터를 mount 로 붙이면
