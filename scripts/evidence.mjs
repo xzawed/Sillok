@@ -38,7 +38,12 @@ const STEPS = [
   },
   {
     name: 'DB 포함 테스트 (D22)',
-    cmd: ['docker', ['compose', '--profile', 'test', 'run', '--rm', 'test']],
+    // `-rs` 로 skip **사유**를 찍게 한다. 개수로는 판정할 수 없다 — 아래 주석 참고.
+    cmd: [
+      'docker',
+      ['compose', '--profile', 'test', 'run', '--rm', 'test',
+       'uv', 'run', '--no-sync', 'pytest', '-q', '-rs'],
+    ],
     summary: (out) => lastMatch(out, /\d+ (passed|failed|skipped|error)[^\n]*/),
   },
   {
@@ -76,37 +81,33 @@ function runStep(step) {
     if (!line) {
       return { ok: false, line: '종료 코드 0 이지만 요약 줄을 찾지 못했다 — 증거로 쓸 수 없다' }
     }
-    return { ok: true, line }
+    return { ok: true, line, out }
   } catch (e) {
     if (e.code === 'ENOENT') {
       return { ok: false, line: `실행 불가 — \`${bin}\` 을 찾을 수 없다`, missing: true }
     }
     const out = (e.stdout || '') + (e.stderr || '')
-    return { ok: false, line: step.summary(out) || `종료 코드 ${e.status}` }
+    return { ok: false, line: step.summary(out) || `종료 코드 ${e.status}`, out }
   }
 }
 
 const results = STEPS.map((step) => ({ step, ...runStep(step) }))
 
 // Q26 이 막으려던 실패 모드: **DB 검사가 전부 skip 됐는데 통과로 적히는 것.**
-// 종료 코드만 보면 그 상태가 PASS 다. 그런데 `skip 0` 을 요구할 수도 없다 —
-// 컨테이너에는 *그 플랫폼이 D36 을 지원할 때* 건너뛰는 뒤집힌 검사가 하나 있다.
-// 그래서 두 단계를 **서로 비교한다.** 수치를 박지 않으므로 검사가 늘어도 낡지 않는다.
-const counts = (line) => ({
-  passed: Number((/(\d+) passed/.exec(line || '') || [])[1] ?? -1),
-  skipped: Number((/(\d+) skipped/.exec(line || '') || [])[1] ?? 0),
-})
-const host = results.find((r) => r.step.name === '호스트 테스트')
+// 종료 코드만 보면 그 상태가 PASS 다.
+//
+// **개수로는 판정할 수 없다.** 처음에는 두 단계의 passed/skipped 를 비교했는데,
+// 이 저장소는 CI 가 없어 증거를 호스트에서 모으고 호스트는 Windows 이며 `test` 는 리눅스 이미지다.
+// 그래서 DB 에 못 붙어도 posix 전용 검사들이 컨테이너에서 살아나 passed 가 오르고 skipped 가 내린다 —
+// **잡으려던 상태가 그 부등식을 만족한다** (Grok 적대 리뷰가 이 자리를 깼다).
+// 반대로 리눅스 호스트 + 5432 오버라이드에서는 두 쪽이 같아져 거짓 실패가 난다.
+//
+// **사유로 본다.** `dbcheck` 의 그 문구는 DB 에 못 붙었을 때만 나온다. 수치가 아니라 원인이다.
+const DB_SKIP_REASON = 'Postgres 에 붙을 수 없다'
 const withDb = results.find((r) => r.step.name.startsWith('DB 포함'))
-if (host?.ok && withDb?.ok) {
-  const a = counts(host.line)
-  const b = counts(withDb.line)
-  if (!(b.passed > a.passed && b.skipped < a.skipped)) {
-    withDb.ok = false
-    withDb.line =
-      `${withDb.line} — 호스트(${a.passed}/${a.skipped}) 보다 나아지지 않았다. ` +
-      'DB 에 붙지 못한 채 전부 skip 된 실행일 수 있다 (Q26).'
-  }
+if (withDb?.ok && (withDb.out || '').includes(DB_SKIP_REASON)) {
+  withDb.ok = false
+  withDb.line = `${withDb.line} — DB 검사가 skip 됐다. 그 실행은 D22 의 증거가 아니다 (Q26).`
 }
 
 console.log('## 검증 (실측)\n')

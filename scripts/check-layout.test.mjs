@@ -697,6 +697,36 @@ const META = [
     disable: (s) => s.replace('if (!defined.has(n)) fail(', 'if (false) fail('),
     inject: append('docs/spec.md', NL + '없는 Q999 를 가리킨다.' + NL),
   },
+
+  // **34·35·36·42 에는 메타가 없다.** 문서를 들어내거나 파일을 지우면 다른 검사도 함께 운다 —
+  // 그 트리에서는 "이 검사 때문에 운다" 를 분리할 수 없기 때문이다. `mentions` 로 그 검사가
+  // 실제로 울었다는 것까지는 잠근다. 분리할 수 있는 37·38·39·40·41 에는 메타를 붙였다.
+  {
+    id: 'M11 검사 3(taxonomy)을 끄면 doc_type 주입이 통과한다',
+    disable: (s) => s.replace(NL + 'for (const p of indexed) {', NL + 'for (const p of []) {'),
+    inject: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('doc_type: other', 'doc_type: 없는종류')),
+  },
+  {
+    id: 'M12 검사 3(status)을 끄면 status 주입이 통과한다',
+    disable: (s) => s.replace(NL + 'for (const p of indexed) {', NL + 'for (const p of []) {'),
+    inject: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('status: current', 'status: 없는상태')),
+  },
+  {
+    id: 'M13 검사 3(module 키)을 끄면 module 주입이 통과한다',
+    disable: (s) => s.replace(NL + 'for (const p of indexed) {', NL + 'for (const p of []) {'),
+    inject: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('module: null', '')),
+  },
+  {
+    id: 'M14 검사 5(도달성)를 끄면 고아 문서가 통과한다',
+    disable: (s) =>
+      s.replace('for (const p of indexed) if (!reach.has(p)) fail(', 'for (const p of []) if (!reach.has(p)) fail('),
+    inject: write('docs/orphan.md', FM + '# 고아'),
+  },
+  {
+    id: 'M15 검사 6(구 파일명)을 끄면 옛 이름이 통과한다',
+    disable: (s) => s.replace('if (s.includes(k)) fail(', 'if (false) fail('),
+    inject: append('docs/spec.md', NL + '옛 이름 01-SPEC 을 다시 가리킨다.' + NL),
+  },
   {
     id: 'M10 검사 13(pg_trgm)을 끄면 trgm 사용이 통과한다',
     disable: (s) => s.replace('for (const [needle, what] of TRGM) {', 'for (const [needle, what] of []) {'),
