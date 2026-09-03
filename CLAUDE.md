@@ -5,17 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 이 저장소의 성격
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
-[docs/plan.md](docs/plan.md) §7의 **1–8단계까지 구현돼 있고 9단계부터는 아직 없다.**
+[docs/plan.md](docs/plan.md) §7의 **1–9단계까지 구현돼 있고 10단계는 아직 없다.**
 (진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
 `src/sillok/`(config · migrations 러너 · api · ingest·search 규칙 · workspace 걸음 ·
-MCP 도구 표면 · CLI `migrate`/`serve`/`ingest`/`mcp`), `tests/`.
+MCP 도구 표면 · 질의 원장 기록 · CLI `migrate`/`serve`/`ingest`/`mcp`), `tests/`.
 **업무 라우트는 아홉이다** — `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` ·
 `POST /v1/ingest`(5단계, MCP 에는 노출하지 않는다) · `POST /v1/search/docs` · `POST /v1/search/events` ·
 `GET /v1/events/{id}` · `GET /v1/files` · `POST /v1/docs/proposals`.
 **MCP 는 `POST /mcp`(와 `/mcp/`) 하나이고 stdio 는 `sillok mcp` 다** (D43·D45).
 그 아래 다른 경로는 정직하게 404다. 스텁을 만들지 않는다.
-없는 것: `kb_query_logs` 기록(9단계), `GET /v1/docs`(§7이 어느 단계에도 넣지 않았다, Q30) — 순서대로 붙인다.
+없는 것: 10단계 스모크, `GET /v1/docs`(§7이 어느 단계에도 넣지 않았다, Q30) — 순서대로 붙인다.
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).

@@ -34,6 +34,7 @@ def test_discover_orders_by_version():
         "002_schema.sql",
         "003_ingest_counters.sql",
         "004_event_tsv.sql",
+        "005_query_log_index.sql",
     ]
 
 
@@ -134,6 +135,7 @@ def test_apply_returns_what_it_applied(applied):
         "002_schema.sql",
         "003_ingest_counters.sql",
         "004_event_tsv.sql",
+        "005_query_log_index.sql",
     ]
 
 

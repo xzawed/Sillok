@@ -132,7 +132,7 @@ def db():
 
 def _wipe(db, project):
     # kb_documents 는 청크를 ON DELETE CASCADE 로 끌고 간다.
-    for table in ("kb_events", "kb_ingest_runs", "kb_documents"):
+    for table in ("kb_query_logs", "kb_events", "kb_ingest_runs", "kb_documents"):
         db.execute(f"DELETE FROM {table} WHERE project = %s", (project,))
     db.commit()
 
@@ -239,7 +239,11 @@ def test_stats_filters_by_module_and_since(clean_project):
 
 @needs_db
 def test_status_counts_and_nulls(clean_project):
-    """5·9단계 전이라 빈 값이 정상이지 스텁이 아니다."""
+    """5단계 전이라 빈 값이 정상이지 스텁이 아니다.
+
+    `zero_hit_queries` 는 9단계가 붙어 이제 자란다 — 이 검사는 아무 질의도 하지 않은
+    project 를 보므로 그래도 0 이다.
+    """
     service.save_event(DSN, body())
     status = service.kb_status(DSN, clean_project)
     assert status["events"] == 1

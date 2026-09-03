@@ -43,7 +43,7 @@ def db():
 @pytest.fixture
 def ws(tmp_path, db):
     def wipe():
-        for table in ("kb_ingest_runs", "kb_documents", "kb_events"):
+        for table in ("kb_query_logs", "kb_ingest_runs", "kb_documents", "kb_events"):
             db.execute(f"DELETE FROM {table} WHERE project = %s", (PROJECT,))
 
     wipe()
