@@ -6,6 +6,7 @@
 // 사용: node scripts/check-layout.mjs
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -696,6 +697,98 @@ for (const p of scanned) {
     if (scope === 'not-tests' && p.startsWith('tests/')) continue
     const hit = pattern.exec(body)
     if (hit) fail(`${p} : ${what} 이 보인다 — 공개 저장소다 (D56). 조각: ${hit[0].slice(0, 12)}…`)
+  }
+}
+
+
+// D61·D63 이 쓰는 걸음 둘.
+function frontMatterOf(p) {
+  const m = readFileSync(join(ROOT, p), 'utf8').match(FRONT_MATTER)
+  if (!m) return null
+  return Object.fromEntries(
+    m[1]
+      .split(/\r?\n/)
+      .filter((l) => l.includes(':'))
+      .map((l) => [
+        l.slice(0, l.indexOf(':')).trim(),
+        l.slice(l.indexOf(':') + 1).replace(/\s+#.*$/, '').trim(),
+      ])
+  )
+}
+
+// D63. 대상은 **헤더 인용 블록 다음부터 끝까지**이고 D30 의 정규화를 쓴다 —
+// 줄 끝을 LF 로 맞추고 BOM 을 지운다. 그래야 CRLF 작업 트리에서 값이 흔들리지 않는다.
+function skillBodyDigest(text) {
+  const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n')
+  let i = lines.findIndex((l) => l.startsWith('> '))
+  if (i < 0) return ''
+  while (i < lines.length && lines[i].startsWith('>')) i += 1
+  const body = lines.slice(i).join('\n')
+  return createHash('sha256').update(body, 'utf8').digest('hex').slice(0, 12)
+}
+
+// 18. `status` 의 생애가 증거를 갖는가 (D61).
+//     `superseded` 와 `stale` 은 **왜 그런지**를 front matter 로 남긴다.
+//     이 둘은 **DB 로 가지 않는다** — ingest 는 D29 의 네 필드만 읽는다. 여기서만 검사한다.
+const TODAY = new Date().toISOString().slice(0, 10)
+for (const p of indexed) {
+  if (isRootReadme(p)) continue
+  const fm = frontMatterOf(p)
+  if (!fm) continue
+  if (fm.status === 'superseded') {
+    const target = fm.superseded_by
+    if (!target) {
+      fail(`${p} : status 가 superseded 인데 superseded_by 가 없다 (D61)`)
+    } else if (target === p) {
+      fail(`${p} : superseded_by 가 자기 자신을 가리킨다 (D61)`)
+    } else if (!indexed.includes(target)) {
+      fail(`${p} : superseded_by "${target}" 이 색인 대상이 아니다 (D61)`)
+    }
+  }
+  if (fm.status === 'stale') {
+    const since = fm.stale_since
+    if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      fail(`${p} : status 가 stale 인데 stale_since 가 YYYY-MM-DD 가 아니다 (D61)`)
+    } else if (since > TODAY) {
+      fail(`${p} : stale_since "${since}" 가 오늘보다 뒤다 (D61)`)
+    }
+  }
+}
+
+// 19. D30 이후의 결정이 선택지 표를 갖는가 (D62).
+//     D1–D15 의 선택지는 복원 불가다. 되풀이를 막는 것이 이 검사이고,
+//     규칙보다 앞선 넷은 **이름으로** 면제한다 — 조용히 건너뛰지 않는다.
+const OPTIONS_EXEMPT = ['D26', 'D27', 'D28', 'D29']
+const adrPath = 'adr/0001-v1-stack-decisions.md'
+if (existsSync(join(ROOT, adrPath))) {
+  const adr = readFileSync(join(ROOT, adrPath), 'utf8')
+  // `## D30`, `## D35–D38` 처럼 묶인 제목도 한 절로 센다.
+  const sections = [...adr.matchAll(/^## (D\d+)(?:[–-]D\d+)?\b[^\n]*$/gm)]
+  for (let i = 0; i < sections.length; i++) {
+    const first = sections[i][1]
+    const n = Number(first.slice(1))
+    if (n < 30 || OPTIONS_EXEMPT.includes(first)) continue
+    const body = adr.slice(sections[i].index, sections[i + 1]?.index ?? adr.length)
+    if (!/^### .*(선택지|버린 안)/m.test(body)) {
+      fail(`${adrPath} : ## ${first} 절에 선택지(또는 버린 안) 표가 없다 (D62)`)
+    }
+  }
+}
+
+// 20. 배포되는 SKILL 의 헤더 해시가 본문과 맞는가 (D63).
+//     사본은 이 한 줄을 공개 저장소와 대조한다. **원본이 낡은 해시를 들고 나갈 수 없어야**
+//     그 대조에 뜻이 있다. 대상은 헤더 인용 블록 다음부터 파일 끝까지다.
+const skillPath = 'docs/skills/sillok-storage/SKILL.md'
+if (existsSync(join(ROOT, skillPath))) {
+  const skill = readFileSync(join(ROOT, skillPath), 'utf8')
+  const stamped = /본문 해시: sha256:([0-9a-f]{12})/.exec(skill)
+  if (!stamped) {
+    fail(`${skillPath} : 헤더에 본문 해시가 없다 (D63)`)
+  } else {
+    const digest = skillBodyDigest(skill)
+    if (digest !== stamped[1]) {
+      fail(`${skillPath} : 본문 해시가 어긋난다 — 헤더 ${stamped[1]} vs 본문 ${digest} (D63)`)
+    }
   }
 }
 

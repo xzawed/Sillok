@@ -280,3 +280,102 @@ def test_a_broken_filters_builder_does_not_break_the_search(ws, db, monkeypatch)
     out = service.search_docs(DSN, {"project": PROJECT, "query": "가나다"})
     assert len(out["results"]) == 2
     assert rows(db) == []
+
+
+# --- D58 천장 (DB 경로) -------------------------------------------------------
+
+
+def _event(db, module: str, title: str = "제목") -> None:
+    service.save_event(
+        DSN,
+        {
+            "project": PROJECT,
+            "module": module,
+            "kind": "failure",
+            "title": title,
+            "summary": "요약 가나다",
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "result": "failure",
+        },
+    )
+
+
+def test_by_module_is_capped_and_says_how_many_it_dropped(ws, db):
+    """열린 축이라 천장이 필요하다 (D58). `by_module_omitted` 가 그 천장을 읽게 한다."""
+    for i in range(15):
+        _event(db, f"m{i:02d}")
+
+    stats = service.event_stats(DSN, PROJECT)
+    assert len(stats["by_module"]) == service.BY_MODULE_LIMIT
+    assert stats["by_module_omitted"] == 15 - service.BY_MODULE_LIMIT
+    assert stats["total"] == 15
+
+
+def test_by_module_omitted_is_zero_under_the_cap(ws, db):
+    """`0` 이면 `sum(by_module) <= total` 의 차이가 D23 의 뜻 그대로다."""
+    _event(db, "auth")
+    _event(db, "auth")
+    _event(db, "billing")
+
+    stats = service.event_stats(DSN, PROJECT)
+    assert stats["by_module"] == {"auth": 2, "billing": 1}
+    assert stats["by_module_omitted"] == 0
+
+
+def test_module_less_rows_stay_out_of_by_module(ws, db):
+    """D23 그대로다 — NULL 은 키가 되지 않고 `total` 에는 남는다. 천장과 섞이지 않는다."""
+    _event(db, "auth")
+    service.save_event(
+        DSN,
+        {
+            "project": PROJECT,
+            "kind": "failure",
+            "title": "모듈 없음",
+            "summary": "요약",
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "result": "failure",
+        },
+    )
+    stats = service.event_stats(DSN, PROJECT)
+    assert stats["by_module"] == {"auth": 1}
+    assert stats["by_module_omitted"] == 0
+    assert stats["total"] == 2
+
+
+def test_search_events_clips_summary_with_the_same_function(ws, db):
+    """`excerpt` 와 **같은 함수**를 쓴다 — 799자 + `…` 로 합 800자다 (D33 §8 · D58)."""
+    long_summary = "가" * 1500
+    service.save_event(
+        DSN,
+        {
+            "project": PROJECT,
+            "kind": "failure",
+            "title": "긴 요약",
+            "summary": long_summary,
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "result": "failure",
+        },
+    )
+    found = service.search_events(DSN, {"project": PROJECT})["results"]
+    assert len(found) == 1
+    assert len(found[0]["summary"]) == 800
+    assert found[0]["summary"].endswith("…")
+
+    # 원문은 get_event 가 그대로 준다 (D39). 자르는 것은 검색뿐이다.
+    whole = service.get_event(DSN, found[0]["id"], PROJECT)
+    assert whole["summary"] == long_summary
+
+
+# --- D60 `repo` 불변식 --------------------------------------------------------
+
+
+def test_repo_is_always_empty(ws, db):
+    """v1 은 repo 가 하나뿐이므로 `''` 로 고정한다 (D60).
+
+    비워 두는 것이 **결정**이지 미정이 아니다. 다른 값이 들어오는 날은
+    기존 행 이관이 따라오는 마이그레이션이고, 그때 이 검사가 먼저 운다.
+    """
+    rows = db.execute(
+        "SELECT DISTINCT repo FROM kb_documents WHERE project = %s", (PROJECT,)
+    ).fetchall()
+    assert [r["repo"] for r in rows] == [""], rows

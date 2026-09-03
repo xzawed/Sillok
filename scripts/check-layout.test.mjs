@@ -697,6 +697,68 @@ const CASES = [
     expectOut: ['docs/link.md (symlink)'],
     mutate: (dir) => symlinkSync('spec.md', join(dir, 'docs', 'link.md')),
   },
+  {
+    // 검사 18. `superseded` 는 왜 그런지를 남겨야 한다 (D61).
+    id: '52 superseded 인데 superseded_by 가 없으면 운다',
+    expect: 'fail',
+    mentions: ['superseded_by 가 없다'],
+    mutate: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('status: current', 'status: superseded')),
+  },
+  {
+    id: '53 superseded_by 가 색인 대상이 아니면 운다',
+    expect: 'fail',
+    mentions: ['색인 대상이 아니다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/spec.md', (t) =>
+        t.replace('status: current', 'status: superseded' + NL + 'superseded_by: docs/없는문서.md')
+      ),
+  },
+  {
+    id: '54 superseded_by 가 자기 자신이면 운다',
+    expect: 'fail',
+    mentions: ['자기 자신을 가리킨다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/spec.md', (t) =>
+        t.replace('status: current', 'status: superseded' + NL + 'superseded_by: docs/spec.md')
+      ),
+  },
+  {
+    id: '55 stale 인데 stale_since 가 날짜가 아니면 운다',
+    expect: 'fail',
+    mentions: ['stale_since 가 YYYY-MM-DD 가 아니다'],
+    mutate: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('status: current', 'status: stale')),
+  },
+  {
+    id: '56 stale_since 가 미래면 운다',
+    expect: 'fail',
+    mentions: ['오늘보다 뒤다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/spec.md', (t) =>
+        t.replace('status: current', 'status: stale' + NL + 'stale_since: 2099-01-01')
+      ),
+  },
+  {
+    // 검사 19. D30 이후의 결정은 선택지 표를 갖는다 (D62).
+    id: '57 D30 이후의 결정에 선택지 표가 없으면 운다',
+    expect: 'fail',
+    mentions: ['표가 없다'],
+    mutate: (dir) =>
+      edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
+  },
+  {
+    // 검사 20. 원본이 낡은 해시를 들고 나갈 수 없어야 사본의 대조에 뜻이 있다 (D63).
+    id: '58 SKILL 본문이 바뀌었는데 해시가 그대로면 운다',
+    expect: 'fail',
+    mentions: ['본문 해시가 어긋난다'],
+    mutate: append('docs/skills/sillok-storage/SKILL.md', NL + '본문에 한 줄 더한다.' + NL),
+  },
+  {
+    id: '59 SKILL 헤더에 해시가 없으면 운다',
+    expect: 'fail',
+    mentions: ['헤더에 본문 해시가 없다'],
+    mutate: (dir) =>
+      edit(dir, 'docs/skills/sillok-storage/SKILL.md', (t) => t.replace('> 본문 해시', '> 해시 없음')),
+  },
 ]
 
 // 메타 케이스: **이 케이스가 정말 그 검사 때문에 실패하는가.**
@@ -753,6 +815,22 @@ const META = [
     id: 'M9 검사 7(Q 참조)을 끄면 없는 Q 참조가 통과한다',
     disable: (s) => s.replace('if (!defined.has(n)) fail(', 'if (false) fail('),
     inject: append('docs/spec.md', NL + '없는 Q999 를 가리킨다.' + NL),
+  },
+  {
+    id: 'M19 검사 18(status 생애)을 끄면 증거 없는 superseded 가 통과한다',
+    disable: (s) => s.replace("if (fm.status === 'superseded') {", 'if (false) {'),
+    inject: (dir) => edit(dir, 'docs/spec.md', (t) => t.replace('status: current', 'status: superseded')),
+  },
+  {
+    id: 'M20 검사 19(선택지 표)를 끄면 표 없는 결정이 통과한다',
+    disable: (s) => s.replace('if (!/^### .*(선택지|버린 안)/m.test(body)) {', 'if (false) {'),
+    inject: (dir) =>
+      edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
+  },
+  {
+    id: 'M21 검사 20(SKILL 해시)을 끄면 어긋난 해시가 통과한다',
+    disable: (s) => s.replace('if (digest !== stamped[1]) {', 'if (false) {'),
+    inject: append('docs/skills/sillok-storage/SKILL.md', NL + '본문에 한 줄 더한다.' + NL),
   },
 
   // **34·35·36·42 에는 메타가 없다.** 문서를 들어내거나 파일을 지우면 다른 검사도 함께 운다 —

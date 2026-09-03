@@ -10,6 +10,7 @@ module: null
 
 > **배포용 산출물.** 이 폴더를 대상 프로젝트로 복사해서 쓴다.
 > 원본: `Sillok:docs/skills/sillok-storage/SKILL.md` · 기준일 2026-09-02
+> 본문 해시: sha256:7842f24f91e5 (게이트가 지킨다, D63)
 > 사본을 고치지 말고 원본을 고친 뒤 다시 복사한다.
 > 상위 계약: `Sillok:docs/plan.md` §4
 
