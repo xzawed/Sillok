@@ -174,4 +174,5 @@ def test_hit_paths_are_built_inside_the_try(caplog):
             with_paths=True,
             started=0.0,
         )
-    assert any("질의 로그를 남기지 못했다" in r.getMessage() for r in caplog.records)
+    # 죽은 DSN 도 같은 머리말로 경고한다. 그래서 **연결 실패가 낼 수 없는 문구**를 본다 (Grok 재검토).
+    assert any("'path'" in r.getMessage() for r in caplog.records)
