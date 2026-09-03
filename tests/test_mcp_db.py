@@ -332,3 +332,74 @@ def test_the_indexed_hash_is_what_save_doc_compares(client, ws):
     )
     assert body["ok"] is True
     assert body["data"]["proposal"]["diff"].startswith("--- a/docs/one.md")
+
+
+# --- D46 대조가 덮지 못하던 조합들 --------------------------------------------
+#
+# D46 은 "그 도구가 낼 수 있는 모든 오류 코드" 를 대조하라고 했는데, 실제로 덮인 것은
+# 도구 둘의 VALIDATION 과 kb_status 의 INTERNAL 뿐이었다 (Grok 적대 리뷰).
+# 여기 있는 조합은 **표를 검사 안 데이터로 둔다** — 도구가 늘면 빠뜨릴 수 없게.
+
+
+def test_validation_matches_for_the_rest(client, ws):
+    """남은 도구들의 `VALIDATION` 도 두 얼굴이 같은 봉투를 낸다 (D46)."""
+    for name, arguments, fn, args in (
+        (
+            "search_events",
+            {"project": PROJECT, "top_k": 99},
+            service.search_events,
+            (DSN, {"project": PROJECT, "top_k": 99}),
+        ),
+        # `since` 의 파싱은 **얼굴**이 한다 (`api.since_filter`). Service 를 직접 부르면
+        # 이미 datetime 이라 같은 자리가 아니다 — D46 의 대조는 *같은 Service 호출*이 기준이다.
+        # 그래서 event_stats 는 Service 자신이 내는 거절로 민다.
+        ("event_stats", {"project": "has/slash"}, service.event_stats, (DSN, "has/slash")),
+        ("save_event", {"project": PROJECT}, service.save_event, (DSN, {"project": PROJECT})),
+        (
+            "save_doc",
+            {"project": PROJECT, "path": "docs/one.md", "body": "x", "base_hash": "없는접두사"},
+            service.save_doc,
+            (DSN, {"project": PROJECT, "path": "docs/one.md", "body": "x", "base_hash": "없는접두사"}, str(ws)),
+        ),
+    ):
+        body = compare(client, name, arguments, fn, *args)
+        assert body["error"]["code"] == "VALIDATION", name
+
+
+def test_not_found_matches_for_save_doc(client, ws):
+    """색인에 없는 경로의 제안은 `NOT_FOUND` 다 (D36·D38). 두 얼굴이 같다."""
+    payload = {
+        "project": PROJECT,
+        "path": "docs/없는문서.md",
+        "body": "x",
+        "base_hash": "sha256:" + "0" * 64,
+    }
+    body = compare(client, "save_doc", payload, service.save_doc, DSN, payload, str(ws))
+    assert body["error"]["code"] == "NOT_FOUND"
+
+
+def test_the_mcp_face_widens_types_where_http_rejects(client):
+    """D42 가 적어 둔 **의도된 비대칭**이다. 문서화된 것이므로 `다름` 을 잠근다.
+
+    SDK 는 스키마에 맞춰 값을 넓게 받아들여 `"8"` 을 `8` 로 바꿔 Service 에 넘긴다.
+    HTTP 얼굴의 POST 본문에서는 같은 글자가 `VALIDATION` 이다 —
+    **같은 글자를 보내도 두 얼굴의 Service 가 다른 값을 본다.** 조용하면 구현이 발명한다.
+    """
+    rpc_body = call(client, "search_docs", {"project": PROJECT, "query": "가나다", "top_k": "8"})
+    assert rpc_body["ok"] is True, "SDK 가 문자열을 정수로 넓혀 준다 (D42)"
+
+    http = client.post(
+        "/v1/search/docs",
+        json={"project": PROJECT, "query": "가나다", "top_k": "8"},
+        headers=HEADERS,
+    )
+    assert http.status_code == 422
+    assert http.json()["error"]["code"] == "VALIDATION"
+
+    # **`"8"` 하나로는 넓힘을 증명하지 못한다** — SDK 가 그 인자를 *버려도* Service 는
+    # 기본값 8 을 써서 같은 결과를 낸다 (D33 의 TOP_K_DEFAULT). 두 갈래가 구별되지 않는
+    # 유일한 값이다 (Grok 적대 리뷰). 범위 밖 문자열은 갈라진다 —
+    # 넓히면 Service 가 99 를 보고 거절하고, 버리면 기본값으로 성공한다.
+    widened = call(client, "search_docs", {"project": PROJECT, "query": "가나다", "top_k": "99"})
+    assert widened["ok"] is False, "버려졌다면 기본값 8 로 성공했을 것이다"
+    assert widened["error"]["code"] == "VALIDATION"
