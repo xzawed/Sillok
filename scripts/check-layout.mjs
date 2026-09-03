@@ -255,7 +255,7 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
 
   // 단계별 표면. 정본은 plan.md §5 와 docs/service-and-mcp.md 다.
   // 긴 접두사부터 본다 — /v1/events/{id}(7단계 get_event)가 /v1/events(4단계)보다 먼저다.
-  // GET /v1/docs 는 §7 이 어느 단계에도 넣지 않았다. 여기서 단계를 발명하지 않는다.
+  // GET /v1/docs 는 만들지 않기로 정했다 (D64). SURFACE 에 넣을 것이 없다.
   const SURFACE = [
     ['/v1/search/docs', 6],
     ['/v1/search/events', 6],
@@ -482,6 +482,12 @@ const RETIRED = [
   // 비켜 가므로 자기가 자기를 문다. D42–D46 의 `마지막 단계 게이트` 와 같은 자리다.
   // 날짜 자체는 참이다. 거짓인 것은 목록이 거기서 끝난다는 것이다 (Grok 재검토).
   ['D35–D41은 2026-09-02 확정. 임의로 뒤집지 않는다', 'D42–D46 도 같은 날이고 D47–D52 가 뒤에 있다'],
+  // D58–D64 가 열린 Q 일곱을 닫으면서 낡은 문장들.
+  ['v1은 삭제보다', 'D59: v1 은 수정도 삭제도 하지 않는다'],
+  ['프로젝트별 문서 목록과 통계를', 'D58: 목록 API 는 v1 에 없다'],
+  ['그래서 이 항목은 열려 있다', 'D61 이 Q23 을 닫았다'],
+  // `MCP에 노출하지 않는 HTTP: …` 의 옛 목록은 등록할 수 없다 — 구별되는 부분이
+  // 전부 코드 스팬 안이라 stripCode 가 지운다. conventions.md 가 적어 둔 그 한계다.
 ]
 const textish = all.filter(
   (p) =>
