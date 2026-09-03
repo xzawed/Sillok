@@ -135,13 +135,14 @@ CREATE TABLE kb_query_logs (
   id          bigserial PRIMARY KEY,
   created_at  timestamptz NOT NULL DEFAULT now(),
   project     text,
-  client      text,
+  client      text,       -- http | mcp  (D49. 얼굴이다. 전송은 구분하지 않는다)
   tool        text NOT NULL,
-  query       text,
-  filters     jsonb,
-  hit_paths   text[],
-  hit_count   int,
-  latency_ms  int
+  -- search_docs | search_events  (D48. 검색 둘만 남긴다)
+  query       text,       -- D49. search_events 가 질의 없이 불리면 NULL
+  filters     jsonb,      -- D49. 실제로 SQL 에 걸린 필터만. project·query·top_k 는 넣지 않는다
+  hit_paths   text[],     -- D49. 문서는 결과 순서대로 중복을 접지 않고, 이벤트는 NULL
+  hit_count   int,        -- D49. 돌려준 행 수. 고유 문서 수가 아니다
+  latency_ms  int         -- D49. Service 진입부터 로그 쓰기 직전까지
 );
 ```
 
@@ -157,11 +158,16 @@ CREATE INDEX kb_events_tsv ON kb_events USING gin (tsv);
 
 CREATE INDEX kb_events_hnsw
   ON kb_events USING hnsw (embedding vector_cosine_ops);
+
+CREATE INDEX kb_query_logs_project_time ON kb_query_logs (project, created_at DESC);
 ```
 
 **v1 은 HNSW 를 만들지 않는다 (D33).** `kb_chunks_hnsw` 는 *행이 적어서* 미룬 것이고,
 `kb_events_hnsw` 는 **채울 값이 없어서**다 — v1 은 이벤트를 임베딩하지 않는다 (D34).
 이유가 다르므로 다르게 적는다. 빈 컬럼에 인덱스가 있으면 벡터 갈래가 있다는 증거로 읽힌다.
+
+`kb_query_logs_project_time` 은 `005` 가 만든다 (D51). `kb_status` 가 부를 때마다
+`project` 로 좁혀 `hit_count = 0` 을 세는데 이 표에는 PK 말고 인덱스가 없었다.
 
 ## 검색
 
@@ -176,3 +182,4 @@ v1 은 이벤트를 임베딩하지 않는다 (D34).
 - 문서 재색인: `(project, repo, path)` 단위로 청크 삭제 후 insert.
 - 이벤트: v1은 삭제보다 `payload`/`summary` 수정. 삭제가 필요하면 물리 삭제 대신 추후 `deleted_at`을 검토.
 - Git이 원본이므로 문서 인덱스는 언제든 지우고 다시 만들 수 있다. 이벤트는 Git에 없는 원장이므로 백업 대상이다.
+- `kb_query_logs` 는 v1 에서 지우지 않고 **백업 대상도 아니다** (D51). 지식이 아니라 v1 성공 조건의 측정이다.

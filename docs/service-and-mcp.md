@@ -269,6 +269,8 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 `last_ingest_at`은 `status`가 `ok`나 `partial`인 run 의 마지막 `finished_at`이다 (D32).
 실패한 run 은 세지 않는다 — 세면 실패가 마지막 색인으로 보고된다. 5단계 전까지 `null`이다.
 `zero_hit_queries`는 `kb_query_logs`의 `hit_count = 0` 건수이고 9단계 전까지 `0`이다.
+그 행을 쓰는 것은 검색 둘뿐이다 — **`kb_status` 자신은 쓰지 않는다** (D48).
+현황을 묻는 질의가 자기가 보고할 수를 늘리면 그 지표가 자기 자신을 센다.
 `chunks_without_embedding`은 `embedding IS NULL`인 청크 수다 (D31). 이벤트는 세지 않는다.
 `chunks`와 같으면 키 없이 색인했다는 뜻이고, 0이 아닌데 키가 있으면 임베딩이 실패했다는 뜻이다 —
 **둘을 이 응답만으로 구분하지 못한다.** 그 구분은 `kb_ingest_runs.status`·`error`가 한다.
