@@ -302,8 +302,8 @@ def event_stats(
             )
             cur.execute(
                 f"SELECT {field} AS bucket, count(*) AS n FROM kb_events"
-                f" WHERE {where} AND ({field} IS NOT NULL OR %(keep_null)s) GROUP BY {field}{order}",
-                {**params, "keep_null": field != "module"},
+                f" WHERE {where} GROUP BY {field}{order}",
+                params,
             )
             # module 이 NULL 인 행의 키는 넣지 않는다 — JSON 키는 null 일 수 없고
             # "null" 은 실제 모듈명과 충돌한다. 그 행들은 total 에 그대로 남는다 (D23).

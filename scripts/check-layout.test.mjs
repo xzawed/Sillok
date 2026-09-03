@@ -746,6 +746,16 @@ const CASES = [
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
   },
   {
+    // **검사 19 가 자기를 정의한 절에서 공허하게 참이었다** (Grok 적대 리뷰).
+    // `### D62 잃어버린 선택지` 라는 서술 제목이 옛 정규식을 만족시켜서, D58–D64 의 표를
+    // 통째로 지워도 초록이었다. 그 자리를 그대로 민다.
+    id: '60 서술 제목이 선택지 표를 대신할 수 없다',
+    expect: 'fail',
+    mentions: ['## D58 절에 선택지'],
+    mutate: (dir) =>
+      edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D58–D64 선택지', '### D58–D64 고른 것')),
+  },
+  {
     // 검사 20. 원본이 낡은 해시를 들고 나갈 수 없어야 사본의 대조에 뜻이 있다 (D63).
     id: '58 SKILL 본문이 바뀌었는데 해시가 그대로면 운다',
     expect: 'fail',
@@ -823,7 +833,7 @@ const META = [
   },
   {
     id: 'M20 검사 19(선택지 표)를 끄면 표 없는 결정이 통과한다',
-    disable: (s) => s.replace('if (!/^### .*(선택지|버린 안)/m.test(body)) {', 'if (false) {'),
+    disable: (s) => s.replace("if (!OPTIONS_HEAD.test(adr.slice(head.index, end))) {", "if (false) {"),
     inject: (dir) =>
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
   },
