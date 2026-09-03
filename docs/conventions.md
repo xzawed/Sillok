@@ -26,6 +26,7 @@ module: null
 | [data-model.md](data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
 | [service-and-mcp.md](service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, 에러 코드 enum |
 | [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
+| [operations.md](operations.md) | 운영 절차 | `runbook` | **백업·복구·재기동, 마이그레이션 실패, 검사 DB 정리** |
 | [open-questions.md](open-questions.md) | 아직 답이 없는 것 | `other` | 미해결 질문 전체 |
 | [../README.md](../README.md) | 방문자용 소개 (영문 정본) | `readme` *(경로에서 유도, D29)* | 프로젝트 소개, 빠른 시작, 코드 배치 |
 | [../README.ko.md](../README.ko.md) | 같은 내용의 한국어 사본 | `readme` *(경로에서 유도, D29)* | 없음 — 어긋나면 영문이 이긴다 |
@@ -107,6 +108,10 @@ node scripts/check-layout.test.mjs   # 그 검사가 실제로 무는지 (고장
   그래서 N을 문장에서 읽지 않고 *막힌 가장 이른 단계 바로 앞*으로 계산해 대조한다.
   막힌 단계가 하나도 없으면 §7 번호 목록의 **마지막 단계**가 N이다 — 여기서 유도를 멈추면
   마지막 Q가 닫히는 날 검사의 절반이 조용히 은퇴한다
+- **비밀 모양** — `sk-` 키, 사설 키, 비밀이 든 DSN 이 들어왔는지 (D56).
+  공개 저장소인데 지금까지 1회성 실측뿐이었다. `tests/` 는 DSN 검사에서 뺀다 —
+  그 파일들은 `redact_dsn` 이 가리는지 증명하려고 **가짜 비밀을 일부러 담는다**.
+  주입 하네스도 needle 을 들고 있어야 하므로 그 한 파일은 면제다
 - **두 walk 의 건너뛰기 목록** — 게이트(JS)와 ingest(파이썬)가 같은 목록을 건너뛰는지 (D47).
   코드로 공유할 수 없어 정본이 ADR 이고 구현이 둘이다. `check-index-parity.mjs` 는
   D9 필터를 통과한 **뒤**를 비교하므로 이 갈라짐을 원리상 보지 못한다

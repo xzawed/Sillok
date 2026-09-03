@@ -33,6 +33,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   (이 둘이 이긴다)
 | [data-model.md](data-model.md) | 테이블, 인덱스, DDL, 컬럼 enum |
 | [service-and-mcp.md](service-and-mcp.md) | HTTP·MCP 입출력 계약 |
 | [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md) | 저장 위치 분류 규칙 |
+| [operations.md](operations.md) | 백업·복구·재기동 절차 (D54) |
 | [open-questions.md](open-questions.md) | 아직 답이 없는 것 |
 
 ---
@@ -139,7 +140,7 @@ DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 **v1 은 HNSW 를
 행이 적어 이득이 없고,  쪽은 채울 값이 아예 없다 (D34).
 
 - 문서 원본은 Git. DB는 해시·청크 인덱스
-- 이벤트는 Git에 없는 원장. **백업 대상**
+- 이벤트는 Git에 없는 원장. **백업 대상** — 절차는 [operations.md](operations.md)가 소유한다 (D54)
 - 재색인: `(project, repo, path)` 단위로 청크 삭제 후 insert
 - 검색: 벡터 + tsv. 식별자·날짜·건수는 필터/SQL
 - 이벤트 임베딩은 `summary`만 — 다만 **v1 은 이벤트를 임베딩하지 않는다** (D34)
