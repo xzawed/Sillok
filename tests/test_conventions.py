@@ -35,7 +35,9 @@ def _db_capable() -> list[Path]:
     return [
         p
         for p in sorted(TESTS.glob("test_*.py"))
-        if "dbcheck" in p.read_text(encoding="utf-8")
+        # 자기 자신은 뺀다. 넣으면 이 파일의 **주석 속 예시**가 아래 대조군을 살려 두어,
+        # 진짜 호출부가 사라져도 "그 모양이 걸린다" 가 참이 된다 (Grok 재검토).
+        if p != Path(__file__).resolve() and "dbcheck" in p.read_text(encoding="utf-8")
     ]
 
 

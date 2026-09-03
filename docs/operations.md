@@ -43,6 +43,7 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 **2026-09-03 에 이 순서로 실제로 돌렸다.** 이벤트 셋이 그대로 돌아왔고 시퀀스도 따라왔다.
 
 ```bash
+test -s kb_events.sql                         # 빈 덤프로 TRUNCATE 만 하고 끝나는 길을 막는다
 docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
 docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
 docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;"
@@ -57,6 +58,8 @@ docker compose exec -T api sillok ingest --project <name>   # 문서 인덱스�
 - **`ON_ERROR_STOP=1`** — 없으면 `psql` 이 그 오류를 찍고 **계속 간 뒤 종료 코드 0 으로 끝난다.**
   실측: 기존 행 셋이 있는 채로 그냥 부었더니 행 수는 그대로인데 종료 코드가 0 이었다
 - **`stop api`** — 붓는 사이에 들어온 `save_event` 하나가 시퀀스를 앞질러 간다
+- **`test -s`** — 빈 파일은 SQL 오류가 아니라 **문장이 0개인 실행**이라 `ON_ERROR_STOP` 이 잡지 못한다.
+  `pg_dump` 가 실패해 리다이렉트만 남긴 파일이면 `TRUNCATE` 뒤에 아무것도 부어지지 않는다
 
 **시퀀스를 손으로 맞추지 않는다.** `pg_dump --data-only --table=kb_events` 는 그 테이블이 소유한
 시퀀스의 `setval` 을 **덤프 안에 함께 넣는다** (실측: 복원 뒤 `last_value` 가 따라왔다).
