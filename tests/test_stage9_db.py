@@ -268,3 +268,15 @@ def test_005_created_the_index(db):
     ).fetchone()
     assert found is not None
     assert "project" in found["indexdef"]
+
+
+def test_a_broken_filters_builder_does_not_break_the_search(ws, db, monkeypatch):
+    """호출부의 구멍을 잠근다 — 값 만들기가 `try` 밖이면 검색이 500 이 된다 (D50)."""
+
+    def boom(_params):
+        raise RuntimeError("주입한 고장")
+
+    monkeypatch.setattr(service, "_log_filters", boom)
+    out = service.search_docs(DSN, {"project": PROJECT, "query": "가나다"})
+    assert len(out["results"]) == 2
+    assert rows(db) == []

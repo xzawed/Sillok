@@ -761,9 +761,9 @@ def _log_query(
     tool: str,
     project: str,
     query: str | None,
-    filters: dict[str, Any],
-    hit_paths: list[str] | None,
-    hit_count: int,
+    params: dict[str, Any],
+    results: list[dict[str, Any]],
+    with_paths: bool,
     started: float,
 ) -> None:
     """질의 하나를 원장에 남긴다 (D48–D52).
@@ -775,21 +775,27 @@ def _log_query(
     500 이 되면 안 된다. 원장이 자기가 기록하는 것을 죽일 수 있으면 안 된다는 것이 규칙이고,
     그 규칙은 쓰기 한 줄이 아니라 이 함수 전체에 걸린다.
 
+    **그래서 만들어진 값이 아니라 재료를 받는다.** 처음에는 `filters=_log_filters(params)` 처럼
+    호출자가 만들어 넘겼는데, 키워드 인자는 함수에 들어오기 **전에** 평가되므로 그 계산이
+    `try` 밖이었다 — 계약이 삼키라고 한 바로 그 자리가 500 으로 새는 길이었다 (Grok 적대 리뷰).
+
     경고에 DSN 을 싣지 않는다 (D21·D50). 이 저장소는 예외 경로로 DSN 을 흘린 적이 이미 있다.
     """
     try:
         # 로그 쓰기 자체는 재지 않는다 (D49). 벽시계가 아니라 단조 시계다.
         latency_ms = round((time.perf_counter() - started) * 1000)
-        # **값을 먼저 만든다.** 연결을 열기 전이라 값 만들다 난 버그가 연결을 쓰지 않고,
-        # 검사도 DB 없이 그 자리를 밀 수 있다 (D50 의 `값 만들기까지 감싼다`).
-        params = {
+        # **값을 여기서 만든다.** 연결을 열기 전이고 `try` 안이라, 값 만들다 난 버그가
+        # 연결을 쓰지도 않고 질의를 죽이지도 않는다 (D50 의 `값 만들기까지 감싼다`).
+        row = {
             "project": project,
             "client": client,
             "tool": tool,
             "query": query,
-            "filters": psycopg.types.json.Jsonb(filters),
-            "hit_paths": hit_paths,
-            "hit_count": hit_count,
+            "filters": psycopg.types.json.Jsonb(_log_filters(params)),
+            # D49. 문서는 돌려준 행의 path 를 결과 순서대로 중복을 접지 않고,
+            # 이벤트는 NULL 이다 — 히트가 경로가 아니라 id 이기 때문이다.
+            "hit_paths": [item["path"] for item in results] if with_paths else None,
+            "hit_count": len(results),
             "latency_ms": latency_ms,
         }
         with connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
@@ -798,9 +804,11 @@ def _log_query(
                 INSERT INTO kb_query_logs
                     (project, client, tool, query, filters, hit_paths, hit_count, latency_ms)
                 VALUES (%(project)s, %(client)s, %(tool)s, %(query)s, %(filters)s,
-                        %(hit_paths)s, %(hit_count)s, %(latency_ms)s)
+                        -- 빈 목록은 psycopg 가 타입 없는 `{}` 로 보낸다. 지금 컬럼에는 들어가지만
+                        -- 추론에 기대지 않는다 — 0건 질의가 §9 의 완료 조건이 서 있는 행이다.
+                        %(hit_paths)s::text[], %(hit_count)s, %(latency_ms)s)
                 """,
-                params,
+                row,
             )
     except Exception as exc:  # noqa: BLE001 - 원장이 질의를 죽이면 안 된다 (D50)
         log.warning("질의 로그를 남기지 못했다 (tool=%s): %s", tool, _clip(exc))
@@ -849,11 +857,10 @@ def search_docs(
         tool="search_docs",
         project=project,
         query=query,
-        filters=_log_filters(params),
-        # D49. 돌려준 행의 path 를 결과 순서대로, 중복을 접지 않는다 —
-        # 문서당 상한이 2라 같은 문서의 청크 둘이 들어올 수 있고, 그것이 곧 이 질의의 행 집합이다.
-        hit_paths=[row["path"] for row in results],
-        hit_count=len(results),
+        # 재료를 넘긴다. 만들어 넘기면 그 계산이 try 밖이 된다 (D50).
+        params=params,
+        results=results,
+        with_paths=True,
         started=started,
     )
     return data
@@ -990,10 +997,10 @@ def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> di
         tool="search_events",
         project=project,
         query=query,
-        filters=_log_filters(params),
+        params=params,
+        results=results,
         # D49. 이벤트 히트는 경로가 아니라 id 다. 한 text[] 에 두 종류의 식별자를 섞지 않는다.
-        hit_paths=None,
-        hit_count=len(results),
+        with_paths=False,
         started=started,
     )
     return data

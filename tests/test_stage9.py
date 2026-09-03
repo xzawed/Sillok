@@ -74,9 +74,9 @@ def test_log_write_failure_is_swallowed(caplog):
             tool="search_docs",
             project="p",
             query="q",
-            filters={},
-            hit_paths=[],
-            hit_count=0,
+            params={"project": "p"},
+            results=[],
+            with_paths=True,
             started=0.0,
         )
     assert any("질의 로그를 남기지 못했다" in r.getMessage() for r in caplog.records)
@@ -91,9 +91,9 @@ def test_log_warning_does_not_carry_the_dsn(caplog):
             tool="search_docs",
             project="p",
             query="q",
-            filters={},
-            hit_paths=None,
-            hit_count=0,
+            params={"project": "p"},
+            results=[],
+            with_paths=False,
             started=0.0,
         )
     text = "\n".join(r.getMessage() for r in caplog.records)
@@ -117,9 +117,9 @@ def test_payload_bugs_are_swallowed_too(caplog, monkeypatch):
             tool="search_events",
             project="p",
             query=None,
-            filters={"kind": "failure"},
-            hit_paths=None,
-            hit_count=0,
+            params={"project": "p", "kind": "failure"},
+            results=[],
+            with_paths=False,
             started=0.0,
         )
     assert any("주입한 고장" in r.getMessage() for r in caplog.records)
@@ -131,3 +131,47 @@ def test_only_the_two_search_functions_log(tool):
     assert f'tool="{tool}"' in inspect.getsource(service)
     for fn in (service.kb_status, service.event_stats, service.get_event, service.save_event):
         assert "_log_query" not in inspect.getsource(fn), fn.__name__
+
+
+def test_values_are_built_inside_the_try(caplog, monkeypatch):
+    """`filters` 를 **만드는** 계산도 삼켜야 한다 (D50).
+
+    처음 구현은 `filters=_log_filters(params)` 를 호출자가 만들어 넘겼는데, 키워드 인자는
+    함수에 들어오기 **전에** 평가되므로 그 계산이 `try` 밖이었다 — 계약이 삼키라고 한
+    바로 그 자리가 500 으로 새는 길이었다 (Grok 적대 리뷰). 재료를 넘기는 형태로 잠근다.
+    """
+
+    def boom(_params):
+        raise RuntimeError("filters 를 만들다 터졌다")
+
+    monkeypatch.setattr(service, "_log_filters", boom)
+    with caplog.at_level(logging.WARNING):
+        service._log_query(
+            DEAD_DSN,
+            client="http",
+            tool="search_docs",
+            project="p",
+            query="q",
+            params={"project": "p"},
+            results=[],
+            with_paths=True,
+            started=0.0,
+        )
+    assert any("filters 를 만들다 터졌다" in r.getMessage() for r in caplog.records)
+
+
+def test_hit_paths_are_built_inside_the_try(caplog):
+    """`hit_paths` 도 같다 — `path` 가 없는 행이 와도 질의를 죽이지 않는다 (D50)."""
+    with caplog.at_level(logging.WARNING):
+        service._log_query(
+            DEAD_DSN,
+            client="http",
+            tool="search_docs",
+            project="p",
+            query="q",
+            params={"project": "p"},
+            results=[{"경로가": "없다"}],
+            with_paths=True,
+            started=0.0,
+        )
+    assert any("질의 로그를 남기지 못했다" in r.getMessage() for r in caplog.records)
