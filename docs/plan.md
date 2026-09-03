@@ -151,7 +151,8 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
 5·6단계 계약이 생겼다.
 **C절의 Q12·Q15와 D절의 Q19·Q20은 D35–D38로 마감됐다** (2026-09-02) —
 7단계 계약이 생겼고, **Q17이 D42–D46으로 닫히면서 1–10단계를 이제 검증할 수 있다** (2026-09-02).
-검증할 수 있다는 것은 **계약이 다 있다**는 뜻이지 구현이 다 됐다는 뜻이 아니다 — 진행 상태는 §9가 소유한다.
+검증할 수 있다는 것은 **계약이 다 있다**는 뜻이다. 진행 상태는 §9가 소유하고,
+**2026-09-03 현재 열 단계가 다 구현됐다.**
 **H절의 Q32는 D48–D52로 마감됐다** (2026-09-03) — 9단계 계약이 생겼다.
 다섯 결정이 `kb_query_logs` 를 이 자리로 미뤄 두고 있었다.
 남은 공백은 단계별로 걸린다 — **4단계 전에 Q16·Q18·Q21**, 5단계 전에 Q6·Q7·Q10,
@@ -225,15 +226,19 @@ node scripts/check-layout.mjs
 docker compose up -d --wait
 docker compose exec api sillok ingest --project sillok
 curl -sf "http://127.0.0.1:8080/v1/status?project=sillok"
+node scripts/smoke.mjs
 uv run pytest -q
 ```
 
-> **3번째 줄의 `exec api` 는 2026-09-02 에 확인했다.** 처음 돌렸을 때는 `sillok` 이 PATH 에 없어
-> `executable file not found` 로 죽었다 — `Dockerfile` 의 runtime 스테이지가 `/app/.venv/bin` 을
-> PATH 에 넣도록 고쳤고, 지금은 그 형태로 돈다. 5단계 검증은 `--profile test` 안에서 같은 Service 함수를 불러 했다.
-> `/v1/status`는 4단계에서 생겼으므로 4번째 줄은 돈다.
-> 5번째 줄은 호스트에서 DB 검사가 skip된 채로 돈다 — 전부 돌리려면 D22의 `--profile test`다.
-> 이 블록은 **v1 목표**이지 현재 상태가 아니다.
+> **여섯 줄을 2026-09-03 에 이 순서로 돌렸다.** 1번째는 `배치 검증 통과`, 2번째는 `db`·`api` 둘 다 `Healthy`,
+> 3번째는 `ok` 로 끝난 run 하나, 4번째는 `{"ok":true,…}` 봉투,
+> 5번째는 스모크 셋이 전부 `PASS`, 6번째는 호스트에서 DB 검사가 skip 된 채 통과였다.
+> 수치는 여기 적지 않는다 — 위 체크박스가 같은 이유로 파일 수를 적지 않는다.
+> `exec api` 는 처음 돌렸을 때 `sillok` 이 PATH 에 없어 `executable file not found` 로 죽었고(2026-09-02),
+> `Dockerfile` 의 runtime 스테이지가 `/app/.venv/bin` 을 PATH 에 넣도록 고쳐 지금은 그 형태로 돈다.
+> 5번째 줄이 10단계 스모크다 (D53). 6번째 줄을 전부 돌리려면 D22의 `--profile test`다.
+> **이 블록은 이제 목표가 아니라 도는 명령이다.** 마이그레이션을 더한 뒤에는 `api` 이미지를 다시 굽는다 —
+> `migrations/` 는 `test` 서비스에만 마운트돼 있고 `api` 에는 구워져 있다 (D28 이 예고한 자리).
 
 `sillok ingest`는 `serve`가 떠 있지 않아도 도는 것이 D19의 요점이다.
 위 명령이 `exec api`를 쓰는 것은 Compose 안에서 워크스페이스와 DSN이 이미 맞춰져 있기 때문이지, HTTP를 타서가 아니다.

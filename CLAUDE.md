@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 이 저장소의 성격
 
 **문서가 먼저이고 코드가 따라온다.** 문서 자체가 계약이다.
-[docs/plan.md](docs/plan.md) §7의 **1–9단계까지 구현돼 있고 10단계는 아직 없다.**
+[docs/plan.md](docs/plan.md) §7의 **1–10단계가 전부 구현돼 있다.**
 (진행 상태 정본은 §7·§9다. 아래는 미러다.)
 있는 것: `docker-compose.yml`+`Dockerfile`(db+api), `migrations/*.sql`,
 `src/sillok/`(config · migrations 러너 · api · ingest·search 규칙 · workspace 걸음 ·
@@ -15,7 +15,7 @@ MCP 도구 표면 · 질의 원장 기록 · CLI `migrate`/`serve`/`ingest`/`mcp
 `GET /v1/events/{id}` · `GET /v1/files` · `POST /v1/docs/proposals`.
 **MCP 는 `POST /mcp`(와 `/mcp/`) 하나이고 stdio 는 `sillok mcp` 다** (D43·D45).
 그 아래 다른 경로는 정직하게 404다. 스텁을 만들지 않는다.
-없는 것: 10단계 스모크, `GET /v1/docs`(§7이 어느 단계에도 넣지 않았다, Q30) — 순서대로 붙인다.
+없는 것: `GET /v1/docs`(§7이 어느 단계에도 넣지 않았다, Q30) — 그 표면을 건드리기 전에 답한다.
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -31,7 +31,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 - 동작이 명세와 다르면 **코드가 틀린 것으로 본다.**
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
 - ADR의 D1–D15는 2026-08-30, D16–D28은 2026-08-31, D29–D34는 2026-09-01,
-  D35–D46은 2026-09-02, D47–D52는 2026-09-03 확정. 임의로 뒤집지 않는다.
+  D35–D46은 2026-09-02, D47–D53은 2026-09-03 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
 - **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [docs/conventions.md](docs/conventions.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
   소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 소유자를 지도에 추가한다.
@@ -39,14 +39,15 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 ### 아직 답이 없는 것
 
 [docs/open-questions.md](docs/open-questions.md)의 미해결 질문들은 **아무 문서에도 답이 없다.**
-추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D53 이후로 기록한다.
+추측으로 채우고 구현하지 않는다. 먼저 결정하고 ADR에 D54 이후로 기록한다.
 
 A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**,
 B절은 Q6·Q7·Q10이 **D30–D32**로, Q8·Q9가 **D33–D34**로,
 C절의 Q12·Q15와 D절의 Q19·Q20이 **D35–D38**로,
 F절의 Q27–Q29(7단계를 구현하다 드러난 침묵)가 **D39–D41**로 마감됐다 —
 Q17이 **D42–D46**(8단계 MCP 표면)으로 마감되면서
-작업 순서 1–10단계를 이제 검증할 수 있다 — **계약이 다 있다는 뜻이지 구현이 다 됐다는 뜻이 아니다.**
+작업 순서 1–10단계를 이제 검증할 수 있다 — 계약이 다 있다는 뜻이고,
+**2026-09-03 현재 그 열 단계의 구현도 끝났다** (진행 상태 정본은 §7·§9다).
 **단계를 막는 Q는 하나도 남지 않았다.**
 
 **G절은 그 7단계를 검증하다 열렸다** — Q31(전체 스캔의 walk)은 같은 날 **D47**로 닫혔고,
@@ -173,6 +174,7 @@ node scripts/check-layout.mjs          # 문서 게이트만
 node scripts/check-layout.test.mjs     # 그 게이트가 실제로 무는지 (고장 주입 + 메타)
 docker compose up -d --wait            # db + api (5432 미게시, 8080 만 게시)
 curl -i http://127.0.0.1:8080/v1/nope  # 404 + 공통 봉투. detail 이 새면 계약 위반
+node scripts/smoke.mjs                 # 10단계 스모크. 살아 있는 8080 이 필요하다 (D53)
 uv run pytest -q                       # 호스트. DB 검사는 skip 된다
 docker compose --profile test run --rm test   # DB 검사까지 (D22)
 ```
