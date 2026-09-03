@@ -689,6 +689,15 @@ for (const p of scanned) {
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
+// D30 이 "다음 후보" 로 적어 둔 것: **D9 경로 안인데 먹지 않은 파일**을 사유와 함께 보인다.
+// ingest 쪽에는 이미 있다 (`skipped[]` 의 `not-md`·`symlink`). 게이트에도 두어 두 벌이
+// 갈라지지 않게 한다 — 여기는 실패가 아니라 출력이다. 무엇이 빠졌는지 사람이 보는 자리다.
+const notIndexed = all.filter((p) => INCLUDE.some((f) => f(p)) && !p.endsWith('.md'))
+console.log(
+  notIndexed.length
+    ? `색인 제외   ${notIndexed.map((p) => `${p} (not-md)`).join(', ')}`
+    : '색인 제외   없다'
+)
 console.log(`FM 없음     ${readmes.join(', ')}`)
 console.log(`doc_type    ${JSON.stringify(seen.doc_type)}`)
 console.log(`status      ${JSON.stringify(seen.status)}`)
