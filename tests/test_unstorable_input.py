@@ -12,6 +12,7 @@ D25 는 `project` 에서, D36 은 `path` 에서 각각 막았지만 **둘 다 �
 from __future__ import annotations
 
 import json
+import sys
 from typing import Any
 
 import pytest
@@ -118,13 +119,44 @@ def test_payload_walk_passes_an_ordinary_payload():
     service.require_payload_text({"module": "api", "count": 3, "tags": ["정상", "😀"], "nested": {"ok": True}})
 
 
+@pytest.mark.parametrize("depth", [10, 200, 400, 5000, 20000])
+def test_deep_payload_raises_no_recursion_error_in_either_step(depth):
+    """**걷는 함수 앞에 재귀가 하나 더 있다** (Grok 재검토가 물은 것).
+
+    `build_event` 는 `_payload_text`(재귀적인 `json.dumps`)로 길이를 먼저 재고,
+    그 다음에 `require_payload_text` 로 걷는다. 앞의 것이 깊은 payload 에서 터지면
+    걷는 쪽을 스택으로 만든 것이 소용없다 — 둘 다 클라이언트가 만든 500 이다.
+
+    **HTTP 로 재지 않는다.** 이 파일의 DSN 은 죽어 있어서 얕고 유효한 payload 는
+    연결 실패로 500 이 되고, 그러면 깊이 때문에 난 500 과 구분되지 않는다.
+    두 함수를 직접 부르는 것이 이 질문에 답하는 유일한 방법이다.
+    (라이브 실측은 따로 했다: 깊이 10~200000 에서 500 이 하나도 없었다.)
+    """
+    node: Any = "ok"
+    for _ in range(depth):
+        node = {"a": node}
+
+    # `build_event` 와 **같은 순서**로 부른다. 순서가 뒤집히면 이 검사가 붉은불이다.
+    try:
+        service.require_payload_text(node)
+    except service.ValidationFailed as exc:
+        # 너무 깊으면 여기서 걸린다 — 새 한계값이 아니라 길이 상한과 같은 문구다.
+        assert str(exc) == f"payload longer than {service.PAYLOAD_MAX}"
+        return
+    service._payload_text(node)  # RecursionError 가 나면 여기서 죽는다
+
+
 def test_payload_walk_does_not_recurse():
     """깊은 중첩에서 `RecursionError` 가 나면 그것도 클라이언트가 만든 500 이다.
 
     스택으로 걷는다는 것을 못 박는다 — 재귀로 바꾸면 이 검사가 붉은불이 된다.
+
+    깊이는 **파이썬 재귀 한계(기본 1000)보다 깊고 `PAYLOAD_MAX` 보다 얕게** 고른다.
+    상한을 넘기면 깊이 가드가 먼저 걸려 재귀 여부를 재지 못한다 — 그러면 공허해진다.
     """
+    assert sys.getrecursionlimit() < 1500 < service.PAYLOAD_MAX  # 위 두 조건을 못 박는다
     deep: Any = "leaf"
-    for _ in range(5000):
+    for _ in range(1500):
         deep = {"a": deep}
     service.require_payload_text(deep)
 

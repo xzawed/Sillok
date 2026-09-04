@@ -208,18 +208,28 @@ def require_payload_text(payload: dict[str, Any]) -> None:
 
     문구는 필드명을 `payload` 로 고정한다. 안쪽 키 경로를 실어 보내면 error 봉투가
     요청 내용을 되비추는 자리가 된다.
+
+    **깊이도 여기서 막는다.** 길이를 재는 `_payload_text` 는 `json.dumps` 라 재귀이고,
+    깊은 payload 에서 `RecursionError` 를 낸다 — 실측 2026-09-04: 호스트에서 깊이 5000 이
+    터졌고 **컨테이너에서는 요청 파서가 먼저 거절해 살아남았다.** 플랫폼이 가린 것이지
+    닫힌 것이 아니다 (이 저장소의 재발 부류다). 그래서 이 함수가 `_payload_text` **앞에** 선다.
+
+    한계값을 새로 만들지 않는다 — 중첩 한 단은 직렬화에 최소 한 바이트를 쓰므로
+    `PAYLOAD_MAX` 단보다 깊은 payload 는 **이미 그 상한을 넘긴 것**이다. 문구도 같은 것을 쓴다.
     """
-    stack: list[Any] = [payload]
+    stack: list[tuple[Any, int]] = [(payload, 0)]
     while stack:
-        node = stack.pop()
+        node, depth = stack.pop()
+        if depth > PAYLOAD_MAX:
+            raise ValidationFailed(f"payload longer than {PAYLOAD_MAX}")
         if isinstance(node, str):
             require_text(node, "payload")
         elif isinstance(node, dict):
             for key, value in node.items():
                 require_text(key, "payload")
-                stack.append(value)
+                stack.append((value, depth + 1))
         elif isinstance(node, list):
-            stack.extend(node)
+            stack.extend((item, depth + 1) for item in node)
 
 
 def _payload_text(payload: dict[str, Any]) -> str:
@@ -277,11 +287,12 @@ def build_event(body: dict[str, Any]) -> Event:
     payload = body.get("payload")
     if payload is not None and not isinstance(payload, dict):
         raise ValidationFailed("payload must be an object")
+    if payload is not None:
+        # **길이보다 먼저다.** 길이를 재는 `_payload_text` 가 재귀라 깊은 payload 에서
+        # RecursionError 를 낸다 — 그 앞에서 깊이를 걸러야 이 부류가 닫힌다.
+        require_payload_text(payload)
     if payload is not None and len(_payload_text(payload)) > PAYLOAD_MAX:
         raise ValidationFailed(f"payload longer than {PAYLOAD_MAX}")
-    if payload is not None:
-        # 길이 뒤다. 상한을 넘긴 payload 를 끝까지 걷지 않는다.
-        require_payload_text(payload)
 
     return Event(
         project=project,
