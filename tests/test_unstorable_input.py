@@ -123,9 +123,10 @@ def test_payload_walk_passes_an_ordinary_payload():
 def test_deep_payload_raises_no_recursion_error_in_either_step(depth):
     """**걷는 함수 앞에 재귀가 하나 더 있다** (Grok 재검토가 물은 것).
 
-    `build_event` 는 `_payload_text`(재귀적인 `json.dumps`)로 길이를 먼저 재고,
-    그 다음에 `require_payload_text` 로 걷는다. 앞의 것이 깊은 payload 에서 터지면
-    걷는 쪽을 스택으로 만든 것이 소용없다 — 둘 다 클라이언트가 만든 500 이다.
+    `build_event` 는 `require_payload_text` 로 **먼저** 걷고, 그 다음에
+    `_payload_text`(재귀적인 `json.dumps`)로 길이를 잰다. 순서가 이것인 이유가 여기다 —
+    반대로 두면 깊은 payload 가 길이를 재다 RecursionError 를 내고, 걷는 쪽을
+    스택으로 만든 보람이 없다. 둘 다 클라이언트가 만든 500 이다.
 
     **HTTP 로 재지 않는다.** 이 파일의 DSN 은 죽어 있어서 얕고 유효한 payload 는
     연결 실패로 500 이 되고, 그러면 깊이 때문에 난 500 과 구분되지 않는다.
