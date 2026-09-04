@@ -49,6 +49,9 @@ TITLE_MAX = 200
 SUMMARY_MAX = 2000
 _PROJECT_FORBIDDEN = (" ", "\t", "\n", "\r", "/", "\\", "\x00")
 
+# 짝 없는 서로게이트. `require_text` 가 쓴다 — 왜 거르는지는 그 함수의 docstring 이다.
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
 # D23. Skill 의 "2회 이상" 이 임계값이고, 상한은 검색 최대치와 같은 값이다.
 REPEAT_MIN_COUNT = 2
 REPEAT_LIMIT = 12
@@ -118,8 +121,41 @@ def normalize_project(raw: object) -> str:
     for bad in _PROJECT_FORBIDDEN:
         if bad in project:
             raise ValidationFailed("project must not contain whitespace, slash or NUL")
+    # NUL 은 위에서 D25 의 문구로 이미 걸렸다. 여기는 서로게이트를 받으러 온다 —
+    # `_PROJECT_FORBIDDEN` 만 있던 동안 `project` 는 그 길로 500 을 냈다.
+    require_text(project, "project")
     # 대소문자를 접지 않는다. 슬러그 알파벳을 여기서 발명하지 않는다 (D25).
     return project
+
+
+def require_text(value: str, field: str) -> str:
+    """`text` 컬럼에 담을 수 없는 문자열을 `VALIDATION` 으로 거절한다. **부류를 막는 한 자리다.**
+
+    거르는 것은 둘이고 이유가 같다 — **그런 값을 담은 행은 존재할 수 없다.**
+
+    - **NUL.** Postgres 의 `text` 가 담지 못한다.
+    - **짝 없는 서로게이트.** UTF-8 로 인코딩되지 않는다 (`json` 은 `\\ud83d\\ude00` 같은
+      **짝**은 이미 한 글자로 합쳐 주므로 이모지·한글은 여기 걸리지 않는다. 남아 있는
+      서로게이트는 정의상 짝이 없는 것이다).
+
+    그대로 SQL 에 넘기면 드라이버 예외(psycopg · `UnicodeEncodeError`)가 D21 의 포괄 예외에
+    걸려 `INTERNAL 500` 이 되고, **클라이언트 입력 문제가 서버 결함으로 보고된다** —
+    D25 가 `resolved_at` 에서 이미 이름 붙인 부류다
+    (`CHECK 로 걸면 … 클라이언트 입력 문제인데 서버 결함으로 보고된다`).
+    정규화가 아니라 **물어볼 수 없는 질문을 거절하는 것이다.**
+
+    **왜 함수인가.** D25 가 `project` 에서, D36 이 `path` 에서 각각 NUL 을 막았지만
+    둘 다 *자리*를 막았다. 2026-09-04 실측에서 나머지가 그대로 500 을 냈다 —
+    `event_stats.module` · `search_docs` 의 `query`·`module` · `search_events` 의
+    `query`·`module`·`kind` · `save_event` 의 `title`·`summary`·`module`·`root_cause` ·
+    `ingest` 의 `workspace`, 그리고 서로게이트로는 **`project` 까지** 뚫렸다.
+    **자리마다 고치면 다음 필드에서 또 난다.**
+    """
+    if "\x00" in value:
+        raise ValidationFailed(f"{field} must not contain NUL")
+    if _SURROGATE.search(value):
+        raise ValidationFailed(f"{field} must not contain unpaired surrogates")
+    return value
 
 
 def parse_timestamp(raw: object, field: str) -> datetime:
@@ -136,7 +172,16 @@ def parse_timestamp(raw: object, field: str) -> datetime:
         raise ValidationFailed(f"{field} is not ISO-8601: {raw!r}") from None
     if parsed.tzinfo is None:
         raise ValidationFailed(f"{field} needs a UTC offset (Z or ±HH:MM): {raw!r}")
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError:
+        # `0001-01-01T00:00:00+23:59` 은 ISO-8601 로도 datetime 으로도 멀쩡하다.
+        # **UTC 로 옮기는 순간** 연도가 1 아래(또는 9999 위)로 나가 OverflowError 가 난다.
+        # 잡지 않으면 D21 의 포괄 예외가 INTERNAL 500 으로 접는다 — 클라이언트 입력인데도.
+        # 실측 2026-09-04: `occurred_at` · `stats.since` · `search_events` 의 `since`·`until`.
+        raise ValidationFailed(
+            f"{field} is outside the representable range once shifted to UTC: {raw!r}"
+        ) from None
 
 
 def _optional_text(body: dict[str, Any], field: str) -> str | None:
@@ -145,7 +190,9 @@ def _optional_text(body: dict[str, Any], field: str) -> str | None:
         return None
     if not isinstance(value, str):
         raise ValidationFailed(f"{field} must be a string")
-    return value
+    # `module`·`root_cause`·`resolution`·`related_doc_path`·`created_by` 와 `_enum` 의 둘이
+    # 이 한 줄로 함께 막힌다. 자리마다 두지 않는 이유는 `require_text` 에 적었다.
+    return require_text(value, field)
 
 
 def _payload_text(payload: dict[str, Any]) -> str:
@@ -179,6 +226,8 @@ def build_event(body: dict[str, Any]) -> Event:
     summary = body["summary"]
     if not isinstance(title, str) or not isinstance(summary, str):
         raise ValidationFailed("title and summary must be strings")
+    require_text(title, "title")
+    require_text(summary, "summary")
     if len(title) > TITLE_MAX:
         raise ValidationFailed(f"title longer than {TITLE_MAX}")
     if len(summary) > SUMMARY_MAX:
@@ -275,6 +324,12 @@ def event_stats(
 ) -> dict[str, Any]:
     """D23. 필터 + COUNT/AVG 만 쓴다. 벡터를 쓰지 않는다."""
     project = normalize_project(project)
+    # `module` 은 두 얼굴 다 **질의 인자**로 들어와 `_filter_text` 를 지나지 않는다.
+    # 그래서 이 부류의 마지막 구멍이었다 (Grok 이 라이브에서 `module=%00` 으로 찾았다).
+    if module is not None:
+        if not isinstance(module, str):
+            raise ValidationFailed("module must be a string")
+        module = require_text(module, "module")
     where, params = _event_filters(project, module, since)
 
     with connect(dsn) as conn, conn.cursor() as cur:
@@ -712,7 +767,8 @@ def _filter_text(body: dict[str, Any], field: str) -> str | None:
         return None
     if not isinstance(raw, str):
         raise ValidationFailed(f"{field} must be a string")
-    value = raw.strip()
+    # 검색 **필터** 도 `text` 컬럼과 비교되므로 같은 것을 거른다.
+    value = require_text(raw, field).strip()
     return value or None
 
 
@@ -872,7 +928,7 @@ def search_docs(
     raw_query = body.get("query")
     if not isinstance(raw_query, str) or not raw_query.strip():
         raise ValidationFailed("query required")
-    query = raw_query.strip()
+    query = require_text(raw_query, "query").strip()
     top_k = _top_k(body.get("top_k"))
     where, params = _doc_filters(body, project)
 
@@ -993,7 +1049,7 @@ def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> di
     raw_query = body.get("query")
     if raw_query is not None and not isinstance(raw_query, str):
         raise ValidationFailed("query must be a string")
-    query = (raw_query or "").strip() or None
+    query = require_text(raw_query or "", "query").strip() or None
     where, params = _event_search_filters(body, project)
 
     fields = "id, title, summary, kind, result, module, occurred_at"
@@ -1104,14 +1160,10 @@ def _require_path(raw: object) -> str:
     """
     if not isinstance(raw, str):
         raise ValidationFailed("path must be a string")
-    # NUL 만 예외다. **정규화가 아니라 물어볼 수 없는 질문을 거절하는 것이다** —
-    # Postgres 의 text 는 NUL 을 담지 못하므로 그런 행은 존재할 수 없고,
-    # 그대로 넘기면 드라이버 예외가 D21 의 포괄 예외에 걸려 INTERNAL 500 이 된다.
-    # 클라이언트 입력 문제가 서버 결함으로 보고되는 자리다 (D25 가 project 에서 이미 막았다).
+    # 담을 수 없는 문자만 예외다. **정규화가 아니라 물어볼 수 없는 질문을 거절하는 것이다.**
     # 실측: `path=docs/plan.md%00.txt` 가 500 을 냈다 (Grok 이 라이브에서 찾았다).
-    if "\x00" in raw:
-        raise ValidationFailed("path must not contain NUL")
-    return raw
+    # 이유 전문과 이 부류의 나머지 자리는 `require_text` 에 있다 — 여기서 되풀이하지 않는다.
+    return require_text(raw, "path")
 
 
 def _require_offset(raw: object) -> int:
@@ -1306,6 +1358,9 @@ def resolve_workspace(requested: object, configured: str) -> str:
         return configured
     if not isinstance(requested, str):
         raise ValidationFailed("workspace must be a string")
+    # `_real` 은 `Path(...).resolve()` 다. NUL·서로게이트가 들어오면 거기서 ValueError 가 나고
+    # `api.classify` 에 분기가 없어 INTERNAL 500 이 된다 — 비교보다 **먼저** 거른다.
+    require_text(requested, "workspace")
     if _real(requested) != _real(configured):
         raise ValidationFailed(
             f"workspace must be the configured SILLOK_WORKSPACE (D37): {requested!r} is a different tree"

@@ -141,7 +141,11 @@ def main(argv: list[str] | None = None) -> int:
         for item in run["skipped"]:
             print(f"  건너뜀 {item['path']} ({item['reason']})", file=sys.stderr)
         if run["status"] != "ok":
-            print(run["error"] or run["status"], file=sys.stderr)
+            # **`get` 이다.** `service.ingest` 가 돌려주는 dict 에는 `error` 키가 없다 —
+            # 실패 문구는 `kb_ingest_runs.error` 컬럼에만 쓰인다 (`_finish`). 대괄호로 읽으면
+            # ok 가 아닌 **모든** run 이 KeyError 로 죽는다: 여기까지 온 것은 이미
+            # `status` 가 `failed`(taxonomy 밖 문서 하나면 난다) 이거나 `partial` 인 경우다.
+            print(run.get("error") or run["status"], file=sys.stderr)
         # ok 에만 0 이다. partial·failed·락 거절은 1 이고, 셋의 구분은
         # 종료 코드가 아니라 stderr 문구와 run 행이 한다 (D32).
         return 0 if run["status"] == "ok" else 1
