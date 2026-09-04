@@ -15,7 +15,9 @@ MCP 도구 표면 · 질의 원장 기록 · CLI `migrate`/`serve`/`ingest`/`mcp
 `GET /v1/events/{id}` · `GET /v1/files` · `POST /v1/docs/proposals`.
 **MCP 는 `POST /mcp`(와 `/mcp/`) 하나이고 stdio 는 `sillok mcp` 다** (D43·D45).
 그 아래 다른 경로는 정직하게 404다. 스텁을 만들지 않는다.
-**열린 Q 는 없다** — D58–D64 가 마지막 일곱을 닫았다. `GET /v1/docs` 는 만들지 않기로 정했다 (D64).
+**열린 Q 는 Q33 하나다** (2026-09-04, I절) — D58–D64 가 그 앞의 마지막 일곱을 닫았고,
+키를 넣어 봐야 볼 수 있는 자리가 하나 드러났다. **단계를 막지 않는다.**
+`GET /v1/docs` 는 만들지 않기로 정했다 (D64).
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -38,9 +40,9 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 
 ### 아직 답이 없는 것
 
-[docs/open-questions.md](docs/open-questions.md)에 **지금 열린 질문은 하나도 없다** —
-D58–D64가 마지막 일곱을 닫았다. 새 공백을 발견하면 추측으로 채우지 말고
-거기에 다음 번호로 열고, 답을 ADR에 D65 이후로 적는다.
+[docs/open-questions.md](docs/open-questions.md)에 **지금 열린 질문은 Q33 하나다** —
+D58–D64가 그 앞의 마지막 일곱을 닫았고, 2026-09-04에 I절이 열렸다.
+새 공백을 발견하면 추측으로 채우지 말고 거기에 다음 번호로 열고, 답을 ADR에 D65 이후로 적는다.
 
 A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은 **D23–D25**,
 B절은 Q6·Q7·Q10이 **D30–D32**로, Q8·Q9가 **D33–D34**로,
@@ -52,7 +54,10 @@ Q17이 **D42–D46**(8단계 MCP 표면)으로 마감되면서
 **단계를 막는 Q는 하나도 남지 않았다.**
 
 **G절은 그 7단계를 검증하다 열렸다** — Q31은 **D47**, Q30은 **D64**로 닫혔다.
-**C·D절에 남아 있던 Q13·Q14·Q22·Q23·Q24·Q25도 D58–D63으로 닫혔다** — 열린 Q 는 하나도 없다.
+**C·D절에 남아 있던 Q13·Q14·Q22·Q23·Q24·Q25도 D58–D63으로 닫혔다.**
+
+**I절의 Q33은 2026-09-04에 열렸다** — 키가 있으면 D33이 지정한 `hit_count=0` 신호가
+`search_docs` 에서 죽는데 무엇으로 대신할지가 정해져 있지 않다. 답은 D65가 된다.
 
 **H절의 Q32는 9단계를 막았고 D48–D52로 닫혔다** — 다섯 결정이 `kb_query_logs` 를 그 자리로 미뤄 뒀었다.
 로그를 남기는 표면은 검색 둘, `client` 는 `http`·`mcp`, `hit_count` 는 돌려준 행 수다.
