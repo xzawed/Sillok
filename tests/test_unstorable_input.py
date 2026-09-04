@@ -12,6 +12,7 @@ D25 는 `project` 에서, D36 은 `path` 에서 각각 막았지만 **둘 다 �
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -98,6 +99,36 @@ def test_json_pairs_surrogates_before_the_guard_sees_them():
     assert json.loads('"\\ud800"') == LONE
 
 
+def test_payload_walk_reaches_keys_values_lists_and_depth():
+    """**겉의 dict 만 보면 `payload` 하나로 부류가 되살아난다.** 네 자리를 다 걷는지 본다."""
+    for payload in (
+        {"x": "a" + NUL},
+        {"a" + NUL: "x"},
+        {"a": ["ok", "b" + NUL]},
+        {"a": {"b": {"c": NUL}}},
+        {"a": [{"b": ["c" + LONE]}]},
+    ):
+        with pytest.raises(service.ValidationFailed) as exc:
+            service.require_payload_text(payload)
+        assert str(exc.value).startswith("payload must not contain"), payload
+
+
+def test_payload_walk_passes_an_ordinary_payload():
+    """가드가 payload 를 통째로 막으면 D58 이 재는 대상이 사라진다."""
+    service.require_payload_text({"module": "api", "count": 3, "tags": ["정상", "😀"], "nested": {"ok": True}})
+
+
+def test_payload_walk_does_not_recurse():
+    """깊은 중첩에서 `RecursionError` 가 나면 그것도 클라이언트가 만든 500 이다.
+
+    스택으로 걷는다는 것을 못 박는다 — 재귀로 바꾸면 이 검사가 붉은불이 된다.
+    """
+    deep: Any = "leaf"
+    for _ in range(5000):
+        deep = {"a": deep}
+    service.require_payload_text(deep)
+
+
 # --- 시각: UTC 로 옮기면 범위를 벗어나는 값 ------------------------------------
 
 
@@ -141,6 +172,14 @@ UNSTORABLE_CASES = [
     ("stats module NUL", "GET", "/v1/stats/events?project=p&module=%00", None),
     ("ingest workspace NUL", "POST", "/v1/ingest", {"project": "p", "workspace": "/w" + NUL}),
     ("ingest workspace surrogate", "POST", "/v1/ingest", {"project": "p", "workspace": "/w" + LONE}),
+    # payload 는 `jsonb` 로 들어간다 — **안쪽까지** 같은 규칙이다 (Grok 이 라이브에서 찾았다).
+    ("payload value NUL", "POST", "/v1/events", _event(payload={"x": "a" + NUL})),
+    ("payload value surrogate", "POST", "/v1/events", _event(payload={"x": "a" + LONE})),
+    ("payload key NUL", "POST", "/v1/events", _event(payload={"a" + NUL: "x"})),
+    ("payload key surrogate", "POST", "/v1/events", _event(payload={"a" + LONE: "x"})),
+    ("payload inside a list", "POST", "/v1/events", _event(payload={"a": ["ok", "b" + NUL]})),
+    ("payload nested three deep", "POST", "/v1/events", _event(payload={"a": {"b": {"c": NUL}}})),
+    ("save_doc body surrogate", "POST", "/v1/docs/proposals", {"project": "p", "path": "docs/spec.md", "body": "a" + LONE, "base_hash": "sha256:" + "0" * 64}),
     ("save_event occurred_at overflows", "POST", "/v1/events", _event(occurred_at="0001-01-01T00:00:00+23:59")),
     ("stats since overflows", "GET", "/v1/stats/events?project=p&since=0001-01-01T00%3A00%3A00%2B23%3A59", None),
     ("search_events since overflows", "POST", "/v1/search/events", {"project": "p", "query": "a", "since": "0001-01-01T00:00:00+23:59"}),

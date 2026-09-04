@@ -195,6 +195,33 @@ def _optional_text(body: dict[str, Any], field: str) -> str | None:
     return require_text(value, field)
 
 
+def require_payload_text(payload: dict[str, Any]) -> None:
+    """`payload` 는 **안쪽 문자열까지** `require_text` 를 받는다.
+
+    `jsonb` 로 저장되므로 키든 값이든 배열 안이든 담을 수 없는 문자열이 하나라도 있으면
+    그 행은 존재할 수 없다. **겉의 dict 만 검사하면 `payload` 하나로 이 부류가 되살아난다** —
+    실제로 그랬다 (2026-09-04, Grok 이 라이브에서 `{"x": "\\u0000"}` 로 찾았다).
+
+    **재귀가 아니라 스택이다.** `PAYLOAD_MAX` 2000자 안에서도 수백 단 중첩이 되고,
+    재귀로 걸으면 그 깊이에서 `RecursionError` 가 난다 — 그것 역시 클라이언트 입력이 만든
+    500 이라 여기서 막으려던 것과 같은 부류다.
+
+    문구는 필드명을 `payload` 로 고정한다. 안쪽 키 경로를 실어 보내면 error 봉투가
+    요청 내용을 되비추는 자리가 된다.
+    """
+    stack: list[Any] = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            require_text(node, "payload")
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                require_text(key, "payload")
+                stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(node)
+
+
 def _payload_text(payload: dict[str, Any]) -> str:
     """`payload` 의 길이를 재는 **한 가지** 방법 (D58).
 
@@ -252,6 +279,9 @@ def build_event(body: dict[str, Any]) -> Event:
         raise ValidationFailed("payload must be an object")
     if payload is not None and len(_payload_text(payload)) > PAYLOAD_MAX:
         raise ValidationFailed(f"payload longer than {PAYLOAD_MAX}")
+    if payload is not None:
+        # 길이 뒤다. 상한을 넘긴 payload 를 끝까지 걷지 않는다.
+        require_payload_text(payload)
 
     return Event(
         project=project,
@@ -1317,6 +1347,10 @@ def save_doc(dsn: str, body: dict[str, Any], workspace: str) -> dict[str, Any]:
     proposed_raw = body.get("body")
     if not isinstance(proposed_raw, str):
         raise ValidationFailed("body required: the whole document as a string")
+    # 이 자리의 싱크는 SQL 이 아니라 아래의 `.encode("utf-8")` 이다 — 짝 없는 서로게이트가
+    # 거기서 UnicodeEncodeError 를 내고 D21 이 INTERNAL 500 으로 접었다 (실측 2026-09-04).
+    # NUL 은 저장되지 않으므로 여기서는 무해하지만, **부류를 자리마다 쪼개지 않는다.**
+    require_text(proposed_raw, "body")
     base_hash = _require_base_hash(body.get("base_hash"))
 
     # 경로 판정은 get_file 과 같다 (D38). 색인된 경로만 고칠 수 있다.
