@@ -57,6 +57,16 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 `INTERNAL`에 예외 문구·트레이스백·경로를 싣지 않는다. DSN·`SILLOK_BEARER_TOKEN`·`OPENAI_API_KEY`가 새는 길이다.
 `에러 메시지를 그대로 돌려준다`는 규칙은 `VALIDATION`에만 해당한다.
 
+**`INTERNAL`은 서버 결함 전용이다.** 클라이언트가 보낸 값 때문에 나는 실패는 `VALIDATION`이다 —
+D25가 `resolved_at`에서 이미 이름 붙인 부류이고(`클라이언트 입력 문제인데 서버 결함으로 보고된다`),
+자리마다가 아니라 **부류로** 막는다. 규칙의 정본은 [adr/0001](../adr/0001-v1-stack-decisions.md) §D21·§D25:
+
+- **담을 수 없는 문자열**은 어느 필드에서든 `VALIDATION`이다 — NUL(Postgres `text`가 담지 못한다)과
+  **짝 없는 서로게이트**(UTF-8로 인코딩되지 않는다). 문구는 `<field> must not contain NUL` ·
+  `<field> must not contain unpaired surrogates`. 이모지처럼 **짝이 맞는** 값은 걸리지 않는다
+- **UTC로 옮기면 표현 범위를 벗어나는 시각**도 `VALIDATION`이다 (`0001-01-01T00:00:00+23:59` 같은 값).
+  ISO-8601로도 `datetime`으로도 멀쩡하고 옮기는 순간 깨지므로 오프셋 검사와는 다른 자리다
+
 FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검증 실패와 없는 경로 둘 다 핸들러로 덮는다.
 표에 없는 상태(405 등)는 표 안의 코드로 접고 **그 코드의 상태**로 나간다 — 405는 `VALIDATION`/422가 된다.
 `/openapi.json`과 슬래시 리다이렉트도 꺼야 한다 — 전자는 봉투 밖 200을, 후자는 핸들러보다 먼저 **빈 본문 307**을 낸다.
