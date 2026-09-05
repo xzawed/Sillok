@@ -239,7 +239,7 @@ def test_stats_filters_by_module_and_since(clean_project):
 
 @needs_db
 def test_status_counts_and_nulls(clean_project):
-    """5단계 전이라 빈 값이 정상이지 스텁이 아니다.
+    """성공한 run 이 없으면 빈 값이 정상이지 스텁이 아니다.
 
     `zero_hit_queries` 는 9단계가 붙어 이제 자란다 — 이 검사는 아무 질의도 하지 않은
     project 를 보므로 그래도 0 이다.
