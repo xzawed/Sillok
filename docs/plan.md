@@ -137,7 +137,7 @@ Service 기본 `http://127.0.0.1:8080`.
 
 테이블: `kb_documents`, `kb_chunks`, `kb_events`, `kb_ingest_runs`, `kb_query_logs`.
 DDL은 [data-model.md](data-model.md)를 그대로 쓴다. 단 **v1 은 HNSW 를 만들지 않는다 (D33)** —
-행이 적어 이득이 없고,  쪽은 채울 값이 아예 없다 (D34).
+행이 적어 이득이 없고, `kb_events` 쪽은 채울 값이 아예 없다 (D34).
 
 - 문서 원본은 Git. DB는 해시·청크 인덱스
 - 이벤트는 Git에 없는 원장. **백업 대상** — 절차는 [operations.md](operations.md)가 소유한다 (D54)

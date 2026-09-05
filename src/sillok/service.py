@@ -453,7 +453,7 @@ def kb_status(dsn: str, project: str) -> dict[str, Any]:
               (SELECT count(*) FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
                  WHERE d.project = %(p)s) AS chunks,
               (SELECT count(*) FROM kb_events WHERE project = %(p)s) AS events,
-              -- 5단계 전까지 null. 빈 값이 정상이지 스텁이 아니다.
+              -- 성공한 run 이 한 번도 없으면 null. 빈 값이 정상이지 스텁이 아니다.
               -- 실패한 run 은 세지 않는다 (D32) — 세면 실패가 마지막 색인으로 보고된다.
               (SELECT max(finished_at) FROM kb_ingest_runs
                  WHERE project = %(p)s AND status = ANY(%(counted)s)) AS last_ingest_at,

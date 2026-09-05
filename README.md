@@ -113,6 +113,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
   "by_kind":   { "failure": 4 },
   "by_result": { "failure": 4 },
   "by_module": { "auth": 2, "billing": 2 },
+  "by_module_omitted": 0,
   "repeat_causes": [
     { "module": "auth",    "root_cause": "pool exhausted", "count": 2 },
     { "module": "billing", "root_cause": "pool exhausted", "count": 2 }
