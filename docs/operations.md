@@ -44,7 +44,7 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 두 번 다 이벤트 셋이 그대로 돌아왔고 시퀀스도 따라왔다.
 
 ```bash
-PROJECT=sillok                                # 색인을 다시 만들 project (D5)
+PROJECT=sillok                                # ingest 가 다시 만들 project. 기본값이 없다 (D19)
 
 docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
 docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
