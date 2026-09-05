@@ -868,8 +868,16 @@ if (existsSync(join(ROOT, adrPath))) {
       // 그 뒤의 결정이 `임의로 뒤집지 않는다` 밖에 남는다. 이 모양도 이미 두 번 낡았다 —
       // RETIRED 에 D35–D41 세대가, 2026-09-05 에 D47–D53 세대가 있었다.
       // **문장 안의 가장 큰 D 가 마지막이어야 한다** — 앞의 범위들은 이력이라 그대로 둔다.
-      for (const m of prose.matchAll(/[^\n]*확정\. 임의로 뒤집지 않는다/g)) {
-        const mentioned = [...m[0].matchAll(/D(\d+)/g)].map((d) => Number(d[1]))
+      //
+      // **줄이 아니라 문단을 본다.** 한 줄만 보면 열거가 접히는 자리에 따라 마지막 D 가
+      // 앞줄로 넘어가고, 그러면 걸린 줄에 D 가 하나도 없어 **검사가 조용히 통과한다**
+      // (Grok 감사가 지적한 자리다 — 거짓 양성이 아니라 침묵이라 더 나쁘다).
+      const CLOSER = '확정. 임의로 뒤집지 않는다'
+      for (let at = prose.indexOf(CLOSER); at >= 0; at = prose.indexOf(CLOSER, at + 1)) {
+        // 그 문단의 시작까지 거슬러 올라간다 — 빈 줄이나 목록 항목의 머리다.
+        const head = Math.max(prose.lastIndexOf('\n\n', at), prose.lastIndexOf('\n- ', at))
+        const sentence = prose.slice(head < 0 ? 0 : head, at + CLOSER.length)
+        const mentioned = [...sentence.matchAll(/D(\d+)/g)].map((d) => Number(d[1]))
         if (mentioned.length && Math.max(...mentioned) !== next - 1) {
           fail(
             `${p} : "임의로 뒤집지 않는다" 열거가 D${Math.max(...mentioned)} 에서 끊긴다 — ` +
