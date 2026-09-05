@@ -30,7 +30,7 @@ module: null
 | [open-questions.md](open-questions.md) | 아직 답이 없는 것 | `other` | 미해결 질문 전체 |
 | [../README.md](../README.md) | 방문자용 소개 (영문 정본) | `readme` *(경로에서 유도, D29)* | 프로젝트 소개, 빠른 시작, 코드 배치 |
 | [../README.ko.md](../README.ko.md) | 같은 내용의 한국어 사본 | `readme` *(경로에서 유도, D29)* | 없음 — 어긋나면 영문이 이긴다 |
-| [../AGENTS.md](../AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위, 출하 루프 · PR 증거 · 테스트 방식 |
+| [../AGENTS.md](../AGENTS.md) | 에이전트 협업 규약 | *(색인 안 함)* | 역할 분담, 금지 행위, 출하 루프(**리뷰 아티팩트 포함**) · PR 증거 · 테스트 방식 · **머지된 이력의 정정** |
 | [../CLAUDE.md](../CLAUDE.md) | Claude Code 전용 컨텍스트 | *(색인 안 함)* | 없음 — 전부 미러 |
 | [../.env.example](../.env.example) | 환경변수 계약 사본 | *(색인 안 함)* | 없음 — 정본은 ADR §D16 |
 
