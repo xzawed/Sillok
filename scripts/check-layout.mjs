@@ -502,10 +502,8 @@ const RETIRED = [
   // Q33 이 열리면서 낡은 문장들 (2026-09-04). `열린 Q 가 없다` 는 이제 거짓이다.
   // ADR 의 `2026-09-03 기준 열린 항목은 하나도 없다` 는 날짜가 붙어 참이라 등록하지 않는다 —
   // 그래서 여기 넷은 전부 날짜 없는 현재형만 고른다.
-  ['열린 Q 는 없다', 'Q33 이 2026-09-04 에 열렸다'],
-  ['열린 Q 는 하나도 없다', 'Q33 이 2026-09-04 에 열렸다'],
-  ['지금 열린 질문은 하나도 없다', 'Q33 이 2026-09-04 에 열렸다'],
-  ['이 파일에 열린 항목은 하나도 없다', 'Q33 이 2026-09-04 에 열렸다'],
+  // Q33 이 D65 로 닫히면서 이 넷은 **다시 참이 됐다** (2026-09-05). 등록을 뺀다 —
+  // RETIRED 는 `지금 거짓인 문구` 의 목록이고, 참인 문장을 물면 그것이 거짓 양성이다.
   // 2026-09-05: 감사가 찾은 현재형 거짓말들. 전부 고친 그 커밋에서 등록한다.
   // ADR 의 `…이 닫지 않는 것` 목록은 문장을 지우지 않고 주석을 붙이므로 등록할 것이 없다 —
   // 등록하면 일부러 남긴 그 문장을 자기가 문다. 아래는 전부 **고쳐 쓴** 문장이다.
@@ -846,6 +844,29 @@ if (existsSync(join(ROOT, skillPath))) {
   }
 }
 
+
+// 21. `Dnn 이후로` 가 ADR 의 마지막 D 번호를 따라가는가.
+//     **같은 자리가 다섯 번 낡았다.** RETIRED 에 D33·D42·D47·D53·D54 세대가 사후 등록돼 있다 —
+//     사후 등록은 되살아나는 것만 막고 **다음에 또 낡는 것**은 막지 못한다. 앞을 보게 만든다.
+//     사본은 셋이고(ADR 자신·open-questions·CLAUDE.md) 정본은 ADR 의 마지막 `## Dnn` 이다.
+if (existsSync(join(ROOT, adrPath))) {
+  const adrText = readFileSync(join(ROOT, adrPath), 'utf8')
+  const nums = [...adrText.matchAll(/^## D(\d+)/gm)].map((m) => Number(m[1]))
+  // 묶음 제목(`## D58–D64`)은 **끝 번호**가 마지막이다.
+  for (const m of adrText.matchAll(/^## D\d+[\u2013\u2014-]D(\d+)/gm)) nums.push(Number(m[1]))
+  if (nums.length) {
+    const next = Math.max(...nums) + 1
+    for (const p of [adrPath, oqPath, 'CLAUDE.md']) {
+      if (!existsSync(join(ROOT, p))) continue
+      const { prose } = stripCode(readFileSync(join(ROOT, p), 'utf8'))
+      for (const m of prose.matchAll(/D(\d+)\s*이후로/g)) {
+        if (Number(m[1]) !== next) {
+          fail(`${p} : "D${m[1]} 이후로" 라는데 다음 번호는 D${next} 다 (ADR 의 마지막 + 1)`)
+        }
+      }
+    }
+  }
+}
 
 console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)

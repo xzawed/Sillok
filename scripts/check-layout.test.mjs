@@ -803,6 +803,33 @@ const CASES = [
     mutate: append('docs/skills/sillok-storage/SKILL.md', NL + '본문에 한 줄 더한다.' + NL),
   },
   {
+    // **다섯 번 낡은 자리다.** RETIRED 에 D33·D42·D47·D53·D54 세대가 사후 등록돼 있는데,
+    // 사후 등록은 되살아나는 것만 막는다. 검사 21 이 앞을 본다.
+    id: '62 다음 D 번호가 낡으면 운다',
+    expect: 'fail',
+    mentions: ['다음 번호는 D', 'docs/open-questions.md'],
+    mutate: (dir) =>
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('D66 이후로', 'D60 이후로')),
+  },
+  {
+    // 대조군. **번호가 앞서 가도 틀린 것이다** — `다음 번호` 는 하나뿐이라서다.
+    id: '63 다음 D 번호가 앞서 가도 운다',
+    expect: 'fail',
+    mentions: ['다음 번호는 D', 'CLAUDE.md'],
+    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D66 이후로', 'D99 이후로')),
+  },
+  {
+    // 대조군 둘. **ADR 에 결정을 더하면 세 사본이 함께 따라와야 한다.**
+    // 마지막 `## Dnn` 만 바꾸면 셋이 한꺼번에 낡는다 — 그때 울어야 한다.
+    id: '64 ADR 에 D 를 더하고 사본을 안 고치면 운다',
+    expect: 'fail',
+    mentions: ['다음 번호는 D67'],
+    mutate: (dir) =>
+      edit(dir, 'adr/0001-v1-stack-decisions.md', (t) =>
+        t.replace('## 나중에 바꿔도 되는 것 (v1 비범위)', '## D66 — 자리표시자\n\n## 나중에 바꿔도 되는 것 (v1 비범위)')
+      ),
+  },
+  {
     id: '59 SKILL 헤더에 해시가 없으면 운다',
     expect: 'fail',
     mentions: ['헤더에 본문 해시가 없다'],
@@ -876,6 +903,12 @@ const META = [
     disable: (s) => s.replace("if (!hasOptionsTable(adr.slice(head.index, end))) {", "if (false) {"),
     inject: (dir) =>
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
+  },
+  {
+    id: 'M22 검사 21(다음 D 번호)을 끄면 낡은 번호가 통과한다',
+    disable: (s) => s.replace('if (Number(m[1]) !== next) {', 'if (false) {'),
+    inject: (dir) =>
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('D66 이후로', 'D60 이후로')),
   },
   {
     id: 'M21 검사 20(SKILL 해시)을 끄면 어긋난 해시가 통과한다',
