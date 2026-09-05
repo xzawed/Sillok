@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from sillok import service
 
 TESTS = Path(__file__).resolve().parent
@@ -83,3 +85,78 @@ def test_every_shape_finds_something():
     for shape in PROJECT_SHAPES:
         hits = sum(len(shape.findall(b)) for b in bodies)
         assert hits > 0, f"이 모양이 하나도 걸리지 않는다 — 그물이 낡았다: {shape.pattern}"
+
+
+# --- 복원 절차의 가드가 실제로 무는가 (D54) ---------------------------------
+
+REPO = TESTS.parent
+OPERATIONS = REPO / "docs" / "operations.md"
+
+# `test` 이미지에는 `docs/` 가 없다 — compose 가 `./src` 와 `./tests` 만 마운트하고
+# Dockerfile 도 문서를 굽지 않는다 (D22 가 그렇게 정했다). 그래서 이 파일을 읽는 검사는
+# 컨테이너에서 skip 되고 **호스트 `uv run pytest -q` 에서 돈다.** 증거 6종이 둘 다 돌리므로
+# 이 부류가 어디에서도 안 도는 일은 없다. 아래 대조군은 파일을 읽지 않아 양쪽에서 다 돈다.
+needs_repo_docs = pytest.mark.skipif(
+    not OPERATIONS.exists(),
+    reason=f"{OPERATIONS} 가 없다 — test 이미지에는 docs/ 가 없다 (D22). 호스트에서 돈다.",
+)
+
+
+def _bash_blocks(markdown: str) -> list[str]:
+    """```bash 펜스 안쪽만 돌려준다. 산문의 예시 문장을 명령으로 오해하지 않으려고."""
+    return re.findall(r"```bash\r?\n(.*?)```", markdown, re.S)
+
+
+def _truncate_is_chained(block: str) -> bool:
+    """블록의 `TRUNCATE` 줄이 **전부** `&&` 로 시작하는가.
+
+    **판정은 여기 하나뿐이다.** 아래 검사와 대조군이 같은 함수를 부른다 — 대조군이 규칙을
+    베껴 쓰면 규칙이 두 벌이 되고, 진짜 판정이 느슨해져도 대조군은 계속 초록이다.
+    """
+    targets = [
+        line.strip()
+        for line in block.splitlines()
+        if "TRUNCATE" in line and not line.strip().startswith("#")
+    ]
+    return bool(targets) and all(line.startswith("&&") for line in targets)
+
+
+@needs_repo_docs
+def test_restore_runbook_chains_its_guard_to_the_truncate():
+    """`TRUNCATE` 는 **빈 덤프 가드에 이어져 있어야** 한다 (D54).
+
+    `test -s` 를 따로 한 줄에 두면 그 종료 코드를 아무도 소비하지 않는다. 그러면 가드가
+    있는 것처럼 보이는데 아무 일도 하지 않고, 0바이트 덤프에 `TRUNCATE` 가 그대로 돈다 —
+    **`kb_events` 는 Git 에 원본이 없는 유일한 데이터다** (D11).
+
+    2026-09-05 실측: 옛 블록을 0바이트 덤프에 대고 그대로 돌리니 `test -s` 가 `1` 을 냈는데도
+    이벤트 셋이 0 이 됐고 모든 종료 코드가 `0` 이었다. 산문으로만 두면 다음 사람이 되돌린다.
+    """
+    text = OPERATIONS.read_text(encoding="utf-8")
+    blocks = [b for b in _bash_blocks(text) if "TRUNCATE" in b]
+    assert blocks, "operations.md 의 bash 블록에서 TRUNCATE 를 찾지 못했다 — 이 검사가 낡았다"
+
+    for block in blocks:
+        assert _truncate_is_chained(block), (
+            "복원 블록의 TRUNCATE 가 가드에 이어져 있지 않다 — `&&` 로 시작해야 한다"
+        )
+        # 잇는 대상이 실제로 빈 덤프 가드여야 한다. `&&` 만 보면 아무거나 이어도 통과한다.
+        assert "test -s" in block, "TRUNCATE 가 있는 블록에 `test -s` 가드가 없다"
+
+
+def test_the_guard_check_would_catch_the_old_block():
+    """대조군. **옛 블록을 넣으면 위 검사가 물어야 한다.**
+
+    무는지 확인하지 않으면 위 검사가 통과하는 이유를 알 수 없다 — 이 저장소의 재발 부류다.
+    """
+    old_block = (
+        "test -s kb_events.sql\n"
+        'docker compose exec -T db psql -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;"\n'
+    )
+    # **위 검사와 같은 함수를 부른다.** 규칙을 여기 베껴 쓰면 대조군이 아니라 사본이 된다
+    # (Grok 리뷰가 그렇게 지적했다 — 처음에는 판정을 손으로 다시 적었다).
+    assert not _truncate_is_chained(old_block), "옛 블록이 통과한다 — 판정이 느슨해졌다"
+    assert _truncate_is_chained(
+        "test -s kb_events.sql \\\n"
+        '  && docker compose exec -T db psql -c "TRUNCATE kb_events;"\n'
+    ), "고친 모양이 걸린다 — 판정이 너무 조이다"

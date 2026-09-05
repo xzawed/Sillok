@@ -40,26 +40,48 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 
 ## 복원
 
-**2026-09-03 에 이 순서로 실제로 돌렸다.** 이벤트 셋이 그대로 돌아왔고 시퀀스도 따라왔다.
+**2026-09-03 에 이 순서로 실제로 돌렸고, 2026-09-05 에 가드를 고쳐 다시 돌렸다.**
+두 번 다 이벤트 셋이 그대로 돌아왔고 시퀀스도 따라왔다.
 
 ```bash
-test -s kb_events.sql                         # 빈 덤프로 TRUNCATE 만 하고 끝나는 길을 막는다
+PROJECT=sillok                                # ingest 가 다시 만들 project. 기본값이 없다 (D19)
+
 docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
 docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
-docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;"
-docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 < kb_events.sql
+
+# 아래 넷은 **한 덩어리다.** `test` 를 따로 한 줄에 두면 그 종료 코드를 아무도 보지 않고
+# 다음 줄이 그냥 돈다 — 빈 덤프에도 TRUNCATE 가 돌아 원장이 사라진다 (아래 실측).
+test -s kb_events.sql \
+  && docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;" \
+  && docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 < kb_events.sql \
+  && docker compose exec -T db psql -U sillok -d sillok -c "SELECT count(*) FROM kb_events;"
+
 docker compose start api
-docker compose exec -T api sillok ingest --project <name>   # 문서 인덱스를 다시 만든다
+docker compose exec -T api sillok ingest --project "$PROJECT"   # 문서 인덱스를 다시 만든다
 ```
 
-**세 가지가 없으면 조용히 실패한다. 실측으로 확인했다.**
+**이 블록은 그대로 붙여넣을 수 있다.** `<name>` 같은 자리표시자를 두면 `<` 가 리다이렉션으로
+파싱돼 셸이 그 줄에서 죽는다 — 그래서 project 를 변수로 둔다 (Grok 리뷰가 `bash -n` 으로 잡았다).
+
+**마지막 `count(*)` 가 이 절차의 증거다.** 체인이 끊기면 그 수가 아예 안 찍힌다 —
+행 수를 눈으로 보기 전에는 복원됐다고 하지 않는다.
+
+**아래가 없으면 조용히 실패한다. 전부 실측으로 확인했다.**
+수를 적지 않는다 — 하나가 늘 때마다 낡는다 (실제로 `세 가지` 인 채로 넷이 됐었다).
 
 - **`TRUNCATE`** — 행이 남아 있으면 `COPY` 가 기본 키에서 걸린다
 - **`ON_ERROR_STOP=1`** — 없으면 `psql` 이 그 오류를 찍고 **계속 간 뒤 종료 코드 0 으로 끝난다.**
   실측: 기존 행 셋이 있는 채로 그냥 부었더니 행 수는 그대로인데 종료 코드가 0 이었다
 - **`stop api`** — 붓는 사이에 들어온 `save_event` 하나가 시퀀스를 앞질러 간다
-- **`test -s`** — 빈 파일은 SQL 오류가 아니라 **문장이 0개인 실행**이라 `ON_ERROR_STOP` 이 잡지 못한다.
-  `pg_dump` 가 실패해 리다이렉트만 남긴 파일이면 `TRUNCATE` 뒤에 아무것도 부어지지 않는다
+- **`test -s` 와 그것을 잇는 `&&`** — 빈 파일은 SQL 오류가 아니라 **문장이 0개인 실행**이라
+  `ON_ERROR_STOP` 이 잡지 못한다. `pg_dump` 가 실패해 리다이렉트만 남긴 파일이면
+  `TRUNCATE` 뒤에 아무것도 부어지지 않는다.
+  **`test` 를 따로 한 줄에 두면 이 가드는 아무 일도 하지 않는다.** 종료 코드를 소비하는 것이
+  없어서다 — 2026-09-05 실측: 0바이트 덤프에 대고 이 절이 적어 두었던 옛 블록을 그대로 돌리니
+  `test -s` 가 `1` 을 냈는데도 `TRUNCATE` 가 이어서 돌아 **이벤트 셋이 0 이 됐고 종료 코드는 전부 `0`
+  이었다.** 고친 블록은 같은 빈 덤프에서 `TRUNCATE` 를 아예 실행하지 않고 멈춘다(종료 코드 `1`),
+  진짜 덤프에서는 `COPY 3` 과 `setval` 뒤에 행 수를 찍는다. **둘 다 돌려 확인했다** —
+  그 실측이 이 저장소의 원장을 한 번 지웠다가 같은 절차로 되살린 기록이다
 
 **시퀀스를 손으로 맞추지 않는다.** `pg_dump --data-only --table=kb_events` 는 그 테이블이 소유한
 시퀀스의 `setval` 을 **덤프 안에 함께 넣는다** (실측: 복원 뒤 `last_value` 가 따라왔다).
