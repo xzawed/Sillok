@@ -219,7 +219,9 @@ A절(Q1–Q5)은 **D16–D20**, Q11은 **D21**, Q26은 **D22**, Q16·Q18·Q21은
       살아 있는 8080 에 0건 확정 질의를 던지니 `{"results": []}` 였고 `zero_hit_queries` 가 0 에서 1 이 됐다.
       행은 `hit_count=0` · `hit_paths={}` · `filters={}` 였다. 히트 있는 질의에서는
       `hit_paths` 에 `README.md` 가 **두 번** 들어온다 — 문서당 상한이 2이고 중복을 접지 않기 때문이다 (D49).
-      MCP 얼굴로 같은 인자를 보내면 `client` 만 `mcp` 로 다르고 `filters`·`hit_count` 는 같다
+      MCP 얼굴로 같은 인자를 보내면 `client` 만 `mcp` 로 다르고 `filters`·`hit_count` 는 같다.
+      **키가 들어온 뒤에는 조건이 붙는다** (D65) — `search_docs` 는 필터가 집합을 비울 때만
+      0건이다. 이 항목은 뒤집히지 않는다: `search_events` 와 필터로 그대로 성립한다
 
 이 저장소 자신이 색인 경로 규칙을 따르므로, **첫 ingest 스모크는 이 레포를 대상으로 돌린다.**
 

@@ -289,6 +289,9 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 성공한 run 이 한 번도 없는 project 는 `null`이다.
 `zero_hit_queries`는 `kb_query_logs`의 `hit_count = 0` 건수다.
 그 행을 쓰는 것은 검색 둘뿐이다 — **`kb_status` 자신은 쓰지 않는다** (D48).
+**키가 있으면 이 수의 뜻이 좁아진다** (D65): 벡터 팔에 거리 임계값이 없어
+`search_docs`는 필터가 집합을 비울 때만 0건이다. 키가 없을 때만 `찾지 못한 질의`에 가깝다.
+`search_events`는 키워드 전용이라(D34) 양쪽 다 그대로다.
 현황을 묻는 질의가 자기가 보고할 수를 늘리면 그 지표가 자기 자신을 센다.
 `chunks_without_embedding`은 `embedding IS NULL`인 청크 수다 (D31). 이벤트는 세지 않는다.
 `chunks`와 같으면 키 없이 색인했다는 뜻이고, 0이 아닌데 키가 있으면 임베딩이 실패했다는 뜻이다 —
