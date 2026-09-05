@@ -44,6 +44,8 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 두 번 다 이벤트 셋이 그대로 돌아왔고 시퀀스도 따라왔다.
 
 ```bash
+PROJECT=sillok                                # 색인을 다시 만들 project (D5)
+
 docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
 docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
 
@@ -55,8 +57,11 @@ test -s kb_events.sql \
   && docker compose exec -T db psql -U sillok -d sillok -c "SELECT count(*) FROM kb_events;"
 
 docker compose start api
-docker compose exec -T api sillok ingest --project <name>   # 문서 인덱스를 다시 만든다
+docker compose exec -T api sillok ingest --project "$PROJECT"   # 문서 인덱스를 다시 만든다
 ```
+
+**이 블록은 그대로 붙여넣을 수 있다.** `<name>` 같은 자리표시자를 두면 `<` 가 리다이렉션으로
+파싱돼 셸이 그 줄에서 죽는다 — 그래서 project 를 변수로 둔다 (Grok 리뷰가 `bash -n` 으로 잡았다).
 
 **마지막 `count(*)` 가 이 절차의 증거다.** 체인이 끊기면 그 수가 아예 안 찍힌다 —
 행 수를 눈으로 보기 전에는 복원됐다고 하지 않는다.

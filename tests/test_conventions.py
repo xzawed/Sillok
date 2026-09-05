@@ -107,6 +107,20 @@ def _bash_blocks(markdown: str) -> list[str]:
     return re.findall(r"```bash\r?\n(.*?)```", markdown, re.S)
 
 
+def _truncate_is_chained(block: str) -> bool:
+    """블록의 `TRUNCATE` 줄이 **전부** `&&` 로 시작하는가.
+
+    **판정은 여기 하나뿐이다.** 아래 검사와 대조군이 같은 함수를 부른다 — 대조군이 규칙을
+    베껴 쓰면 규칙이 두 벌이 되고, 진짜 판정이 느슨해져도 대조군은 계속 초록이다.
+    """
+    targets = [
+        line.strip()
+        for line in block.splitlines()
+        if "TRUNCATE" in line and not line.strip().startswith("#")
+    ]
+    return bool(targets) and all(line.startswith("&&") for line in targets)
+
+
 @needs_repo_docs
 def test_restore_runbook_chains_its_guard_to_the_truncate():
     """`TRUNCATE` 는 **빈 덤프 가드에 이어져 있어야** 한다 (D54).
@@ -123,14 +137,9 @@ def test_restore_runbook_chains_its_guard_to_the_truncate():
     assert blocks, "operations.md 의 bash 블록에서 TRUNCATE 를 찾지 못했다 — 이 검사가 낡았다"
 
     for block in blocks:
-        for raw_line in block.splitlines():
-            line = raw_line.strip()
-            if "TRUNCATE" not in line or line.startswith("#"):
-                continue
-            assert line.startswith("&&"), (
-                "복원 블록의 TRUNCATE 가 가드에 이어져 있지 않다 — "
-                f"`&&` 로 시작해야 한다: {line!r}"
-            )
+        assert _truncate_is_chained(block), (
+            "복원 블록의 TRUNCATE 가 가드에 이어져 있지 않다 — `&&` 로 시작해야 한다"
+        )
         # 잇는 대상이 실제로 빈 덤프 가드여야 한다. `&&` 만 보면 아무거나 이어도 통과한다.
         assert "test -s" in block, "TRUNCATE 가 있는 블록에 `test -s` 가드가 없다"
 
@@ -144,12 +153,10 @@ def test_the_guard_check_would_catch_the_old_block():
         "test -s kb_events.sql\n"
         'docker compose exec -T db psql -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;"\n'
     )
-    truncate_lines = [
-        line.strip()
-        for line in old_block.splitlines()
-        if "TRUNCATE" in line and not line.strip().startswith("#")
-    ]
-    assert truncate_lines, "대조군 블록에서 TRUNCATE 줄을 못 찾았다"
-    assert not truncate_lines[0].startswith("&&"), (
-        "옛 블록의 TRUNCATE 가 `&&` 로 시작한다 — 대조군이 대조군이 아니다"
-    )
+    # **위 검사와 같은 함수를 부른다.** 규칙을 여기 베껴 쓰면 대조군이 아니라 사본이 된다
+    # (Grok 리뷰가 그렇게 지적했다 — 처음에는 판정을 손으로 다시 적었다).
+    assert not _truncate_is_chained(old_block), "옛 블록이 통과한다 — 판정이 느슨해졌다"
+    assert _truncate_is_chained(
+        "test -s kb_events.sql \\\n"
+        '  && docker compose exec -T db psql -c "TRUNCATE kb_events;"\n'
+    ), "고친 모양이 걸린다 — 판정이 너무 조이다"
