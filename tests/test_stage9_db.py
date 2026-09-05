@@ -137,12 +137,33 @@ def test_event_filters_are_isoformatted(ws, db):
 
 
 def test_events_leave_null_hit_paths(ws, db):
-    """이벤트 히트는 경로가 아니라 id 다 — 한 `text[]` 에 두 종류를 섞지 않는다 (D49)."""
+    """이벤트 히트는 경로가 아니라 id 다 — 한 `text[]` 에 두 종류를 섞지 않는다 (D49).
+
+    **이벤트를 먼저 넣는다.** `ws` 는 문서만 색인하므로 그냥 부르면 결과가 0 건이고
+    `hit_count == len(results)` 가 `0 == 0` 이 된다 — 어느 쪽이 틀려도 통과하는 자다.
+    히트가 있는 상태로 재야 그 등식이 무언가를 잠근다.
+    """
+    _event(db, "auth")
+    _event(db, "billing")
     out = service.search_events(DSN, {"project": PROJECT})
     row = only(db)
     assert row["tool"] == "search_events"
     assert row["hit_paths"] is None
-    assert row["hit_count"] == len(out["results"])
+    # 0 이 아니어야 위 등식이 재는 것이 생긴다.
+    assert row["hit_count"] == len(out["results"]) == 2
+
+
+def test_zero_hit_events_still_log_a_row(ws, db):
+    """대조군. **0 건도 남는다** — v1 성공 조건이다 (D51).
+
+    위 검사가 히트 있는 자리를 잠그므로, 0 건 자리를 여기서 따로 잠근다.
+    둘이 함께 있어야 `hit_count` 가 `돌려준 행 수` 라는 정의가 양쪽에서 확인된다.
+    """
+    out = service.search_events(DSN, {"project": PROJECT, "query": "없는낱말없는낱말"})
+    row = only(db)
+    assert out["results"] == []
+    assert row["hit_count"] == 0
+    assert row["hit_paths"] is None
 
 
 def test_query_is_null_when_events_are_filtered_without_one(ws, db):

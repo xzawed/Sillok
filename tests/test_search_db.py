@@ -177,13 +177,73 @@ def test_excerpt_shows_why_the_chunk_matched(indexed, tmp_path):
     assert "제목에만있는낱말" in got[0]["excerpt"]
 
 
+def _picked(cur, query, project=PROJECT):
+    """`_decorate` 에 넘길 것을 실제 병합 경로로 만든다. 손으로 dict 를 빚지 않는다."""
+    where, params = service._doc_filters({"project": project}, project)
+    keyword = service._keyword_arm(cur, where, params, query)
+    return keyword, search.order_and_cut(search.rrf(keyword), 12)
+
+
 def test_excerpt_is_clipped_with_a_mark(indexed, tmp_path):
+    """**잘린 행을 실제로 본다** (D33 §8).
+
+    옛 검사는 `len <= EXCERPT_MAX` 만 봤다. 짧은 발췌도 그것을 만족하므로
+    `clip_excerpt` 를 통째로 들어내도 초록이었다 — 무는 것이 없었다.
+
+    잘리는 자리는 **키워드로 걸리지 않은 행**이다. 걸린 행은 `ts_headline` 이 짧은 조각을
+    돌려주기 때문이다 (실측: 179자). 그래서 `matched` 를 비워 `left(c.content, …)` 가지를
+    태운다 — 벡터 팔만 올린 행이 그 상태이고, 키가 있으면 실제로 생긴다.
+    """
     (tmp_path / "docs" / "long.md").write_text(
         FM + "# 긺\n\n" + ("길다 " * 900) + "긴낱말표식\n", encoding="utf-8"
     )
     service.ingest(DSN, PROJECT, str(tmp_path))
-    for row in docs({"query": "길다", "top_k": 12}):
-        assert len(row["excerpt"]) <= search.EXCERPT_MAX
+
+    with service.connect(DSN) as conn, conn.cursor() as cur:
+        _, picked = _picked(cur, "길다")
+        assert picked, "후보가 없으면 이 검사는 아무것도 보지 못한다"
+        # 키워드 히트로 보지 않는다 → ts_headline 대신 본문 앞머리를 가져온다.
+        rows = service._decorate(cur, picked, "길다", set())
+
+    clipped = [r for r in rows if r["excerpt"].endswith(search.ELLIPSIS)]
+    assert clipped, "잘린 행이 하나도 없다 — clip_excerpt 가 도는지 보지 못한다"
+    for row in clipped:
+        # 잘린 행은 정확히 상한이다. `EXCERPT_MAX - 1` 자 + 말줄임표 한 글자.
+        assert len(row["excerpt"]) == search.EXCERPT_MAX
+    assert all(len(r["excerpt"]) <= search.EXCERPT_MAX for r in rows)
+
+
+def test_a_keyword_hit_is_not_clipped_and_carries_no_mark(indexed):
+    """대조군 둘을 겸한다.
+
+    말줄임표가 **잘린 행에만** 붙는지, 그리고 키워드로 걸린 행은 `ts_headline` 이라
+    애초에 짧은지. 이것이 없으면 위 검사는 `clip_excerpt` 가 모든 발췌에 말줄임표를
+    붙여도 통과한다.
+    """
+    rows = docs({"query": "검색"})
+    assert rows
+    assert all(len(r["excerpt"]) < search.EXCERPT_MAX for r in rows)
+    assert not any(r["excerpt"].endswith(search.ELLIPSIS) for r in rows)
+
+
+def test_a_chunk_deleted_under_us_is_dropped_not_a_500(indexed, db):
+    """팔 질의와 `excerpt` 질의는 **같은 스냅숏이 아니다** (READ COMMITTED).
+
+    그 사이 동시 ingest 가 청크를 지우면 옛 코드는 `by_id[...]` 에서 KeyError 를 냈고,
+    D21 의 포괄 예외가 그것을 `INTERNAL 500` 으로 접었다 — 클라이언트 잘못도
+    서버 결함도 아닌 것이 서버 결함으로 보고되는 자리다.
+
+    사라진 행은 빠지기만 하고 **남은 행의 순서와 점수는 그대로**여야 한다 (D33 §5).
+    """
+    with service.connect(DSN) as conn, conn.cursor() as cur:
+        keyword, picked = _picked(cur, "검색")
+        assert len(picked) >= 2, "지울 행과 남을 행이 함께 있어야 한다"
+        # **다른 연결의 커밋이다.** autocommit 인 `db` 픽스처라 다음 문장이 그것을 본다.
+        db.execute("DELETE FROM kb_chunks WHERE id = %s", (picked[0]["id"],))
+        rows = service._decorate(cur, picked, "검색", {r.key for r in keyword})
+
+    assert [r["path"] for r in rows] == [p["path"] for p in picked[1:]]
+    assert [r["score"] for r in rows] == [p["score"] for p in picked[1:]]
 
 
 def test_commit_sha_is_empty_and_status_comes_from_the_document(indexed):

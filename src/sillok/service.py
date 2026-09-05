@@ -1041,17 +1041,30 @@ def _decorate(cur, picked: list[dict], query: str, matched: set) -> list[dict[st
     ).fetchall()
     by_id = {r["id"]: r for r in rows}
 
-    return [
-        {
-            "path": row["path"],
-            "heading_path": by_id[row["id"]]["heading_path"],
-            "excerpt": search.clip_excerpt(by_id[row["id"]]["excerpt"]),
-            "commit_sha": by_id[row["id"]]["commit_sha"],
-            "status": by_id[row["id"]]["status"],
-            "score": row["score"],
-        }
-        for row in picked
-    ]
+    results: list[dict[str, Any]] = []
+    for row in picked:
+        # **팔 질의와 이 질의는 같은 스냅숏이 아니다.** `connect()` 가 격리 수준을 주지 않아
+        # 서버 기본값(READ COMMITTED)이고, 그 사이 커밋된 동시 ingest 가 같은 문서를 다시
+        # 색인하면 청크는 DELETE 후 INSERT 라 id 가 사라진다 (D32: 문서 하나가 트랜잭션 하나).
+        #
+        # 사라진 행은 **조용히 뺀다.** 대괄호로 읽으면 KeyError 가 D21 의 포괄 예외에 걸려
+        # INTERNAL 500 이 되는데, 그것은 클라이언트 잘못도 서버 결함도 아니다.
+        # 병합과 `score` 는 이 함수에 들어오기 전에 이미 정해졌으므로 남은 행의 순서도
+        # 점수도 그대로다 (D33 §5) — 빼는 것이 순위를 바꾸지 않는다.
+        extra = by_id.get(row["id"])
+        if extra is None:
+            continue
+        results.append(
+            {
+                "path": row["path"],
+                "heading_path": extra["heading_path"],
+                "excerpt": search.clip_excerpt(extra["excerpt"]),
+                "commit_sha": extra["commit_sha"],
+                "status": extra["status"],
+                "score": row["score"],
+            }
+        )
+    return results
 
 
 def _event_search_filters(body: dict[str, Any], project: str) -> tuple[str, dict[str, Any]]:
