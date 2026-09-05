@@ -819,6 +819,29 @@ const CASES = [
     mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D66 이후로', 'D99 이후로')),
   },
   {
+    // 같은 몰의 두 번째 굴. 열거가 일찍 끊기면 그 뒤 결정이 `임의로 뒤집지 않는다` 밖에 남는다.
+    // 이 모양도 두 번 낡았다 — RETIRED 의 D35–D41 세대와 2026-09-05 의 D47–D53 세대.
+    // **줄이 아니라 문단을 본다는 것**을 잠근다. 열거가 틀렸는데 닫는 줄에 D 가 하나도
+    // 없으면, 줄만 보는 창은 `mentioned` 가 비어 **조용히 통과한다** — 거짓 양성이 아니라
+    // 침묵이라 더 나쁘다. 창을 줄로 되돌리면 이 케이스가 붉어진다.
+    id: '66 닫는 줄에 D 가 없어도 끊긴 열거를 잡는다',
+    expect: 'fail',
+    mentions: ['임의로 뒤집지 않는다', 'D53 에서 끊긴다'],
+    mutate: (dir) =>
+      edit(dir, 'CLAUDE.md', (t) =>
+        t.replace(
+          '  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05 확정. 임의로 뒤집지 않는다.',
+          '  D35–D46은 2026-09-02, D47–D53은 2026-09-03' + NL + '  확정. 임의로 뒤집지 않는다.'
+        )
+      ),
+  },
+  {
+    id: '65 확정 열거가 마지막 D 에서 끊기면 운다',
+    expect: 'fail',
+    mentions: ['임의로 뒤집지 않는다', '에서 끊긴다'],
+    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D65는 2026-09-05 확정', 'D64는 2026-09-03 확정')),
+  },
+  {
     // 대조군 둘. **ADR 에 결정을 더하면 세 사본이 함께 따라와야 한다.**
     // 마지막 `## Dnn` 만 바꾸면 셋이 한꺼번에 낡는다 — 그때 울어야 한다.
     id: '64 ADR 에 D 를 더하고 사본을 안 고치면 운다',
@@ -903,6 +926,13 @@ const META = [
     disable: (s) => s.replace("if (!hasOptionsTable(adr.slice(head.index, end))) {", "if (false) {"),
     inject: (dir) =>
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
+  },
+  {
+    id: 'M23 검사 21(확정 열거)을 끄면 끊긴 열거가 통과한다',
+    disable: (s) =>
+      s.replace('if (mentioned.length && Math.max(...mentioned) !== next - 1) {', 'if (false) {'),
+    inject: (dir) =>
+      edit(dir, 'CLAUDE.md', (t) => t.replace('D65는 2026-09-05 확정', 'D64는 2026-09-03 확정')),
   },
   {
     id: 'M22 검사 21(다음 D 번호)을 끄면 낡은 번호가 통과한다',
