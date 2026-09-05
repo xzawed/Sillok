@@ -864,6 +864,19 @@ if (existsSync(join(ROOT, adrPath))) {
           fail(`${p} : "D${m[1]} 이후로" 라는데 다음 번호는 D${next} 다 (ADR 의 마지막 + 1)`)
         }
       }
+      // 같은 몰의 두 번째 굴. `D47–D53은 … 확정. 임의로 뒤집지 않는다` 처럼 **열거가 일찍 끊기면**
+      // 그 뒤의 결정이 `임의로 뒤집지 않는다` 밖에 남는다. 이 모양도 이미 두 번 낡았다 —
+      // RETIRED 에 D35–D41 세대가, 2026-09-05 에 D47–D53 세대가 있었다.
+      // **문장 안의 가장 큰 D 가 마지막이어야 한다** — 앞의 범위들은 이력이라 그대로 둔다.
+      for (const m of prose.matchAll(/[^\n]*확정\. 임의로 뒤집지 않는다/g)) {
+        const mentioned = [...m[0].matchAll(/D(\d+)/g)].map((d) => Number(d[1]))
+        if (mentioned.length && Math.max(...mentioned) !== next - 1) {
+          fail(
+            `${p} : "임의로 뒤집지 않는다" 열거가 D${Math.max(...mentioned)} 에서 끊긴다 — ` +
+              `마지막은 D${next - 1} 다`
+          )
+        }
+      }
     }
   }
 }

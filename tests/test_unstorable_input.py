@@ -214,6 +214,9 @@ UNSTORABLE_CASES = [
     ("payload nested three deep", "POST", "/v1/events", _event(payload={"a": {"b": {"c": NUL}}})),
     ("save_doc body surrogate", "POST", "/v1/docs/proposals", {"project": "p", "path": "docs/spec.md", "body": "a" + LONE, "base_hash": "sha256:" + "0" * 64}),
     ("save_event occurred_at overflows", "POST", "/v1/events", _event(occurred_at="0001-01-01T00:00:00+23:59")),
+    # `parse_timestamp` 는 네 자리에서 불린다. 셋만 덮으면 네 번째가 조용히 열린다 —
+    # 가드가 공유 함수에 있어 오늘은 맞지만, 잠그지 않으면 그 공유가 깨져도 모른다 (Grok 감사).
+    ("save_event resolved_at overflows", "POST", "/v1/events", _event(resolved_at="9999-12-31T23:59:59-23:59")),
     ("stats since overflows", "GET", "/v1/stats/events?project=p&since=0001-01-01T00%3A00%3A00%2B23%3A59", None),
     ("search_events since overflows", "POST", "/v1/search/events", {"project": "p", "query": "a", "since": "0001-01-01T00:00:00+23:59"}),
     ("search_events until overflows", "POST", "/v1/search/events", {"project": "p", "query": "a", "until": "9999-12-31T23:59:59-23:59"}),
