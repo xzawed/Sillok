@@ -137,7 +137,7 @@ const CASES = [
     // 케이스 10·11 과 같은 형태로 바꾼다 — Q 를 다시 열어 게이트가 문서를 따라가는지 본다.
     id: '09 Q19 를 다시 열면 7단계 라우트가 막힌다',
     expect: 'fail',
-    mentions: ['7단계', 'Q19', '/v1/files'],
+    mentions: ['7단계', 'Q19', '/v1/files', 'src/sillok/_probe.py'],
     mutate: (dir) => {
       // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
       edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
@@ -217,9 +217,38 @@ const CASES = [
     },
   },
   {
+    // **9단계는 표면 매핑이 아예 없었다.** 라우트도 CLI 도 아니라서다 — Q32 가 열려 있어도
+    // 게이트가 막을 것을 못 찾았고, 그래서 9단계 게이트 문장은 강제되지 않는 채였다.
+    // 표면은 `kb_query_logs` 에 **쓰는** SQL 이다 (D48–D52).
+    id: '12d Q32 를 다시 열면 9단계 질의 원장 기록이 막힌다',
+    expect: 'fail',
+    mentions: ['9단계', 'Q32', 'kb_query_logs 기록', 'src/sillok/_probe.py'],
+    mutate: (dir) => {
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('— **해결 → D48–D52**', ''))
+      write('src/sillok/_probe.py', 'cur.execute("INSERT INTO kb_query_logs (project) VALUES (%s)")' + NL)(dir)
+    },
+  },
+  {
+    // 대조군. **Q 가 닫혀 있으면 같은 표면이 통과해야 한다** — 새 분기가 무조건 울면
+    // 12d 가 붉은 이유가 Q 때문인지 분기 때문인지 구분되지 않는다.
+    //
+    // **읽기(SELECT)와 쓰기(INSERT)를 가르는 것은 여기서 잠그지 못한다.** `service.py` 자신이
+    // `INSERT INTO kb_query_logs` 를 갖고 있어, Q32 를 다시 열면 probe 가 무엇이든 그 파일이
+    // 먼저 운다 — 13–16 이 걸렸던 바로 그 자리다. 정규식이 INSERT 만 보는 것은 코드로 읽는다.
+    id: '12e Q32 가 닫혀 있으면 질의 원장 기록은 통과한다',
+    expect: 'pass',
+    mutate: write(
+      'src/sillok/_probe.py',
+      'cur.execute("INSERT INTO kb_query_logs (project) VALUES (%s)")' + NL
+    ),
+  },
+  {
+    // **`_probe.py` 가 인용되는지까지 본다.** api.py 가 이미 같은 7단계 경로를 갖고 있어
+    // Q19 만 다시 열어도 실패 줄이 나온다 — 그러면 이 문법을 파싱하지 못해도 초록이다.
+    // 13–16 이 잠그는 것은 **문법**이지 Q 가 아니다 (09 도 같은 이유로 파일을 본다).
     id: '13 APIRouter(prefix) + 상대 경로',
     expect: 'fail',
-    mentions: ['7단계', 'Q19', '/v1/files'],
+    mentions: ['7단계', 'Q19', '/v1/files', 'src/sillok/_probe.py'],
     mutate: (dir) => {
       // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
       edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
@@ -233,7 +262,7 @@ const CASES = [
     // /v1/search/* 는 6단계라 이제 안 막힌다. 같은 문법을 아직 막힌 단계로 옮긴다.
     id: '14 include_router(prefix=) + 상대 경로',
     expect: 'fail',
-    mentions: ['7단계', 'Q19', '/v1/docs/proposals'],
+    mentions: ['7단계', 'Q19', '/v1/docs/proposals', 'src/sillok/_probe.py'],
     mutate: (dir) => {
       // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
       edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
@@ -246,7 +275,7 @@ const CASES = [
   {
     id: '15 path= 키워드 인자',
     expect: 'fail',
-    mentions: ['7단계', 'Q19', '/v1/events/'],
+    mentions: ['7단계', 'Q19', '/v1/events/', 'src/sillok/_probe.py'],
     mutate: (dir) => {
       // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
       edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
@@ -256,7 +285,7 @@ const CASES = [
   {
     id: '16 add_api_route',
     expect: 'fail',
-    mentions: ['7단계', 'Q19', '/v1/files'],
+    mentions: ['7단계', 'Q19', '/v1/files', 'src/sillok/_probe.py'],
     mutate: (dir) => {
       // Q19 를 다시 열면 7단계 표면이 전부 막힌다 (같은 단계의 Q 하나만 열려도 막는다).
       edit(dir, 'docs/open-questions.md', (t) => t.replace(' — **해결 → D36**', ''))
@@ -756,6 +785,17 @@ const CASES = [
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D58–D64 선택지', '### D58–D64 고른 것')),
   },
   {
+    // **제목이 남고 표만 사라져도 초록이었다** — 검사 19 가 제목만 봤기 때문이다.
+    // D62 가 요구하는 것은 표다. 60 은 제목을, 이 케이스는 몸통을 잠근다.
+    id: '61 선택지 제목만 남고 표 행이 없으면 운다',
+    expect: 'fail',
+    mentions: ['## D53 절에 선택지'],
+    mutate: (dir) =>
+      edit(dir, 'adr/0001-v1-stack-decisions.md', (t) =>
+        t.replace(/(### D53 선택지\r?\n\r?\n)(?:\|[^\n]*\r?\n)+/, '$1')
+      ),
+  },
+  {
     // 검사 20. 원본이 낡은 해시를 들고 나갈 수 없어야 사본의 대조에 뜻이 있다 (D63).
     id: '58 SKILL 본문이 바뀌었는데 해시가 그대로면 운다',
     expect: 'fail',
@@ -833,7 +873,7 @@ const META = [
   },
   {
     id: 'M20 검사 19(선택지 표)를 끄면 표 없는 결정이 통과한다',
-    disable: (s) => s.replace("if (!OPTIONS_HEAD.test(adr.slice(head.index, end))) {", "if (false) {"),
+    disable: (s) => s.replace("if (!hasOptionsTable(adr.slice(head.index, end))) {", "if (false) {"),
     inject: (dir) =>
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) => t.replace('### D53 선택지', '### D53 고른 것')),
   },

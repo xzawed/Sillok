@@ -269,7 +269,13 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
     ['/v1/files', 7],
   ]
   const CLI_STEP = { ingest: 5, mcp: 8 }
-  const TRACKED_STEPS = [...new Set([...SURFACE.map((s) => s[1]), ...Object.values(CLI_STEP), 8])]
+  // 9단계는 라우트도 CLI 도 아니다 — 표면은 `kb_query_logs` 에 **쓰는** SQL 이다 (D48–D52).
+  // 읽는 쪽(`kb_status` 의 count)은 4단계라 INSERT 만 본다. 이것이 없는 동안
+  // **9단계 게이트는 강제할 표면이 없어 조용히 비어 있었다.**
+  const LEDGER_WRITE = /INSERT\s+INTO\s+kb_query_logs/i
+  const TRACKED_STEPS = [
+    ...new Set([...SURFACE.map((s) => s[1]), ...Object.values(CLI_STEP), 8, 9]),
+  ]
 
   const stepOf = (path) => {
     for (const [prefix, step] of SURFACE) if (path.startsWith(prefix)) return step
@@ -371,6 +377,9 @@ if (existsSync(join(ROOT, planPath)) && existsSync(join(ROOT, oqPath))) {
     }
     if (/^\s*(?:from|import)\s+mcp\b/m.test(s)) {
       found.push({ step: 8, what: 'MCP SDK import', file: p })
+    }
+    if (LEDGER_WRITE.test(s)) {
+      found.push({ step: 9, what: 'kb_query_logs 기록', file: p })
     }
   }
 
@@ -506,6 +515,10 @@ const RETIRED = [
   ['5단계 전까지', '5단계는 구현됐다 — 성공한 run 이 없는 project 가 null 이다'],
   ['D47–D53은 2026-09-03 확정', 'D47–D64 가 같은 날이다'],
   ['MCP stdio 클라이언트', 'stdio 도 서버다 (D6·D45)'],
+  // D64 가 지운 `GET /v1/docs` 스케치와 그 Q30 주장. 코드 쪽은 검사가 이미 막지만
+  // **문서만 되살아나면 게이트가 초록이었다** (2026-09-05 주입으로 확인).
+  ['인덱스 메타 + 원문이 있으면 excerpt', 'D64: GET /v1/docs 를 만들지 않는다'],
+  ['그 표면을 건드리기 전에 답한다', 'D64 가 Q30 을 닫았다 — 답은 만들지 않는다 이다'],
 ]
 const textish = all.filter(
   (p) =>
@@ -793,12 +806,24 @@ if (existsSync(join(ROOT, adrPath))) {
   const allHeads = [...adr.matchAll(/^## [^\n]*$/gm)].map((m) => m.index)
   // 제목은 `선택지`/`버린 안` **자체**여야 한다. `잃어버린 선택지` 같은 서술 제목이
   // 규칙을 만족시키면 **그 규칙을 정의한 절이 공허하게 통과한다** — 실제로 그랬다.
+  // 제목만으로도 부족하다. D62 는 `표를 갖는다` 이지 `제목을 갖는다` 가 아닌데,
+  // **표의 행을 전부 지워도 초록이었다** (2026-09-05 주입으로 확인). 몸통을 센다 —
+  // 구분줄 하나와 데이터 행 하나가 있어야 하므로 헤더까지 최소 셋이다.
   const OPTIONS_HEAD = /^### (?:D\S*\s+)?(선택지|버린 안)\s*$/m
+  const hasOptionsTable = (section) => {
+    const at = section.search(OPTIONS_HEAD)
+    if (at < 0) return false
+    const after = section.slice(at).split(/\r?\n/).slice(1).map((l) => l.trimEnd())
+    const stop = after.findIndex((l) => /^#{2,3} /.test(l))
+    const body = stop < 0 ? after : after.slice(0, stop)
+    const rows = body.filter((l) => l.startsWith('|') && l.endsWith('|'))
+    return rows.length >= 3 && rows.some((l) => /^\|[\s:|-]+\|$/.test(l))
+  }
   for (const head of dHeads) {
     const n = Number(head[1].slice(1))
     if (n < 30) continue
     const end = allHeads.find((at) => at > head.index) ?? adr.length
-    if (!OPTIONS_HEAD.test(adr.slice(head.index, end))) {
+    if (!hasOptionsTable(adr.slice(head.index, end))) {
       fail(`${adrPath} : ## ${head[1]} 절에 선택지(또는 버린 안) 표가 없다 (D62)`)
     }
   }
