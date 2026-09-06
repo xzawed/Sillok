@@ -13,6 +13,10 @@ venv/
 .env.local
 *.pem
 
+# 이벤트 덤프 (docs/operations.md 의 백업 절차가 이 이름으로 만든다).
+# 원장은 Git 에 두지 않는다 — kb_events 는 Git 에 원본이 없는 유일한 데이터다 (D11).
+kb_events*.sql*
+
 # Tooling
 .idea/
 .vscode/

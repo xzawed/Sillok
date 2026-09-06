@@ -90,6 +90,46 @@ docker compose exec -T api sillok ingest --project "$PROJECT"   # 문서 인덱�
 `the input device is not a TTY` 로 죽는다.
 
 
+## 새 머신에서 같은 상태 만들기
+
+**옮겨야 하는 것은 `kb_events` 덤프 하나다.** 나머지는 Git 과 이 절차가 다시 만든다 —
+스키마는 마이그레이션이 (D17), 문서 인덱스는 `sillok ingest` 가 만든다.
+**덤프를 가져가지 않으면 이벤트가 없는 채로 뜬다.** 문서가 이벤트 id 를 인용하는 자리는
+그 머신에서만 끊긴다 — `kb_events` 는 Git 에 원본이 없는 유일한 데이터다 (D11).
+질의 로그와 색인 이력은 옮기지 않는다 (위 표) — `같은 상태`는 **문서 인덱스와 원장**을 말한다.
+
+**셸은 POSIX 다.** 아래 블록과 `복원` 절은 `bash` 이고, Windows 에서는 Git Bash 로 돌린다 —
+PowerShell 에는 `test` 도, 그 뜻의 `<` 리다이렉션도 없다.
+
+```bash
+git clone https://github.com/xzawed/Sillok.git
+cd Sillok
+cp .env.example .env          # OPENAI_API_KEY 를 채운다. 비우면 키워드 검색만 돈다 (D2)
+docker compose up -d --wait   # 마이그레이션이 bind 전에 적용된다 (D17)
+```
+
+덤프를 **`kb_events.sql` 이라는 이름으로** 이 디렉터리에 두고 위 `복원` 절을 그대로 돌린다 —
+그 절이 이름을 박아 쓰므로 다른 이름이면 가드가 `1` 을 내고 거기서 멈춘다(원장은 안전하다).
+그 절이 색인까지 다시 만들고 끝난다.
+`kb_events*.sql*` 은 `.gitignore` 에 있어 커밋되지 않는다 — **장기 보관은 저장소 밖이다.**
+그것을 커밋하면 이 저장소가 첫 줄에서 금지한 것이 다른 이름으로 들어온다.
+
+**판정은 `count(*)` 와 현황이다.** 복원 절의 마지막 `count(*)` 가 원장의 증거이고,
+전체는 현황 하나로 본다.
+
+```bash
+curl -s "http://127.0.0.1:8080/v1/status?project=sillok"
+```
+
+`events` 가 덤프의 **그 project 행 수**와 같고 `documents`·`chunks` 가 차 있으면 같은 상태다.
+**복원 절의 `count(*)` 와 다른 수일 수 있다** — 그쪽은 테이블 전체이고 여기는 project 필터라,
+검사가 남긴 `t_` 행이 덤프에 들어 있으면 갈라진다. 둘이 다르다고 복원이 실패한 것은 아니다.
+키를 넣었으면 `chunks_without_embedding` 이 `0` 이다 (D31).
+
+**증거 스크립트는 이 판정이 아니다.** `node scripts/evidence.mjs` 는 **PR 한 장의 증거**이고
+([AGENTS.md](../AGENTS.md) 가 소유한다) 원장이 비어도 초록일 수 있다.
+그것을 돌리려면 Docker 말고 Node 와 uv 가 더 있어야 한다 (D18). 저장소를 고칠 때 쓴다.
+
 ## 재기동
 
 ```bash

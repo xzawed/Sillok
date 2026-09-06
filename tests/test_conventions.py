@@ -130,7 +130,8 @@ def test_restore_runbook_chains_its_guard_to_the_truncate():
     **`kb_events` 는 Git 에 원본이 없는 유일한 데이터다** (D11).
 
     2026-09-05 실측: 옛 블록을 0바이트 덤프에 대고 그대로 돌리니 `test -s` 가 `1` 을 냈는데도
-    이벤트 셋이 0 이 됐고 모든 종료 코드가 `0` 이었다. 산문으로만 두면 다음 사람이 되돌린다.
+    이벤트 셋이 0 이 됐다. **가드가 `1` 을 냈는데 아무도 그것을 보지 않았다** — 뒤의 둘
+    (`TRUNCATE`·붓기)이 `0` 으로 끝나 전체가 성공처럼 보였다. 산문으로만 두면 다음 사람이 되돌린다.
     """
     text = OPERATIONS.read_text(encoding="utf-8")
     blocks = [b for b in _bash_blocks(text) if "TRUNCATE" in b]
