@@ -162,8 +162,8 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 **스텁은 만들지 않습니다.**
 뜨기만 하는 라우트를 완료 조건 자리에 올려 두면 진척처럼 보입니다.
 
-미해결 설계 질문은 [docs/open-questions.md](docs/open-questions.md)에 있고,
-**그 질문이 막는 단계는 실제로 막힙니다** — 관례가 아니라 검사가 강제합니다.
+설계 질문은 [docs/open-questions.md](docs/open-questions.md)에 적습니다.
+**답이 없는 질문이 막는 단계는 실제로 막힙니다** — 관례가 아니라 검사가 강제합니다.
 
 ## 문서
 
