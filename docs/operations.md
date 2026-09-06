@@ -121,7 +121,9 @@ docker compose up -d --wait   # 마이그레이션이 bind 전에 적용된다 (
 curl -s "http://127.0.0.1:8080/v1/status?project=sillok"
 ```
 
-`events` 가 덤프의 행 수와 같고 `documents`·`chunks` 가 차 있으면 같은 상태다.
+`events` 가 덤프의 **그 project 행 수**와 같고 `documents`·`chunks` 가 차 있으면 같은 상태다.
+**복원 절의 `count(*)` 와 다른 수일 수 있다** — 그쪽은 테이블 전체이고 여기는 project 필터라,
+검사가 남긴 `t_` 행이 덤프에 들어 있으면 갈라진다. 둘이 다르다고 복원이 실패한 것은 아니다.
 키를 넣었으면 `chunks_without_embedding` 이 `0` 이다 (D31).
 
 **증거 스크립트는 이 판정이 아니다.** `node scripts/evidence.mjs` 는 **PR 한 장의 증거**이고
