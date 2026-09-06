@@ -163,8 +163,8 @@ Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP 
 **No stubs.**
 A route that merely responds, parked on a completion criterion, would look like progress.
 
-Open design questions are tracked in [docs/open-questions.md](docs/open-questions.md),
-and they **block the stages that depend on them** — enforced by a check, not by convention.
+Design questions are recorded in [docs/open-questions.md](docs/open-questions.md).
+An unanswered one **blocks the stages that depend on it** — enforced by a check, not by convention.
 
 ## Documentation
 

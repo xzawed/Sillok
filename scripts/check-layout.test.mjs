@@ -307,7 +307,8 @@ const CASES = [
     mentions: ['문장을 하나도 찾지 못했다'],
     mutate: (dir) =>
       edit(dir, 'docs/plan.md', (s) =>
-        s.replace(/남은 공백은 단계별로 걸린다 —[\s\S]*?필요하다\./, '남은 공백이 있다.')
+        // 접두사 `남은` 은 붙였다 뗐다 한다 (열린 Q 가 0 이 되면서 뗐다). 그 낱말에 매달지 않는다.
+        s.replace(/공백은 단계별로 걸린다 —[\s\S]*?필요하다\./, '공백이 있다.')
       ),
   },
   {
@@ -425,6 +426,28 @@ const CASES = [
     expect: 'fail',
     mentions: ['폐기된 문구', 'those routes honestly return 404'],
     mutate: append('docs/spec.md', NL + 'Not yet — those routes honestly return 404' + NL),
+  },
+  {
+    // 2026-09-06 감사가 고친 넷의 **대조군**. 넷 다 문맥에 따라 참이 되므로 RETIRED 에 넣지 않았다.
+    // 그래서 이 넷은 통과해야 한다 — 누가 다시 등록하면 여기가 붉어져 거짓 양성을 드러낸다.
+    // **문자열은 등록될 바늘과 글자까지 같아야 한다.** 앞선 판에서 링크 href 를 `plan.md` 로
+    // 바꿨더니 셋째 바늘의 카나리가 조용히 끊겼다 (Grok 재검토). `../docs/plan.md` 는
+    // docs/ 안에서도 해석되므로 검사 4 는 통과한다.
+    // 이 케이스는 검사 11 이 **살아 있는지**는 잠그지 않는다 — 그쪽은 주입 24·25 와 메타 M3 다.
+    id: '25g 문맥에 따라 참이 되는 넷은 물지 않는다',
+    expect: 'pass',
+    mutate: append(
+      'docs/spec.md',
+      NL +
+        '미해결 설계 질문은 없다.' +
+        NL +
+        'Open design questions are tracked in that file.' +
+        NL +
+        'v1 완료 조건의 기록은 [plan.md](../docs/plan.md) §9 다.' +
+        NL +
+        '이벤트 셋이 0 이 됐고 종료 코드는 전부 0 이 아니었다 — 가드는 1 을 냈다.' +
+        NL
+    ),
   },
   {
     // D34 는 확장을 선언만 하고 쓰지 않기로 정했다. 검사가 없으면 다음 사람이 조용히 쓴다.
