@@ -90,6 +90,31 @@ docker compose exec -T api sillok ingest --project "$PROJECT"   # 문서 인덱�
 `the input device is not a TTY` 로 죽는다.
 
 
+## 새 머신에서 같은 상태 만들기
+
+**옮겨야 하는 것은 `kb_events` 덤프 하나다.** 나머지는 Git 과 이 절차가 다시 만든다 —
+스키마는 마이그레이션이 (D17), 문서 인덱스는 `sillok ingest` 가 만든다.
+**덤프를 가져가지 않으면 이벤트가 없는 채로 뜬다.** 문서가 이벤트 id 를 인용하는 자리는
+그 머신에서만 끊긴다 — `kb_events` 는 Git 에 원본이 없는 유일한 데이터다 (D11).
+
+```bash
+git clone https://github.com/xzawed/Sillok.git
+cd Sillok
+cp .env.example .env          # OPENAI_API_KEY 를 채운다. 비우면 키워드 검색만 돈다 (D2)
+docker compose up -d --wait   # 마이그레이션이 bind 전에 적용된다 (D17)
+```
+
+덤프를 이 디렉터리로 복사하고 위 `복원` 절을 그대로 돌린다.
+`kb_events*.sql` 은 `.gitignore` 에 있어 커밋되지 않는다 — **장기 보관은 저장소 밖이다.**
+그것을 커밋하면 이 저장소가 첫 줄에서 금지한 것이 다른 이름으로 들어온다.
+
+그다음 색인을 다시 만들고 증거를 돌린다. 여기까지 통과하면 같은 상태다.
+
+```bash
+docker compose exec -T api sillok ingest --project sillok
+node scripts/evidence.mjs
+```
+
 ## 재기동
 
 ```bash
