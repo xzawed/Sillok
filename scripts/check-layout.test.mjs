@@ -435,24 +435,20 @@ const CASES = [
     mutate: append('docs/spec.md', NL + '이벤트 셋이 0 이 됐고 종료 코드는 전부 0 이었다' + NL),
   },
   {
-    // 진입 문서가 열린 질문의 재고를 다시 단언하면 운다. 영문·한국어 둘 다 등록했다.
-    id: '25h README 가 열린 질문의 재고를 다시 단언하면 운다',
-    expect: 'fail',
-    mentions: ['폐기된 문구', 'Open design questions are tracked'],
-    mutate: append('docs/spec.md', NL + 'Open design questions are tracked in that file' + NL),
-  },
-  {
-    id: '25i 한국어 쪽 같은 단언',
-    expect: 'fail',
-    mentions: ['폐기된 문구', '미해결 설계 질문은'],
-    mutate: append('docs/spec.md', NL + '미해결 설계 질문은 저 파일에 있습니다' + NL),
-  },
-  {
-    // 측정치가 원장으로 옮겨 갔으므로 ADR 이 plan.md 를 기록 자리로 다시 가리키면 낡은 사본이다.
-    id: '25j ADR 이 plan.md 를 기록 자리로 다시 가리키면 운다',
-    expect: 'fail',
-    mentions: ['폐기된 문구', '기록은 [plan.md]'],
-    mutate: append('docs/spec.md', NL + '기록은 [plan.md](../docs/plan.md) §9 다' + NL),
+    // 등록하지 않기로 한 셋의 **대조군**. 상태에 따라 참이 되는 문장이라 RETIRED 에 넣지 않았고,
+    // 그래서 이 셋은 통과해야 한다. 넣었다면 여기가 붉어져 거짓 양성을 드러냈을 자리다.
+    id: '25h 상태에 따라 참이 되는 셋은 물지 않는다',
+    expect: 'pass',
+    mutate: append(
+      'docs/spec.md',
+      NL +
+        '미해결 설계 질문은 없다.' +
+        NL +
+        'Open design questions are tracked in that file.' +
+        NL +
+        'v1 완료 조건의 기록은 [plan.md](plan.md) §9 다.' +
+        NL
+    ),
   },
   {
     // D34 는 확장을 선언만 하고 쓰지 않기로 정했다. 검사가 없으면 다음 사람이 조용히 쓴다.
