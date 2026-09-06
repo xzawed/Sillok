@@ -428,16 +428,13 @@ const CASES = [
     mutate: append('docs/spec.md', NL + 'Not yet — those routes honestly return 404' + NL),
   },
   {
-    // 2026-09-06 감사가 찾은 자기모순. 같은 문장이 `test -s` 를 1 이라 해 놓고 전부 0 이라 했다.
-    id: '25g 종료 코드를 전부 0 이라 다시 적으면 운다',
-    expect: 'fail',
-    mentions: ['폐기된 문구', '종료 코드는 전부'],
-    mutate: append('docs/spec.md', NL + '이벤트 셋이 0 이 됐고 종료 코드는 전부 0 이었다' + NL),
-  },
-  {
-    // 등록하지 않기로 한 셋의 **대조군**. 상태에 따라 참이 되는 문장이라 RETIRED 에 넣지 않았고,
-    // 그래서 이 셋은 통과해야 한다. 넣었다면 여기가 붉어져 거짓 양성을 드러냈을 자리다.
-    id: '25h 상태에 따라 참이 되는 셋은 물지 않는다',
+    // 2026-09-06 감사가 고친 넷의 **대조군**. 넷 다 문맥에 따라 참이 되므로 RETIRED 에 넣지 않았다.
+    // 그래서 이 넷은 통과해야 한다 — 누가 다시 등록하면 여기가 붉어져 거짓 양성을 드러낸다.
+    // **문자열은 등록될 바늘과 글자까지 같아야 한다.** 앞선 판에서 링크 href 를 `plan.md` 로
+    // 바꿨더니 셋째 바늘의 카나리가 조용히 끊겼다 (Grok 재검토). `../docs/plan.md` 는
+    // docs/ 안에서도 해석되므로 검사 4 는 통과한다.
+    // 이 케이스는 검사 11 이 **살아 있는지**는 잠그지 않는다 — 그쪽은 주입 24·25 와 메타 M3 다.
+    id: '25g 문맥에 따라 참이 되는 넷은 물지 않는다',
     expect: 'pass',
     mutate: append(
       'docs/spec.md',
@@ -446,7 +443,9 @@ const CASES = [
         NL +
         'Open design questions are tracked in that file.' +
         NL +
-        'v1 완료 조건의 기록은 [plan.md](plan.md) §9 다.' +
+        'v1 완료 조건의 기록은 [plan.md](../docs/plan.md) §9 다.' +
+        NL +
+        '이벤트 셋이 0 이 됐고 종료 코드는 전부 0 이 아니었다 — 가드는 1 을 냈다.' +
         NL
     ),
   },
