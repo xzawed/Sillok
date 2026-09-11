@@ -261,6 +261,9 @@ def vector_mechanism_in(sql: str) -> str | None:
     for operator in VECTOR_OPERATORS:
         if operator in lowered:
             return operator
+    # `::vector` 만 보면 같은 캐스트의 다른 표기를 놓친다.
+    if re.search(r"\bas\s+vector\b", lowered):
+        return "cast as vector"
     if re.search(r"\bembedding\b", lowered):
         return "embedding"
     return None
@@ -284,8 +287,11 @@ def test_predicate_passes_the_shape_event_stats_actually_sends():
         ("SELECT id FROM kb_chunks ORDER BY embedding <-> %(q)s", "<->"),
         ("SELECT id FROM kb_chunks ORDER BY embedding <#> %(q)s", "<#>"),
         ("SELECT %(q)s::vector", "::vector"),
+        ("SELECT CAST(%(q)s AS vector)", "cast as vector"),
         ("SELECT embedding FROM kb_events", "embedding"),
         ("select EMBEDDING from kb_events", "embedding"),
+        # 점은 낱말 경계다. 한정 이름도 잡혀야 한다.
+        ("SELECT kb_chunks.embedding FROM kb_chunks", "embedding"),
     ],
 )
 def test_predicate_catches_vector_mechanisms(sql, expected):
@@ -309,9 +315,13 @@ def test_event_stats_never_sends_a_vector_query(clean_project, monkeypatch):
 
     # Connection 에는 executemany 가 없다. 클래스마다 있는 것만 감싼다 —
     # 없는 이름을 감싸려 들면 AttributeError 로 죽고, 있는데 빠뜨리면 조용히 샌다.
+    # ClientCursor·ServerCursor 는 오늘 event_stats 가 타지 않는다. 그래도 감싼다 —
+    # `conn.cursor(name=...)` 하나면 ServerCursor 로 새고, 그때 이 검사는 **초록으로** 샌다.
     for target, names in (
         (psycopg.Connection, ("execute",)),
         (psycopg.Cursor, ("execute", "executemany")),
+        (psycopg.ClientCursor, ("execute", "executemany")),
+        (psycopg.ServerCursor, ("execute", "executemany")),
     ):
         for name in names:
             original = getattr(target, name)

@@ -149,12 +149,19 @@ def indexes_in_stripped_sql(sql: str) -> dict[str, str]:
 
     벗기는 단계를 분리해 두는 것은 그 단계가 실제로 일하는지 검사가 보기 위해서다.
     """
+    if "$$" in sql:
+        # 달러 인용 안의 CREATE INDEX 는 선언이 아니다. 이 파서는 SQL 을 모르므로
+        # 오탐한다. 조용히 틀리느니 여기서 멈춘다.
+        raise AssertionError("달러 인용은 v1 마이그레이션에 없다")
     found: dict[str, str] = {}
     for m in _CREATE_INDEX.finditer(sql):
         name = m.group("name")
         rest = m.group("rest")
         if name.startswith('"') or rest.lstrip().startswith('"'):
             raise AssertionError(f"따옴표 식별자는 v1 에 없다: {name}")
+        # `public.kb_x` 로 선언해도 카탈로그의 relname 은 `kb_x` 다.
+        # 떼지 않으면 다음 마이그레이션이 스키마를 붙이는 순간 **거짓 붉은불**이 난다.
+        name = name.rpartition(".")[2]
         if re.search(r"\bWHERE\b", rest, re.IGNORECASE):
             raise AssertionError(f"부분 인덱스는 v1 에 없다: {name}")
         using = re.search(r"\bUSING\s+(?P<am>\w+)", rest, re.IGNORECASE)
@@ -246,6 +253,23 @@ def test_partial_index_is_rejected_not_skipped():
 def test_quoted_identifier_is_rejected_not_skipped():
     with pytest.raises(AssertionError, match="따옴표 식별자"):
         declared_indexes('CREATE INDEX "X" ON t (c);')
+
+
+def test_schema_qualified_name_matches_the_catalog():
+    """`public.kb_x` 로 선언해도 pg_class.relname 은 `kb_x` 다.
+
+    떼지 않으면 닫힌 집합 대조가 **무관한 이유로** 붉어진다 — 인덱스는 살아 있는데
+    이름이 달라서 양쪽이 안 맞는 것이고, 그 붉은불은 진짜 결함을 가린다.
+    """
+    assert declared_indexes("CREATE INDEX public.kb_x ON public.kb_t (c);") == {
+        "kb_x": "btree"
+    }
+
+
+def test_dollar_quoting_is_rejected_not_guessed():
+    """이 파서는 SQL 을 모른다. 달러 인용 안의 CREATE INDEX 는 선언이 아니다."""
+    with pytest.raises(AssertionError, match="달러 인용"):
+        declared_indexes("DO $$ BEGIN CREATE INDEX ghost ON t (c); END $$;")
 
 
 def test_duplicate_index_name_is_rejected():
