@@ -6,6 +6,7 @@ DB 가 필요한 검사는 아래 `needs_db` 묶음에 있다.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 import psycopg
@@ -235,6 +236,110 @@ def test_stats_filters_by_module_and_since(clean_project):
     assert service.event_stats(DSN, clean_project, module="auth")["total"] == 1
     since = datetime(2026, 6, 1, tzinfo=timezone.utc)
     assert service.event_stats(DSN, clean_project, since=since)["total"] == 1
+
+
+# --- event_stats 는 벡터를 쓰지 않는다 (D23) -------------------------------
+#
+# CLAUDE.md `절대 금지` 와 AGENTS.md `통계는 SQL 집계` 가 같은 것을 말하고
+# event_stats 의 docstring 도 그렇게 적는데, 그것을 무는 검사가 없었다.
+#
+# `inspect.getsource(event_stats)` 로 보지 않는다. 이 저장소의 선례는
+# test_hnsw_is_absent_in_v1 의 `이름이 아니라 접근 방법(pg_am)으로 본다` 이고,
+# 벡터 금지의 기전은 소스 텍스트가 아니라 **Postgres 에 가는 질의문**이다.
+# 소스로 보면 셋을 놓친다: _event_filters 가 만드는 조각, 본문이
+# `return _stats(...)` 로 바뀌는 순간, 그리고 연산자를 변수로 이어 붙이는 경우.
+
+VECTOR_OPERATORS = ("<=>", "<->", "<#>", "::vector")
+
+
+def vector_mechanism_in(sql: str) -> str | None:
+    """질의문이 쓰는 벡터 기전을 돌려준다. 없으면 None.
+
+    한글 `벡터` 는 찾지 않는다 — event_stats 의 docstring 이 그 말을 쓴다.
+    """
+    lowered = str(sql).lower()
+    for operator in VECTOR_OPERATORS:
+        if operator in lowered:
+            return operator
+    # `::vector` 만 보면 같은 캐스트의 다른 표기를 놓친다.
+    if re.search(r"\bas\s+vector\b", lowered):
+        return "cast as vector"
+    if re.search(r"\bembedding\b", lowered):
+        return "embedding"
+    return None
+
+
+def test_predicate_passes_the_shape_event_stats_actually_sends():
+    assert (
+        vector_mechanism_in(
+            "SELECT count(*) AS total, ROUND(EXTRACT(EPOCH FROM"
+            " AVG(resolved_at - occurred_at))) FROM kb_events WHERE project = %(project)s"
+        )
+        is None
+    )
+    assert vector_mechanism_in("SELECT kind, count(*) FROM kb_events GROUP BY kind") is None
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT id FROM kb_events ORDER BY embedding <=> %(q)s", "<=>"),
+        ("SELECT id FROM kb_chunks ORDER BY embedding <-> %(q)s", "<->"),
+        ("SELECT id FROM kb_chunks ORDER BY embedding <#> %(q)s", "<#>"),
+        ("SELECT %(q)s::vector", "::vector"),
+        ("SELECT CAST(%(q)s AS vector)", "cast as vector"),
+        ("SELECT embedding FROM kb_events", "embedding"),
+        ("select EMBEDDING from kb_events", "embedding"),
+        # 점은 낱말 경계다. 한정 이름도 잡혀야 한다.
+        ("SELECT kb_chunks.embedding FROM kb_chunks", "embedding"),
+    ],
+)
+def test_predicate_catches_vector_mechanisms(sql, expected):
+    """주입: 이 술어가 무는지 여기서 본다. 없으면 아래 캡처 검사가 공허해진다."""
+    assert vector_mechanism_in(sql) == expected
+
+
+def test_predicate_does_not_fire_on_a_similar_word():
+    """`embedding` 은 낱말 경계로 본다. 아니면 컬럼 이름 하나가 못 지나간다."""
+    assert vector_mechanism_in("SELECT embeddings_disabled FROM t") is None
+
+
+@needs_db
+def test_event_stats_never_sends_a_vector_query(clean_project, monkeypatch):
+    """event_stats 가 실제로 execute 에 넘긴 질의문을 전부 모아 본다.
+
+    감싸는 곳은 psycopg 의 Connection·Cursor 두 클래스다. 로컬 커서만 감싸면
+    도우미가 connect() 를 새로 여는 순간 새어 나간다.
+    """
+    seen: list[str] = []
+
+    # Connection 에는 executemany 가 없다. 클래스마다 있는 것만 감싼다 —
+    # 없는 이름을 감싸려 들면 AttributeError 로 죽고, 있는데 빠뜨리면 조용히 샌다.
+    # ClientCursor·ServerCursor 는 오늘 event_stats 가 타지 않는다. 그래도 감싼다 —
+    # `conn.cursor(name=...)` 하나면 ServerCursor 로 새고, 그때 이 검사는 **초록으로** 샌다.
+    for target, names in (
+        (psycopg.Connection, ("execute",)),
+        (psycopg.Cursor, ("execute", "executemany")),
+        (psycopg.ClientCursor, ("execute", "executemany")),
+        (psycopg.ServerCursor, ("execute", "executemany")),
+    ):
+        for name in names:
+            original = getattr(target, name)
+
+            def spy(self, query, *args, _original=original, **kwargs):
+                seen.append(str(query))
+                return _original(self, query, *args, **kwargs)
+
+            monkeypatch.setattr(target, name, spy)
+
+    service.save_event(DSN, body(module="auth"))
+    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    seen.clear()  # save_event 의 질의는 이 검사의 대상이 아니다
+    service.event_stats(DSN, clean_project, module="auth", since=since)
+
+    assert seen, "질의를 하나도 잡지 못했다 — 캡처가 비면 이 검사는 공허하다"
+    offenders = {sql: found for sql in seen if (found := vector_mechanism_in(sql))}
+    assert offenders == {}, f"event_stats 가 벡터 기전을 썼다: {offenders}"
 
 
 @needs_db

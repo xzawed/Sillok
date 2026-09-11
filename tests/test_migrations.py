@@ -6,6 +6,7 @@ DB 가 없으면 skip 하되 이유를 남긴다 — 조용한 skip 은 "통과�
 
 from __future__ import annotations
 
+import re
 
 import psycopg
 import pytest
@@ -13,6 +14,12 @@ import pytest
 from sillok import migrations
 
 from dbcheck import DSN, needs_db
+
+
+def _migration_text(name: str) -> str:
+    """러너가 실제로 먹는 파일을 읽는다. 사본을 만들지 않는다."""
+    return (migrations.DEFAULT_MIGRATIONS_DIR / name).read_text(encoding="utf-8")
+
 
 TABLES = [
     "kb_documents",
@@ -100,6 +107,186 @@ def test_redact_keeps_what_is_useful():
 def test_redact_leaves_passwordless_dsn_alone():
     dsn = "postgresql://db:5432/sillok"
     assert migrations.redact_dsn(dsn) == dsn
+
+
+# --- 선언된 인덱스 파서 ----------------------------------------------------
+#
+# 왜 파서인가: 손으로 쓴 기대 목록은 **범위 밖이 조용히 썩는다.** 004 가
+# kb_events_tsv 를 더했을 때 이 파일의 목록은 그대로였고, 그래서 그 인덱스가
+# 사라져도 아무도 몰랐다. 기대 집합을 마이그레이션에서 유도하면 그 구멍이 닫힌다.
+#
+# 파싱하는 쪽은 **마이그레이션이지 docs/data-model.md 가 아니다.** 정본 DDL 은
+# v1 이 만들지 않는 HNSW 를 CREATE INDEX 로 적어 두므로(D33), 그쪽을 기대 집합에
+# 넣으면 test_hnsw_is_absent_in_v1 과 정면으로 부딪힌다. 이 검사가 묻는 것은
+# "러너가 적용하는 파일이 선언한 인덱스가 살아 있는가" 하나다.
+#
+# 파서는 그 자체가 새 결함 표면이다 — 이 저장소는 검사 0개로 나간 게이트 파서에서
+# 결함을 3건 냈다. 그래서 아래 파서 검사가 DB 검사보다 **먼저** 온다.
+
+_COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
+_COMMENT_LINE = re.compile(r"--[^\n]*")
+
+# CREATE [UNIQUE] INDEX [CONCURRENTLY] [IF NOT EXISTS] <이름> ON <표> [USING <방법>]
+_CREATE_INDEX = re.compile(
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+"
+    r"(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"(?P<name>[^\s(;]+)\s+ON\s+(?P<rest>[^;]*)",
+    re.IGNORECASE,
+)
+
+
+def strip_sql_comments(sql: str) -> str:
+    """`--` 줄 주석과 `/* */` 블록 주석을 지운다.
+
+    이 단계가 없으면 산문이 인덱스가 된다. 004 는 본문에
+    `CREATE INDEX CONCURRENTLY 를 쓸 수 없다` 를 주석으로 적어 두었다.
+    """
+    return _COMMENT_LINE.sub("", _COMMENT_BLOCK.sub("", sql))
+
+
+def indexes_in_stripped_sql(sql: str) -> dict[str, str]:
+    """주석이 **이미 벗겨진** SQL 에서 인덱스 이름 -> 접근 방법을 뽑는다.
+
+    벗기는 단계를 분리해 두는 것은 그 단계가 실제로 일하는지 검사가 보기 위해서다.
+    """
+    if "$$" in sql:
+        # 달러 인용 안의 CREATE INDEX 는 선언이 아니다. 이 파서는 SQL 을 모르므로
+        # 오탐한다. 조용히 틀리느니 여기서 멈춘다.
+        raise AssertionError("달러 인용은 v1 마이그레이션에 없다")
+    found: dict[str, str] = {}
+    for m in _CREATE_INDEX.finditer(sql):
+        name = m.group("name")
+        rest = m.group("rest")
+        if name.startswith('"') or rest.lstrip().startswith('"'):
+            raise AssertionError(f"따옴표 식별자는 v1 에 없다: {name}")
+        # `public.kb_x` 로 선언해도 카탈로그의 relname 은 `kb_x` 다.
+        # 떼지 않으면 다음 마이그레이션이 스키마를 붙이는 순간 **거짓 붉은불**이 난다.
+        name = name.rpartition(".")[2]
+        if re.search(r"\bWHERE\b", rest, re.IGNORECASE):
+            raise AssertionError(f"부분 인덱스는 v1 에 없다: {name}")
+        using = re.search(r"\bUSING\s+(?P<am>\w+)", rest, re.IGNORECASE)
+        method = using.group("am").lower() if using else "btree"
+        if name in found:
+            raise AssertionError(f"같은 인덱스 이름이 두 번 선언됐다: {name}")
+        found[name] = method
+    return found
+
+
+def declared_indexes(sql: str) -> dict[str, str]:
+    return indexes_in_stripped_sql(strip_sql_comments(sql))
+
+
+def declared_indexes_in_dir(directory=None) -> dict[str, str]:
+    """러너가 적용하는 파일 전체가 선언한 인덱스.
+
+    discover() 를 쓰는 것은 러너가 실제로 먹는 목록과 갈라지지 않기 위해서다 —
+    디렉터리를 따로 훑으면 그 순간 두 번째 목록이 생긴다.
+    """
+    merged: dict[str, str] = {}
+    for m in migrations.discover(directory):
+        for name, method in declared_indexes(m.path.read_text(encoding="utf-8")).items():
+            if name in merged:
+                raise AssertionError(f"같은 인덱스 이름이 두 파일에 있다: {name}")
+            merged[name] = method
+    return merged
+
+
+def test_parser_reads_002():
+    got = declared_indexes(_migration_text("002_schema.sql"))
+    assert got == {
+        "kb_events_project_time": "btree",
+        "kb_events_filter": "btree",
+        "kb_chunks_tsv": "gin",
+        "kb_docs_lookup": "btree",
+    }
+
+
+def test_parser_reads_004():
+    """004 는 본문 주석에 `CREATE INDEX CONCURRENTLY` 라는 산문을 갖는다."""
+    assert declared_indexes(_migration_text("004_event_tsv.sql")) == {
+        "kb_events_tsv": "gin"
+    }
+
+
+def test_parser_reads_005():
+    assert declared_indexes(_migration_text("005_query_log_index.sql")) == {
+        "kb_query_logs_project_time": "btree"
+    }
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "-- CREATE INDEX CONCURRENTLY 를 쓸 수 없다 — 러너는 한 트랜잭션이다 (D32).",
+        "-- CREATE INDEX IF NOT EXISTS ghost ON t (c);",
+        "/* CREATE INDEX ghost ON t (c); */",
+    ],
+)
+def test_commented_out_index_is_not_declared(sql):
+    assert declared_indexes(sql) == {}
+
+
+def test_if_not_exists_is_not_part_of_the_name():
+    assert declared_indexes("CREATE INDEX IF NOT EXISTS x ON t (c);") == {"x": "btree"}
+
+
+def test_concurrently_is_not_part_of_the_name():
+    assert declared_indexes("CREATE INDEX CONCURRENTLY x ON t (c);") == {"x": "btree"}
+
+
+def test_the_comment_step_is_what_keeps_prose_out():
+    """주입: 주석을 벗기는 단계를 끄면 주석 속 산문이 인덱스가 된다.
+
+    이 케이스가 없으면 strip_sql_comments 를 지워도 위 검사들이 초록일 수 있다 —
+    그 단계가 실제로 일하고 있음을 여기서만 볼 수 있다.
+    """
+    commented = "-- CREATE INDEX IF NOT EXISTS ghost ON t (c);"
+    assert declared_indexes(commented) == {}
+    assert indexes_in_stripped_sql(commented) == {"ghost": "btree"}
+
+
+def test_partial_index_is_rejected_not_skipped():
+    with pytest.raises(AssertionError, match="부분 인덱스"):
+        declared_indexes("CREATE INDEX x ON t (c) WHERE c IS NOT NULL;")
+
+
+def test_quoted_identifier_is_rejected_not_skipped():
+    with pytest.raises(AssertionError, match="따옴표 식별자"):
+        declared_indexes('CREATE INDEX "X" ON t (c);')
+
+
+def test_schema_qualified_name_matches_the_catalog():
+    """`public.kb_x` 로 선언해도 pg_class.relname 은 `kb_x` 다.
+
+    떼지 않으면 닫힌 집합 대조가 **무관한 이유로** 붉어진다 — 인덱스는 살아 있는데
+    이름이 달라서 양쪽이 안 맞는 것이고, 그 붉은불은 진짜 결함을 가린다.
+    """
+    assert declared_indexes("CREATE INDEX public.kb_x ON public.kb_t (c);") == {
+        "kb_x": "btree"
+    }
+
+
+def test_dollar_quoting_is_rejected_not_guessed():
+    """이 파서는 SQL 을 모른다. 달러 인용 안의 CREATE INDEX 는 선언이 아니다."""
+    with pytest.raises(AssertionError, match="달러 인용"):
+        declared_indexes("DO $$ BEGIN CREATE INDEX ghost ON t (c); END $$;")
+
+
+def test_duplicate_index_name_is_rejected():
+    with pytest.raises(AssertionError, match="두 번 선언"):
+        declared_indexes("CREATE INDEX x ON t (a); CREATE INDEX x ON t (b);")
+
+
+def test_directory_walk_finds_every_declared_index():
+    """러너가 먹는 파일 전체에서 여섯이 나온다. 하나라도 빠지면 대조가 공허해진다."""
+    assert set(declared_indexes_in_dir()) == {
+        "kb_events_project_time",
+        "kb_events_filter",
+        "kb_chunks_tsv",
+        "kb_docs_lookup",
+        "kb_events_tsv",
+        "kb_query_logs_project_time",
+    }
 
 
 # --- DB 필요 --------------------------------------------------------------
@@ -229,32 +416,48 @@ def test_chunks_cascade_with_document(applied, conn):
     assert left == 0
 
 
-@needs_db
-def test_tsv_gin_index_exists(applied, conn):
-    row = conn.execute(
-        "SELECT indexdef FROM pg_indexes WHERE indexname = 'kb_chunks_tsv'"
-    ).fetchone()
-    assert row is not None, "kb_chunks_tsv 가 없다"
-    assert "gin" in row[0].lower()
+# UNIQUE 제약이 만드는 인덱스. 재색인 upsert 와 청크 교체가 이것에 기댄다.
+# CREATE INDEX 가 아니라 CREATE TABLE 이 만들므로 파서가 유도하지 못한다 —
+# 여기만 손으로 둔다. CREATE TABLE 까지 파싱하면 이번 구멍과 무관한 표면이 열린다.
+# PRIMARY KEY 의 `_pkey` 는 넣지 않는다. 표가 있는 한 항상 있다.
+CONSTRAINT_INDEXES = {
+    "kb_documents_project_repo_path_key",
+    "kb_chunks_document_id_chunk_idx_key",
+}
 
 
 @needs_db
-@pytest.mark.parametrize(
-    "index",
-    [
-        "kb_events_project_time",
-        "kb_events_filter",
-        "kb_docs_lookup",
-        # UNIQUE 제약이 만드는 인덱스. 재색인 upsert 와 청크 교체가 이것에 기댄다.
-        "kb_documents_project_repo_path_key",
-        "kb_chunks_document_id_chunk_idx_key",
-    ],
-)
-def test_declared_index_exists(applied, conn, index):
-    row = conn.execute(
-        "SELECT indexname FROM pg_indexes WHERE indexname = %s", (index,)
-    ).fetchone()
-    assert row is not None, f"{index} 가 없다"
+def test_live_indexes_are_exactly_what_migrations_declare(applied, conn):
+    """산 DB 와 마이그레이션이 **양쪽 다** 같은 집합인지 본다.
+
+    존재만 보면 두 방향으로 썩는다.
+      - 파일에만 있고 DB 에 없다 = 마이그레이션이 안 돌았다
+      - DB 에만 있고 파일에 없다 = 손으로 만든 인덱스가 공유 볼륨(D55)에 남았다.
+        이쪽은 CREATE INDEX 줄을 지워도 조용히 통과하게 만든다.
+
+    접근 방법까지 보는 것은 test_hnsw_is_absent_in_v1 과 같은 이유다 — 이름만 보면
+    gin 이어야 할 kb_events_tsv 가 btree 로 살아 있어도 초록이다.
+    """
+    declared = declared_indexes_in_dir()
+    rows = conn.execute(
+        """
+        SELECT c.relname, am.amname
+        FROM pg_class c
+        JOIN pg_am am ON am.oid = c.relam
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_index i ON i.indexrelid = c.oid
+        JOIN pg_class t ON t.oid = i.indrelid
+        WHERE c.relkind = 'i'
+          AND n.nspname = 'public'
+          AND t.relname ~ '^kb_'
+          AND c.relname !~ '_pkey$'
+        """
+    ).fetchall()
+    live = {name: method for name, method in rows}
+
+    assert set(live) == set(declared) | CONSTRAINT_INDEXES
+    # 제약이 만드는 둘은 접근 방법을 단언하지 않는다. Postgres 가 정한다.
+    assert {n: live[n] for n in declared} == declared
 
 
 @needs_db
