@@ -529,9 +529,17 @@ const RETIRED = [
   // Q33 이 닫히자 넷을 뺐던 그 자리와 같다. **이 부류는 게이트가 아니라 읽는 감사가 잡는다.**
   // 넷이 다시 등록되면 아래 대조군(주입 25g)이 붉어진다.
 ]
+// **런북이 이 디렉터리에 두라고 한 산출물은 게이트의 것이 아니다.**
+// `docs/operations.md` 는 복원할 때 덤프를 `kb_events.sql` 이라는 이름으로 여기 두라고 하고,
+// `compose.override.yml` 은 D16 이 만든 로컬 예외다. 둘 다 `.gitignore` 에 있어 커밋될 수 없는데
+// walk 는 디렉터리만 거르므로(D47 이 ingest 와 같은 목록으로 못 박았다) 파일 수준에서 새어 들어왔다.
+// 실측으로 둘 다 게이트를 붉게 만들었다 — 런북을 그대로 따른 결과가 종료 코드 1 이었다.
+// `SKIP_DIRS` 에 넣지 않는다. 그러면 검사 15 가 ingest 와 갈라졌다고 운다.
+const RUNBOOK_ARTIFACTS = (p) => /^kb_events.*\.sql/.test(p) || p === 'compose.override.yml'
 const textish = all.filter(
   (p) =>
     !p.startsWith('scripts/') && // 목록 자체를 들고 있는 파일
+    !RUNBOOK_ARTIFACTS(p) &&
     /\.(md|py|yml|yaml|toml|example|sql)$|(^|\/)Dockerfile$/.test(p)
 )
 for (const p of textish) {
@@ -727,8 +735,13 @@ const SECRETS = [
 // 검사 11(폐기 문구)이 `scripts/` 를 통째로 비켜 가는 것과 같은 이유이고, 여기서는
 // 한 파일만 빼서 나머지 스크립트는 계속 본다.
 const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
+// 검사 11 과 같은 이유로 런북 산출물을 뺀다. D56 이 막는 것은 **저장소에 들어온** 모양이고,
+// 그 둘은 `.gitignore` 가 이미 막는다 — 겹치는 세 층 중 첫 층이 그 파일들을 담당한다.
 const scanned = all.filter(
-  (p) => p !== SECRET_SCAN_EXEMPT && /\.(md|py|mjs|js|yml|yaml|sql|toml|example|txt|json)$/.test(p)
+  (p) =>
+    p !== SECRET_SCAN_EXEMPT &&
+    !RUNBOOK_ARTIFACTS(p) &&
+    /\.(md|py|mjs|js|yml|yaml|sql|toml|example|txt|json)$/.test(p)
 )
 for (const p of scanned) {
   const body = readFileSync(join(ROOT, p), 'utf8')

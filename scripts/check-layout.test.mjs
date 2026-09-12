@@ -32,9 +32,17 @@ const claim = (n) => `1–${n}단계를 이제 검증할 수 있다`
 const CLAIM_NOW = claim(STAGE_NOW)
 const CLAIM_OFF = claim(STAGE_NOW + 1)   // 어긋난 주장. RETIRED 와 겹치지 않는 쪽으로 고른다
 
+// 런북 산출물은 복사본에 끌고 가지 않는다. 작업 트리에 원장 덤프가 있는 채로 돌리면
+// **대조군부터 붉어져** 주입이 아니라 환경이 검사를 중독시킨다. 게이트가 그 둘을 건너뛰는지는
+// 아래 주입이 따로 만들어 확인한다 — 여기서 빼는 것은 우연한 오염을 막기 위해서다.
+const RUNBOOK_ARTIFACT = (name) => /^kb_events.*\.sql/.test(name) || name === 'compose.override.yml'
+
 function copyRepo() {
   const dest = mkdtempSync(join(tmpdir(), 'sillok-layout-'))
-  cpSync(ROOT, dest, { recursive: true, filter: (src) => !SKIP.has(basename(src)) })
+  cpSync(ROOT, dest, {
+    recursive: true,
+    filter: (src) => !SKIP.has(basename(src)) && !RUNBOOK_ARTIFACT(basename(src)),
+  })
   return dest
 }
 
@@ -719,6 +727,47 @@ const CASES = [
     expect: 'fail',
     mentions: ['비밀이 든 DSN'],
     mutate: append('docs/spec.md', NL + 'postgresql://sillok:hunter2@db:5432/sillok' + NL),
+  },
+  {
+    // 검사 11·17 이 런북 산출물을 보지 않는가.
+    // **실측으로 둘 다 게이트를 붉게 만들었다** — operations.md 가 복원할 때
+    // 덤프를 이 디렉터리에 두라고 하는데 그 이벤트 본문에 폐기 문구가 있었고,
+    // compose.override.yml 주석에 같은 문구를 넣으니 또 붉었다.
+    // 런북을 그대로 따른 결과가 종료 코드 1 이면 안 된다.
+    id: '67 원장 덤프의 폐기 문구는 물지 않는다',
+    expect: 'pass',
+    mutate: write('kb_events.sql', '-- 같은 구조다' + NL),
+  },
+  {
+    id: '68 로컬 compose 오버라이드의 폐기 문구는 물지 않는다',
+    expect: 'pass',
+    mutate: write('compose.override.yml', '# 같은 구조다' + NL),
+  },
+  {
+    // 대조군. 면제가 넓어져 **추적 문서까지** 놓치면 이 케이스가 붉어진다.
+    id: '69 같은 문구가 추적 문서에 있으면 여전히 운다',
+    expect: 'fail',
+    mentions: ['폐기된 문구', 'docs/spec.md'],
+    mutate: append('docs/spec.md', NL + '같은 구조다' + NL),
+  },
+  {
+    // 검사 17 도 같은 면제를 쓴다. 덤프에 키 모양이 들어와도 게이트가 아니라
+    // .gitignore 가 담당하는 층이다 (D56 의 셋 중 첫 층).
+    id: '70 원장 덤프의 키 모양은 물지 않는다',
+    expect: 'pass',
+    mutate: write('kb_events.sql', '-- sk-abcdefghijklmnop0123456789' + NL),
+  },
+  {
+    // 메타. **면제를 끄면 67 의 주입이 다시 물려야 한다** — 아니면 67·68·70 은
+    // 면제가 일하는 것을 보는 게 아니라 그냥 초록인 것을 보는 공허한 케이스다.
+    // META 배열은 `검사를 끄면 통과한다` 를 단언하는 형태라 방향이 반대여서 여기 둔다.
+    id: '71 면제를 끄면 원장 덤프가 다시 물린다',
+    expect: 'fail',
+    mentions: ['폐기된 문구', 'kb_events.sql'],
+    mutate: (dir) => {
+      edit(dir, CHECKER, (s) => s.replace('    !RUNBOOK_ARTIFACTS(p) &&' + NL, ''))
+      writeFileSync(join(dir, 'kb_events.sql'), '-- 같은 구조다' + NL, 'utf8')
+    },
   },
   {
     // 같은 문자열이 tests/ 에 있으면 **울지 않는다.** 그 파일들은 redact_dsn 이
