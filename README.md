@@ -10,7 +10,10 @@ Current truth lives in Git. What happened lives in Postgres. AI reads a handful 
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-000000?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+
+A personal tool that happens to be public — no support, no compatibility promise.
 
 [한국어 README](README.ko.md) · this English page is canonical; the Korean one is a copy (D27)
 
@@ -39,7 +42,28 @@ Returning "all the relevant documents" is treated as a design violation, not a f
 | The model reads a huge file and gets it wrong | Tools return **rows**, not documents |
 | You cannot count incidents or repeats from prose | Events are aggregated in SQL. `repeat_causes` counts recurring causes |
 
+## The tools
+
+| Tool | Purpose |
+|---|---|
+| `search_docs` | Ranked document rows for a query |
+| `search_events` | Events — filtered first, then keyword |
+| `get_event` | One event, by id |
+| `get_file` | A window of an indexed file |
+| `save_event` | Append an event; a missing required field is refused |
+| `save_doc` | A proposed document body; Git is never written |
+| `event_stats` | SQL aggregates, including repeats per module |
+| `kb_status` | A snapshot for one project label |
+
+An agent reaches these eight over MCP; each one also has an HTTP face.
+The names are fixed in [docs/plan.md](docs/plan.md) §5, and the request and response JSON is in
+[docs/service-and-mcp.md](docs/service-and-mcp.md).
+Indexing is not one of the eight. The operator entry point is `sillok ingest`.
+
 ## Quick start
+
+The walk below is HTTP. An agent reaches the same functions over MCP.
+Events here use the label `demo` and indexing uses `sillok`; the last subsection is why.
 
 Requires Docker. Nothing else — the API container carries its own Python.
 The first `up` builds that image, so the build sandbox has to reach PyPI.
@@ -204,7 +228,7 @@ Indexing blocks the instance it runs on, so point the agent at it after the run 
 **No stubs.**
 A route that merely responds, parked on a completion criterion, would look like progress.
 
-Design questions are recorded in [docs/open-questions.md](docs/open-questions.md).
+Design questions, while any are open, are recorded in [docs/open-questions.md](docs/open-questions.md).
 An unanswered one **blocks the stages that depend on it** — enforced by a check, not by convention.
 
 ## Documentation
