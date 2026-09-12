@@ -126,6 +126,22 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 미해결 건은 평균에서 빠지므로 전부 미해결이면 `0`이 아니라 `null`입니다.
 `by_*`는 JSON 객체라 키 순서는 보장하지 않습니다.
 
+### 색인은 경로가 아니라 라벨로 한다
+
+위 산책은 이벤트를 `demo` 아래에 씁니다. 문서는 따로 넣습니다.
+
+```bash
+docker compose exec api sillok ingest --project sillok
+```
+
+`--project`는 디렉터리가 아니라 **원장의 라벨**입니다.
+한 인스턴스는 한 workspace를 섬기고, 색인하는 경로는 언제나 셋입니다 —
+`docs/**`, 루트 `README*`, `adr/**`.
+그 셋이 없는 나무를 색인하면 본 파일이 없습니다.
+
+검색과 `get_file`과 통계가 모두 같은 라벨을 받습니다.
+색인하지 않은 라벨을 물으면 빈 결과가 돌아오고, 그것이 올바른 답입니다.
+
 ## 어떻게 도는가
 
 ```text
@@ -144,6 +160,22 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
   v1 은 이벤트를 임베딩하지 않습니다.
   키가 있으면 벡터 팔이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
 - **비밀은 환경변수로만 옵니다.** [.env.example](.env.example)을 참조하십시오.
+
+### 에이전트를 붙이는 곳
+
+도구 여덟은 HTTP 입구 하나, 또는 stdio 로 닿습니다.
+
+```bash
+# HTTP — serve 와 같은 프로세스라 스택이 이미 떠 있어야 합니다
+POST http://127.0.0.1:8080/mcp
+
+# stdio — 별도 프로세스입니다. 파이프가 파이프로 남도록 -T 를 뺴지 마십시오
+docker compose exec -T api sillok mcp
+```
+
+stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr 로 갑니다.
+어느 입구든 `initialize` 와 `tools/list` 에 답하고, 모든 도구가 `project` 라벨을 받습니다.
+색인은 그것이 도는 인스턴스를 막으므로, run 이 끝난 뒤에 에이전트를 붙이십시오.
 
 ## 상태
 
@@ -212,6 +244,43 @@ docker compose build \
 ```
 
 환경 문제이므로 **이미지에 굽지 않습니다.**
+
+</details>
+
+두 번째 저장소를 섬기려면 **스택 전체**를 복제합니다 — 자체 DB와 나무와 포트입니다.
+
+<details>
+<summary>다른 저장소용 스택을 띄우기</summary>
+
+커밋된 Compose 파일은 고치지 않습니다. 로컬 오버라이드로 다른 나무를 가리킵니다.
+
+```yaml
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:8090:8080"
+    volumes: !override
+      - /다른/저장소/절대경로:/workspace:ro
+```
+
+```bash
+docker compose -p other-repo \
+  -f /경로/sillok/docker-compose.yml \
+  -f /경로/sillok/compose.override.yml \
+  -f other-repo.override.yml \
+  up -d --wait
+```
+
+두 줄이 무게를 지고 있고, 빼면 둘 다 시끄럽게 죽습니다.
+
+- `-f` 를 하나라도 명시하면 `compose.override.yml` 의 자동 로드가 꺼지므로,
+  기대고 있는 로컬 오버라이드는 체인에 직접 넣어야 합니다.
+- Compose 는 `ports` 와 `volumes` 를 바꿔치지 않고 **이어 붙입니다.**
+  `!override` 가 없으면 커밋된 `127.0.0.1:8080` 이 살아남아 포트가 이미 잡혀 있습니다.
+
+`-p` 가 그 스택에 자체 네트워크와 볼륨과 DB를 주고, 그것이 둘을 갈라 둡니다.
+자기 라벨로 색인하면 검색과 파일과 통계와 MCP 입구가 그 나무를 답하고,
+첫 스택은 그대로 돕니다.
 
 </details>
 
