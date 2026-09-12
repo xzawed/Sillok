@@ -29,7 +29,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.routing import Route
 
-from . import service
+from . import __version__, service
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app = FastAPI(
         lifespan=lifespan,
         title="Sillok",
-        version="0.0.1",
+        version=__version__,
         # D12: 사람이 볼 웹 페이지는 v1 비범위. openapi_url 까지 꺼야 한다 —
         # docs_url 만 끄면 /openapi.json 이 살아남아 봉투 밖 200 을 돌려준다.
         docs_url=None,

@@ -42,6 +42,11 @@ Returning "all the relevant documents" is treated as a design violation, not a f
 ## Quick start
 
 Requires Docker. Nothing else — the API container carries its own Python.
+The first `up` builds that image, so the build sandbox has to reach PyPI.
+
+The shell examples below are POSIX — Git Bash, WSL, macOS, Linux.
+They do not run as written in Windows PowerShell, which aliases `curl` to `Invoke-WebRequest`
+and mangles the quoting of a JSON body on its way to `curl.exe`.
 
 ```bash
 docker compose up -d --wait
@@ -127,6 +132,12 @@ Unresolved events are excluded from the average,
 so an all-unresolved window returns `null` rather than `0`.
 `by_*` are JSON objects; key order is not guaranteed.
 
+### Events survive only in Postgres
+
+Those four events live only in Postgres. Git cannot rebuild them.
+`docker compose down -v` deletes the volume and the ledger with it.
+Backup, restore and restart are in [docs/operations.md](docs/operations.md).
+
 ### Indexing uses a label, not a path
 
 The walk above writes events under `demo`. Documents are a separate step:
@@ -207,6 +218,7 @@ The design documents are written in Korean.
 | [docs/conventions.md](docs/conventions.md) | Document map, conflict resolution, the documentation gate |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | Problem framing · schema · API and MCP contract |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | The storage decision tree — which writes become documents and which become events |
+| [docs/operations.md](docs/operations.md) | Backup, restore and restart. Events are the only backup target |
 | [docs/open-questions.md](docs/open-questions.md) | What has no answer yet |
 | [AGENTS.md](AGENTS.md) | How a change ships, and what counts as evidence |
 
@@ -242,6 +254,21 @@ docker compose build \
 ```
 
 It is an environment problem, so it is never baked into the image.
+
+A sandbox can also resolve `pypi.org` and still fail on `files.pythonhosted.org`, the host the
+wheels come from. Pin that one. Keep it in `compose.override.yml`, which is gitignored — the
+address moves, so it is not ours to commit. The `test` service builds separately and needs it too.
+
+```yaml
+services:
+  api:
+    build:
+      # Look the current address up. 203.0.113.10 is a documentation placeholder, not a real host.
+      extra_hosts: ["files.pythonhosted.org:203.0.113.10"]
+  test:
+    build:
+      extra_hosts: ["files.pythonhosted.org:203.0.113.10"]
+```
 
 </details>
 
