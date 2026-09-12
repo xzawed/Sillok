@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 
-from . import api, service
+from . import __version__, api, service
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -53,7 +53,9 @@ def _text(call: Callable[[], Any]) -> str:
 
 def build(cfg: Config) -> MCPServer:
     """도구 여덟을 단 서버. 이름은 plan.md §5 가 소유한다 — 여기서 바꾸지 않는다."""
-    mcp = MCPServer(name=SERVER_NAME)
+    # version 을 넘기지 않으면 SDK 기본값이 빈 문자열이라 initialize 의
+    # serverInfo.version 이 "" 로 나간다 — 에이전트가 보는 유일한 신원 표면이다 (실측).
+    mcp = MCPServer(name=SERVER_NAME, version=__version__)
 
     # structured_output=False: 봉투 하나만 내보낸다 (D44). 켜 두면 같은 사실이
     # 텍스트와 structuredContent 두 모양으로 나가고, 두 모양은 곧 두 계약이 된다.

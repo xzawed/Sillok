@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from importlib.metadata import version as metadata_version
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,6 +80,27 @@ def call(client: TestClient, name: str, arguments: dict | None = None) -> dict:
     contents = result["content"]
     assert len(contents) == 1 and contents[0]["type"] == "text", contents
     return json.loads(contents[0]["text"])
+
+
+# --- 신원 (initialize) -------------------------------------------------------
+
+
+def test_initialize_reports_a_real_version(client):
+    """`serverInfo.version` 이 비어 있지 않고 패키지 메타데이터와 같다.
+
+    SDK 는 `version` 을 넘기지 않으면 빈 문자열을 쓴다. initialize 의 serverInfo 는
+    에이전트가 보는 유일한 신원 표면이라, 빈 값이면 클라이언트에 신원이 없는 서버로 간다.
+    문자열을 소스에 박아 잠그지 않는다 — 그러면 pyproject 와 갈라지는 사본이 하나 더 는다.
+    """
+    installed = metadata_version("sillok")
+    result = rpc(client, "initialize", {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "test", "version": "1"},
+    }).json()["result"]
+
+    assert result["serverInfo"]["version"] == installed
+    assert result["serverInfo"]["version"] != ""
 
 
 # --- 목록과 스키마 (D42) -----------------------------------------------------
