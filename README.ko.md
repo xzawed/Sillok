@@ -5,8 +5,6 @@
 **저장 위치를 강제하는 지식 원장.**<br>
 현재 진실은 Git에, 무슨 일이 있었는지는 Postgres에. AI는 행 몇 개만 읽습니다.
 
-공개된 개인 도구입니다 — 지원도, 하위호환 약속도 없습니다.
-
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
@@ -14,6 +12,8 @@
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-000000?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+
+공개된 개인 도구입니다 — 지원도, 하위호환 약속도 없습니다.
 
 [English README](README.md) · 정본은 영문입니다. **어긋나면 영문이 이깁니다 (D27).**
 
@@ -58,11 +58,11 @@ Sillok은 RAG 플랫폼이 **아닙니다.**
 에이전트는 이 여덟을 MCP 로 부르고, 각각은 HTTP 얼굴도 갖습니다.
 이름은 [docs/plan.md](docs/plan.md) §5 가 소유하고, 요청·응답 JSON 은
 [docs/service-and-mcp.md](docs/service-and-mcp.md)에 있습니다.
-색인은 `sillok ingest` 입니다 — 운영자 명령이지 도구가 아닙니다.
+색인은 이 여덟이 아닙니다. 운영자 진입점은 `sillok ingest` 입니다.
 
 ## 빠른 시작
 
-아래 걸음은 HTTP 입니다 — 에이전트가 MCP 로 부르는 그 여덟 기능과 같습니다.
+아래 걸음은 HTTP 입니다. 에이전트는 같은 기능을 MCP 로 부릅니다.
 여기의 이벤트는 라벨 `demo` 를 쓰고 색인은 `sillok` 을 쓰는데, 이유는 마지막 절에 있습니다.
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
