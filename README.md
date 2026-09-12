@@ -42,6 +42,10 @@ Returning "all the relevant documents" is treated as a design violation, not a f
 ## Quick start
 
 Requires Docker. Nothing else — the API container carries its own Python.
+The first `up` builds that image, so the build sandbox has to reach PyPI.
+
+The shell examples below are POSIX — Git Bash, WSL, macOS, Linux.
+Windows PowerShell aliases `curl` to `Invoke-WebRequest`, so they do not run there as written.
 
 ```bash
 docker compose up -d --wait
@@ -143,6 +147,12 @@ A tree without them gives a run that ends `failed` with no files seen.
 Search, `get_file` and statistics all take the same label.
 Asking for a label you never indexed returns an empty result, and that is the correct answer.
 
+### Events survive only in Postgres
+
+Those four events live only in Postgres. Git cannot rebuild them.
+`docker compose down -v` deletes the volume and the ledger with it.
+Backup, restore and restart are in [docs/operations.md](docs/operations.md).
+
 ## How it works
 
 ```text
@@ -207,6 +217,7 @@ The design documents are written in Korean.
 | [docs/conventions.md](docs/conventions.md) | Document map, conflict resolution, the documentation gate |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | Problem framing · schema · API and MCP contract |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | The storage decision tree — which writes become documents and which become events |
+| [docs/operations.md](docs/operations.md) | Backup, restore and restart. Events are the only backup target |
 | [docs/open-questions.md](docs/open-questions.md) | What has no answer yet |
 | [AGENTS.md](AGENTS.md) | How a change ships, and what counts as evidence |
 
@@ -242,6 +253,20 @@ docker compose build \
 ```
 
 It is an environment problem, so it is never baked into the image.
+
+If the sandbox resolves nothing at all for PyPI, pin the host instead.
+Keep it in `compose.override.yml`, which is gitignored — the address moves, so it is not ours to commit.
+The `test` service builds separately and needs the same entry.
+
+```yaml
+services:
+  api:
+    build:
+      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+  test:
+    build:
+      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+```
 
 </details>
 

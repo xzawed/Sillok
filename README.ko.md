@@ -42,6 +42,10 @@ Sillok은 RAG 플랫폼이 **아닙니다.**
 ## 빠른 시작
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
+첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
+
+아래 셸 예제는 POSIX 셸 기준입니다 — Git Bash · WSL · macOS · Linux.
+Windows PowerShell은 `curl`을 `Invoke-WebRequest`의 별칭으로 두므로 적힌 그대로는 돌지 않습니다.
 
 ```bash
 docker compose up -d --wait
@@ -142,6 +146,12 @@ docker compose exec api sillok ingest --project sillok
 검색과 `get_file`과 통계가 모두 같은 라벨을 받습니다.
 색인하지 않은 라벨을 물으면 빈 결과가 돌아오고, 그것이 올바른 답입니다.
 
+### 이벤트는 Postgres에만 남는다
+
+위의 네 건은 Postgres에만 있습니다. Git이 다시 만들어 주지 못합니다.
+`docker compose down -v`는 볼륨을 지우고 원장도 함께 지웁니다.
+백업·복구·재기동은 [docs/operations.md](docs/operations.md)에 있습니다.
+
 ## 어떻게 도는가
 
 ```text
@@ -206,6 +216,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 | [docs/conventions.md](docs/conventions.md) | 문서 지도, 충돌 판정, 문서 게이트 |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | 문제 정의 · 스키마 · API와 MCP 계약 |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 결정 트리 — 무엇이 문서가 되고 무엇이 이벤트가 되는가 |
+| [docs/operations.md](docs/operations.md) | 백업·복구·재기동. 백업 대상은 이벤트 원장뿐 |
 | [docs/open-questions.md](docs/open-questions.md) | 아직 답이 없는 것 |
 | [AGENTS.md](AGENTS.md) | 한 변경이 나가는 절차와 무엇이 증거인가 |
 
@@ -242,6 +253,20 @@ docker compose build \
 ```
 
 환경 문제이므로 **이미지에 굽지 않습니다.**
+
+샌드박스가 PyPI를 아예 해석하지 못하면 호스트를 고정합니다.
+`compose.override.yml`에 둡니다 — gitignore된 파일입니다. 주소는 옮겨 다니므로 커밋하지 않습니다.
+`test` 서비스는 따로 빌드하므로 같은 항목이 필요합니다.
+
+```yaml
+services:
+  api:
+    build:
+      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+  test:
+    build:
+      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+```
 
 </details>
 
