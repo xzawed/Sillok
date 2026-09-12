@@ -127,6 +127,22 @@ Unresolved events are excluded from the average,
 so an all-unresolved window returns `null` rather than `0`.
 `by_*` are JSON objects; key order is not guaranteed.
 
+### Indexing uses a label, not a path
+
+The walk above writes events under `demo`. Documents are a separate step:
+
+```bash
+docker compose exec api sillok ingest --project sillok
+```
+
+`--project` is a **label on the ledger**, not a directory.
+One instance serves one workspace, and the indexed paths are always the same three —
+`docs/**`, a root `README*`, and `adr/**`.
+A tree without them gives a run that ends `failed` with no files seen.
+
+Search, `get_file` and statistics all take the same label.
+Asking for a label you never indexed returns an empty result, and that is the correct answer.
+
 ## How it works
 
 ```text
@@ -145,6 +161,20 @@ Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP 
   either way — v1 does not embed events.
   A key turns the vector arm on; without one the merge runs over the keyword list alone.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
+
+### Pointing an agent at it
+
+The eight tools are reached over one HTTP entrance — `POST http://127.0.0.1:8080/mcp`,
+the same process as `serve`, so the stack has to be up — or over stdio:
+
+```bash
+# a separate process; keep -T so the pipe stays a pipe
+docker compose exec -T api sillok mcp
+```
+
+On stdio, **stdout carries the protocol and nothing else**; startup logs go to stderr.
+Either entrance answers `initialize` and `tools/list`, and every tool takes the `project` label.
+Indexing blocks the instance it runs on, so point the agent at it after the run finishes.
 
 ## Status
 
@@ -212,6 +242,43 @@ docker compose build \
 ```
 
 It is an environment problem, so it is never baked into the image.
+
+</details>
+
+Serving a second repository means replicating the **whole stack** — its own database, tree and port.
+
+<details>
+<summary>Bringing up a stack for another repository</summary>
+
+The committed Compose file is never edited. Point it at the other tree with a local override:
+
+```yaml
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:8090:8080"
+    volumes: !override
+      - /absolute/path/to/other-repo:/workspace:ro
+```
+
+```bash
+docker compose -p other-repo \
+  -f /path/to/sillok/docker-compose.yml \
+  -f other-repo.override.yml \
+  up -d --wait
+```
+
+`!override` is load-bearing. Compose **appends** to `ports` and `volumes` instead of replacing them,
+so without it the committed `127.0.0.1:8080` survives and the port is already taken.
+
+Naming any `-f` also turns off the automatic pickup of `compose.override.yml`.
+That file is a machine-local exception, not part of this recipe —
+adding it to the chain applies it to the whole stack, `db` included,
+and naming a path that does not exist makes Compose refuse to start at all.
+
+`-p` gives the stack its own network, volume and database — that separation is what keeps the two apart,
+not the label. Its search, files, statistics and MCP entrance answer for that tree
+while the first stack carries on untouched.
 
 </details>
 
