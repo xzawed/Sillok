@@ -5,11 +5,14 @@
 **저장 위치를 강제하는 지식 원장.**<br>
 현재 진실은 Git에, 무슨 일이 있었는지는 Postgres에. AI는 행 몇 개만 읽습니다.
 
+공개된 개인 도구입니다 — 지원도, 하위호환 약속도 없습니다.
+
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-000000?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 [English README](README.md) · 정본은 영문입니다. **어긋나면 영문이 이깁니다 (D27).**
@@ -39,7 +42,28 @@ Sillok은 RAG 플랫폼이 **아닙니다.**
 | 모델이 큰 파일을 읽고 틀린다 | 도구가 문서가 아니라 **행**을 돌려준다 |
 | 건수·재발을 글에서 셀 수 없다 | 이벤트를 SQL로 집계한다. `repeat_causes`가 반복 원인을 센다 |
 
+## 도구
+
+| 도구 | 하는 일 |
+|---|---|
+| `search_docs` | 질의에 대한 문서 행 — 순위 매김 |
+| `search_events` | 사건 검색 — 필터 먼저, 그다음 키워드 |
+| `get_event` | 이벤트 하나를 id 로 |
+| `get_file` | 색인된 파일의 창 하나 |
+| `save_event` | 사건을 원장에 남김. 빠진 필드가 있으면 거절 |
+| `save_doc` | 문서 본문 제안. Git 에 쓰지 않음 |
+| `event_stats` | SQL 집계 — 모듈별 반복 포함 |
+| `kb_status` | project 라벨 하나의 현황 |
+
+에이전트는 이 여덟을 MCP 로 부르고, 각각은 HTTP 얼굴도 갖습니다.
+이름은 [docs/plan.md](docs/plan.md) §5 가 소유하고, 요청·응답 JSON 은
+[docs/service-and-mcp.md](docs/service-and-mcp.md)에 있습니다.
+색인은 `sillok ingest` 입니다 — 운영자 명령이지 도구가 아닙니다.
+
 ## 빠른 시작
+
+아래 걸음은 HTTP 입니다 — 에이전트가 MCP 로 부르는 그 여덟 기능과 같습니다.
+여기의 이벤트는 라벨 `demo` 를 쓰고 색인은 `sillok` 을 쓰는데, 이유는 마지막 절에 있습니다.
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
 첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
@@ -203,7 +227,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 **스텁은 만들지 않습니다.**
 뜨기만 하는 라우트를 완료 조건 자리에 올려 두면 진척처럼 보입니다.
 
-설계 질문은 [docs/open-questions.md](docs/open-questions.md)에 적습니다.
+열린 설계 질문이 있을 때는 [docs/open-questions.md](docs/open-questions.md)에 적습니다.
 **답이 없는 질문이 막는 단계는 실제로 막힙니다** — 관례가 아니라 검사가 강제합니다.
 
 ## 문서

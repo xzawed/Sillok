@@ -5,11 +5,14 @@
 **A knowledge ledger that forces the storage decision.**<br>
 Current truth lives in Git. What happened lives in Postgres. AI reads a handful of rows.
 
+A personal tool that happens to be public — no support, no compatibility promise.
+
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-000000?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 [한국어 README](README.ko.md) · this English page is canonical; the Korean one is a copy (D27)
@@ -39,7 +42,28 @@ Returning "all the relevant documents" is treated as a design violation, not a f
 | The model reads a huge file and gets it wrong | Tools return **rows**, not documents |
 | You cannot count incidents or repeats from prose | Events are aggregated in SQL. `repeat_causes` counts recurring causes |
 
+## The tools
+
+| Tool | Purpose |
+|---|---|
+| `search_docs` | Ranked document rows for a query |
+| `search_events` | Events — filtered first, then keyword |
+| `get_event` | One event, by id |
+| `get_file` | A window of an indexed file |
+| `save_event` | Append an event; an incomplete one is refused |
+| `save_doc` | A proposed document body; Git is never written |
+| `event_stats` | SQL counts, including repeats per module |
+| `kb_status` | Counts for one project label |
+
+An agent reaches these eight over MCP; each one also has an HTTP face.
+The names are fixed in [docs/plan.md](docs/plan.md) §5, and the request and response JSON is in
+[docs/service-and-mcp.md](docs/service-and-mcp.md).
+Indexing is `sillok ingest` — an operator command, not a tool.
+
 ## Quick start
+
+The walk below is HTTP — the same eight functions an agent reaches over MCP.
+Events here use the label `demo` and indexing uses `sillok`; the last subsection is why.
 
 Requires Docker. Nothing else — the API container carries its own Python.
 The first `up` builds that image, so the build sandbox has to reach PyPI.
@@ -191,20 +215,20 @@ Indexing blocks the instance it runs on, so point the agent at it after the run 
 
 | Area | State |
 |---|---|
-| Compose, migrations, FastAPI skeleton | Working |
-| `POST /v1/events`, `GET /v1/stats/events`, `GET /v1/status` | Working |
-| Search — `POST /v1/search/docs` and `/v1/search/events` | Working. Without a key the vector arm is empty, which is the designed normal state |
-| `get_event`, `get_file`, `save_doc` | Working. `get_file` opens indexed rows only and answers with a 4000-character window; `save_doc` returns a proposal and never writes Git |
-| Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL |
-| MCP tools | Working. Eight tools over `POST /mcp` and stdio (`sillok mcp`); each answers with the same envelope as its HTTP face |
-| Query ledger — `kb_query_logs` | Working. The two search tools write one row per query; `kb_status` counts the zero-hit ones from it |
+| Compose, migrations, FastAPI skeleton | Done |
+| `POST /v1/events`, `GET /v1/stats/events`, `GET /v1/status` | Done |
+| Search — `POST /v1/search/docs` and `/v1/search/events` | Done. Without a key the vector arm is empty, which is the designed normal state |
+| `get_event`, `get_file`, `save_doc` | Done. `get_file` opens indexed rows only and answers with a 4000-character window; `save_doc` returns a proposal and never writes Git |
+| Indexing — `sillok ingest` and `POST /v1/ingest` | Done. Embeddings need a key; without one the vectors stay NULL |
+| MCP tools | Done. Eight tools over `POST /mcp` and stdio (`sillok mcp`); each answers with the same envelope as its HTTP face |
+| Query ledger — `kb_query_logs` | Done. The two search tools write one row per query; `kb_status` counts the zero-hit ones from it |
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 
 **No stubs.**
 A route that merely responds, parked on a completion criterion, would look like progress.
 
-Design questions are recorded in [docs/open-questions.md](docs/open-questions.md).
+Design questions, while any are open, are recorded in [docs/open-questions.md](docs/open-questions.md).
 An unanswered one **blocks the stages that depend on it** — enforced by a check, not by convention.
 
 ## Documentation
