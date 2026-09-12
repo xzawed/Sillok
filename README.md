@@ -45,7 +45,8 @@ Requires Docker. Nothing else — the API container carries its own Python.
 The first `up` builds that image, so the build sandbox has to reach PyPI.
 
 The shell examples below are POSIX — Git Bash, WSL, macOS, Linux.
-Windows PowerShell aliases `curl` to `Invoke-WebRequest`, so they do not run there as written.
+They do not run as written in Windows PowerShell, which aliases `curl` to `Invoke-WebRequest`
+and mangles the quoting of a JSON body on its way to `curl.exe`.
 
 ```bash
 docker compose up -d --wait
@@ -131,6 +132,12 @@ Unresolved events are excluded from the average,
 so an all-unresolved window returns `null` rather than `0`.
 `by_*` are JSON objects; key order is not guaranteed.
 
+### Events survive only in Postgres
+
+Those four events live only in Postgres. Git cannot rebuild them.
+`docker compose down -v` deletes the volume and the ledger with it.
+Backup, restore and restart are in [docs/operations.md](docs/operations.md).
+
 ### Indexing uses a label, not a path
 
 The walk above writes events under `demo`. Documents are a separate step:
@@ -146,12 +153,6 @@ A tree without them gives a run that ends `failed` with no files seen.
 
 Search, `get_file` and statistics all take the same label.
 Asking for a label you never indexed returns an empty result, and that is the correct answer.
-
-### Events survive only in Postgres
-
-Those four events live only in Postgres. Git cannot rebuild them.
-`docker compose down -v` deletes the volume and the ledger with it.
-Backup, restore and restart are in [docs/operations.md](docs/operations.md).
 
 ## How it works
 
@@ -254,18 +255,19 @@ docker compose build \
 
 It is an environment problem, so it is never baked into the image.
 
-If the sandbox resolves nothing at all for PyPI, pin the host instead.
-Keep it in `compose.override.yml`, which is gitignored — the address moves, so it is not ours to commit.
-The `test` service builds separately and needs the same entry.
+A sandbox can also resolve `pypi.org` and still fail on `files.pythonhosted.org`, the host the
+wheels come from. Pin that one. Keep it in `compose.override.yml`, which is gitignored — the
+address moves, so it is not ours to commit. The `test` service builds separately and needs it too.
 
 ```yaml
 services:
   api:
     build:
-      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+      # Look the current address up. 203.0.113.10 is a documentation placeholder, not a real host.
+      extra_hosts: ["files.pythonhosted.org:203.0.113.10"]
   test:
     build:
-      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+      extra_hosts: ["files.pythonhosted.org:203.0.113.10"]
 ```
 
 </details>

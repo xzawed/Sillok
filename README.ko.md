@@ -45,7 +45,8 @@ Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 �
 첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
 
 아래 셸 예제는 POSIX 셸 기준입니다 — Git Bash · WSL · macOS · Linux.
-Windows PowerShell은 `curl`을 `Invoke-WebRequest`의 별칭으로 두므로 적힌 그대로는 돌지 않습니다.
+Windows PowerShell에서는 적힌 그대로 돌지 않습니다 — `curl`이 `Invoke-WebRequest`의 별칭이고,
+`curl.exe`로 바꿔도 JSON 본문의 인용이 깨집니다.
 
 ```bash
 docker compose up -d --wait
@@ -130,6 +131,12 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 미해결 건은 평균에서 빠지므로 전부 미해결이면 `0`이 아니라 `null`입니다.
 `by_*`는 JSON 객체라 키 순서는 보장하지 않습니다.
 
+### 이벤트는 Postgres에만 남는다
+
+위의 네 건은 Postgres에만 있습니다. Git이 다시 만들어 주지 못합니다.
+`docker compose down -v`는 볼륨을 지우고 원장도 함께 지웁니다.
+백업·복구·재기동은 [docs/operations.md](docs/operations.md)에 있습니다.
+
 ### 색인은 경로가 아니라 라벨로 한다
 
 위 산책은 이벤트를 `demo` 아래에 씁니다. 문서는 따로 넣습니다.
@@ -145,12 +152,6 @@ docker compose exec api sillok ingest --project sillok
 
 검색과 `get_file`과 통계가 모두 같은 라벨을 받습니다.
 색인하지 않은 라벨을 물으면 빈 결과가 돌아오고, 그것이 올바른 답입니다.
-
-### 이벤트는 Postgres에만 남는다
-
-위의 네 건은 Postgres에만 있습니다. Git이 다시 만들어 주지 못합니다.
-`docker compose down -v`는 볼륨을 지우고 원장도 함께 지웁니다.
-백업·복구·재기동은 [docs/operations.md](docs/operations.md)에 있습니다.
 
 ## 어떻게 도는가
 
@@ -254,18 +255,19 @@ docker compose build \
 
 환경 문제이므로 **이미지에 굽지 않습니다.**
 
-샌드박스가 PyPI를 아예 해석하지 못하면 호스트를 고정합니다.
-`compose.override.yml`에 둡니다 — gitignore된 파일입니다. 주소는 옮겨 다니므로 커밋하지 않습니다.
-`test` 서비스는 따로 빌드하므로 같은 항목이 필요합니다.
+`pypi.org`는 해석되는데 휠을 받아 오는 `files.pythonhosted.org`만 막히는 경우가 있습니다.
+그 호스트를 고정합니다. `compose.override.yml`에 둡니다 — gitignore된 파일입니다.
+주소는 옮겨 다니므로 커밋하지 않습니다. `test` 서비스도 따로 빌드하므로 같은 항목이 필요합니다.
 
 ```yaml
 services:
   api:
     build:
-      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+      # 지금 주소를 직접 조회해서 넣는다. 203.0.113.10 은 문서용 자리표시자이지 실제 호스트가 아니다.
+      extra_hosts: ["files.pythonhosted.org:203.0.113.10"]
   test:
     build:
-      extra_hosts: ["files.pythonhosted.org:ADDRESS"]
+      extra_hosts: ["files.pythonhosted.org:203.0.113.10"]
 ```
 
 </details>
