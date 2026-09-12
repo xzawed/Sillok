@@ -138,7 +138,7 @@ docker compose exec api sillok ingest --project sillok
 `--project` is a **label on the ledger**, not a directory.
 One instance serves one workspace, and the indexed paths are always the same three —
 `docs/**`, a root `README*`, and `adr/**`.
-A tree without them gives an ingest that saw no files.
+A tree without them gives a run that ends `failed` with no files seen.
 
 Search, `get_file` and statistics all take the same label.
 Asking for a label you never indexed returns an empty result, and that is the correct answer.
@@ -164,13 +164,11 @@ Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP 
 
 ### Pointing an agent at it
 
-The eight tools are reached over one HTTP entrance, or over stdio.
+The eight tools are reached over one HTTP entrance — `POST http://127.0.0.1:8080/mcp`,
+the same process as `serve`, so the stack has to be up — or over stdio:
 
 ```bash
-# HTTP — same process as serve, so the stack must already be up
-POST http://127.0.0.1:8080/mcp
-
-# stdio — a separate process; keep -T so the pipe stays a pipe
+# a separate process; keep -T so the pipe stays a pipe
 docker compose exec -T api sillok mcp
 ```
 
@@ -266,20 +264,20 @@ services:
 ```bash
 docker compose -p other-repo \
   -f /path/to/sillok/docker-compose.yml \
-  -f /path/to/sillok/compose.override.yml \
   -f other-repo.override.yml \
   up -d --wait
 ```
 
-Two lines are load-bearing and both fail loudly when dropped.
+`!override` is load-bearing. Compose **appends** to `ports` and `volumes` instead of replacing them,
+so without it the committed `127.0.0.1:8080` survives and the port is already taken.
 
-- Naming any `-f` turns off the automatic pickup of `compose.override.yml`,
-  so a local override you rely on has to join the chain explicitly.
-- Compose **appends** to `ports` and `volumes` instead of replacing them.
-  Without `!override` the committed `127.0.0.1:8080` survives and the port is already taken.
+Naming any `-f` also turns off the automatic pickup of `compose.override.yml`.
+That file is a machine-local exception, not part of this recipe —
+adding it to the chain applies it to the whole stack, `db` included,
+and naming a path that does not exist makes Compose refuse to start at all.
 
-`-p` gives the stack its own network, volume and database, which is what keeps the two apart.
-Index it with its own label, and its search, files, statistics and MCP entrance answer for that tree
+`-p` gives the stack its own network, volume and database — that separation is what keeps the two apart,
+not the label. Its search, files, statistics and MCP entrance answer for that tree
 while the first stack carries on untouched.
 
 </details>

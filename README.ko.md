@@ -137,7 +137,7 @@ docker compose exec api sillok ingest --project sillok
 `--project`는 디렉터리가 아니라 **원장의 라벨**입니다.
 한 인스턴스는 한 workspace를 섬기고, 색인하는 경로는 언제나 셋입니다 —
 `docs/**`, 루트 `README*`, `adr/**`.
-그 셋이 없는 나무를 색인하면 본 파일이 없습니다.
+그 셋이 없는 나무를 색인하면 run 이 `failed` 로 끝나고 본 파일이 없습니다.
 
 검색과 `get_file`과 통계가 모두 같은 라벨을 받습니다.
 색인하지 않은 라벨을 물으면 빈 결과가 돌아오고, 그것이 올바른 답입니다.
@@ -163,13 +163,11 @@ docker compose exec api sillok ingest --project sillok
 
 ### 에이전트를 붙이는 곳
 
-도구 여덟은 HTTP 입구 하나, 또는 stdio 로 닿습니다.
+도구 여덟은 HTTP 입구 하나 — `POST http://127.0.0.1:8080/mcp` 이고
+`serve` 와 같은 프로세스라 스택이 떠 있어야 합니다 — 또는 stdio 로 닿습니다.
 
 ```bash
-# HTTP — serve 와 같은 프로세스라 스택이 이미 떠 있어야 합니다
-POST http://127.0.0.1:8080/mcp
-
-# stdio — 별도 프로세스입니다. 파이프가 파이프로 남도록 -T 를 뺴지 마십시오
+# 별도 프로세스입니다. 파이프가 파이프로 남도록 -T 를 빼지 마십시오
 docker compose exec -T api sillok mcp
 ```
 
@@ -266,20 +264,20 @@ services:
 ```bash
 docker compose -p other-repo \
   -f /경로/sillok/docker-compose.yml \
-  -f /경로/sillok/compose.override.yml \
   -f other-repo.override.yml \
   up -d --wait
 ```
 
-두 줄이 무게를 지고 있고, 빼면 둘 다 시끄럽게 죽습니다.
+`!override` 가 무게를 지고 있습니다. Compose 는 `ports` 와 `volumes` 를 바꿔치지 않고 **이어 붙이므로**,
+없으면 커밋된 `127.0.0.1:8080` 이 살아남아 포트가 이미 잡혀 있습니다.
 
-- `-f` 를 하나라도 명시하면 `compose.override.yml` 의 자동 로드가 꺼지므로,
-  기대고 있는 로컬 오버라이드는 체인에 직접 넣어야 합니다.
-- Compose 는 `ports` 와 `volumes` 를 바꿔치지 않고 **이어 붙입니다.**
-  `!override` 가 없으면 커밋된 `127.0.0.1:8080` 이 살아남아 포트가 이미 잡혀 있습니다.
+`-f` 를 하나라도 명시하면 `compose.override.yml` 의 자동 로드도 꺼집니다.
+그 파일은 이 레시피의 일부가 아니라 머신별 예외입니다 —
+체인에 넣으면 `db` 를 포함한 스택 전체에 적용되고,
+없는 경로를 적으면 Compose 가 아예 기동을 거절합니다.
 
-`-p` 가 그 스택에 자체 네트워크와 볼륨과 DB를 주고, 그것이 둘을 갈라 둡니다.
-자기 라벨로 색인하면 검색과 파일과 통계와 MCP 입구가 그 나무를 답하고,
+`-p` 가 그 스택에 자체 네트워크와 볼륨과 DB를 줍니다 — 둘을 갈라 두는 것은 라벨이 아니라
+그 분리입니다. 검색과 파일과 통계와 MCP 입구가 그 나무를 답하고,
 첫 스택은 그대로 돕니다.
 
 </details>
