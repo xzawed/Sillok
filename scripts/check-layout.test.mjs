@@ -832,14 +832,14 @@ const CASES = [
     expect: 'fail',
     mentions: ['다음 번호는 D', 'docs/open-questions.md'],
     mutate: (dir) =>
-      edit(dir, 'docs/open-questions.md', (t) => t.replace('D66 이후로', 'D60 이후로')),
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('D67 이후로', 'D60 이후로')),
   },
   {
     // 대조군. **번호가 앞서 가도 틀린 것이다** — `다음 번호` 는 하나뿐이라서다.
     id: '63 다음 D 번호가 앞서 가도 운다',
     expect: 'fail',
     mentions: ['다음 번호는 D', 'CLAUDE.md'],
-    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D66 이후로', 'D99 이후로')),
+    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D67 이후로', 'D99 이후로')),
   },
   {
     // 같은 몰의 두 번째 굴. 열거가 일찍 끊기면 그 뒤 결정이 `임의로 뒤집지 않는다` 밖에 남는다.
@@ -853,7 +853,7 @@ const CASES = [
     mutate: (dir) =>
       edit(dir, 'CLAUDE.md', (t) =>
         t.replace(
-          '  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05 확정. 임의로 뒤집지 않는다.',
+          '  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05, D66은 2026-09-12 확정. 임의로 뒤집지 않는다.',
           '  D35–D46은 2026-09-02, D47–D53은 2026-09-03' + NL + '  확정. 임의로 뒤집지 않는다.'
         )
       ),
@@ -862,17 +862,17 @@ const CASES = [
     id: '65 확정 열거가 마지막 D 에서 끊기면 운다',
     expect: 'fail',
     mentions: ['임의로 뒤집지 않는다', '에서 끊긴다'],
-    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D65는 2026-09-05 확정', 'D64는 2026-09-03 확정')),
+    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D66은 2026-09-12 확정', 'D65는 2026-09-05 확정')),
   },
   {
     // 대조군 둘. **ADR 에 결정을 더하면 세 사본이 함께 따라와야 한다.**
     // 마지막 `## Dnn` 만 바꾸면 셋이 한꺼번에 낡는다 — 그때 울어야 한다.
     id: '64 ADR 에 D 를 더하고 사본을 안 고치면 운다',
     expect: 'fail',
-    mentions: ['다음 번호는 D67'],
+    mentions: ['다음 번호는 D68'],
     mutate: (dir) =>
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) =>
-        t.replace('## 나중에 바꿔도 되는 것 (v1 비범위)', '## D66 — 자리표시자\n\n## 나중에 바꿔도 되는 것 (v1 비범위)')
+        t.replace('## 나중에 바꿔도 되는 것 (v1 비범위)', '## D67 — 자리표시자\n\n## 나중에 바꿔도 되는 것 (v1 비범위)')
       ),
   },
   {
@@ -955,13 +955,13 @@ const META = [
     disable: (s) =>
       s.replace('if (mentioned.length && Math.max(...mentioned) !== next - 1) {', 'if (false) {'),
     inject: (dir) =>
-      edit(dir, 'CLAUDE.md', (t) => t.replace('D65는 2026-09-05 확정', 'D64는 2026-09-03 확정')),
+      edit(dir, 'CLAUDE.md', (t) => t.replace('D66은 2026-09-12 확정', 'D65는 2026-09-05 확정')),
   },
   {
     id: 'M22 검사 21(다음 D 번호)을 끄면 낡은 번호가 통과한다',
     disable: (s) => s.replace('if (Number(m[1]) !== next) {', 'if (false) {'),
     inject: (dir) =>
-      edit(dir, 'docs/open-questions.md', (t) => t.replace('D66 이후로', 'D60 이후로')),
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('D67 이후로', 'D60 이후로')),
   },
   {
     id: 'M21 검사 20(SKILL 해시)을 끄면 어긋난 해시가 통과한다',
