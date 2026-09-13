@@ -177,6 +177,28 @@ docker compose exec api sillok ingest --project sillok
 검색과 `get_file`과 통계가 모두 같은 라벨을 받습니다.
 색인하지 않은 라벨을 물으면 빈 결과가 돌아오고, 그것이 올바른 답입니다.
 
+### 검색은 행을 돌려준다
+
+색인은 `sillok` 에 있습니다. 한 행만 물어봅니다.
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: application/json' \n  -d '{"project":"sillok","query":"Sillok","top_k":1}'
+```
+
+```json
+{ "ok": true, "data": { "results": [
+  { "path": "docs/plan.md",
+    "heading_path": "Sillok — 구현 계약 > 0. 한 줄",
+    "excerpt": "Sillok — 구현 계약 > 0. 한 줄 Git에는 현재 진실만. …",
+    "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
+```
+
+키 없는 설치 — 이 산책이 그렇습니다 — 는 키워드로 순위를 매깁니다.
+`score`는 한 응답 안에서의 순위 병합이지 유사도가 아니며, 키가 있으면 달라집니다.
+`excerpt`는 폭 때문에 여기서 잘랐고, 서비스는 800자에서 자릅니다.
+`commit_sha`는 v1 내내 빈 문자열입니다. 나머지 필드는
+[docs/service-and-mcp.md](docs/service-and-mcp.md)에 있습니다.
+
 ## 어떻게 도는가
 
 ```text
@@ -194,6 +216,8 @@ docker compose exec api sillok ingest --project sillok
   문서 검색은 `tsv` 키워드만 씁니다. 이벤트 검색은 키가 있어도 키워드만입니다 —
   v1 은 이벤트를 임베딩하지 않습니다.
   키가 있으면 벡터 팔이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
+  켜려면 `.env.example` 을 `.env` 로 복사해 `OPENAI_API_KEY` 를 넣고,
+  api 컨테이너가 다시 만들어지도록 `up` 을 한 번 더 돌리십시오.
 - **비밀은 환경변수로만 옵니다.** [.env.example](.env.example)을 참조하십시오.
 
 ### 에이전트를 붙이는 곳
@@ -208,7 +232,8 @@ docker compose exec -T api sillok mcp
 
 stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr 로 갑니다.
 어느 입구든 `initialize` 와 `tools/list` 에 답하고, 모든 도구가 `project` 라벨을 받습니다.
-색인은 그것이 도는 인스턴스를 막으므로, run 이 끝난 뒤에 에이전트를 붙이십시오.
+에이전트는 ingest run 이 끝난 뒤에 붙이십시오.
+그 전까지는 인덱스를 완료된 것으로 보지 마십시오.
 
 ## 상태
 

@@ -178,6 +178,28 @@ A tree without them gives a run that ends `failed` with no files seen.
 Search, `get_file` and statistics all take the same label.
 Asking for a label you never indexed returns an empty result, and that is the correct answer.
 
+### Search returns rows
+
+The index is on `sillok`. Ask for one row:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: application/json' \n  -d '{"project":"sillok","query":"Sillok","top_k":1}'
+```
+
+```json
+{ "ok": true, "data": { "results": [
+  { "path": "docs/plan.md",
+    "heading_path": "Sillok — 구현 계약 > 0. 한 줄",
+    "excerpt": "Sillok — 구현 계약 > 0. 한 줄 Git에는 현재 진실만. …",
+    "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
+```
+
+A keyless install — this walk — ranks by keyword.
+`score` is a rank merge inside one response, not a similarity; a key changes it.
+The `excerpt` is clipped here for width; the service clips at 800 characters.
+`commit_sha` is empty for all of v1. The remaining fields are in
+[docs/service-and-mcp.md](docs/service-and-mcp.md).
+
 ## How it works
 
 ```text
@@ -195,6 +217,8 @@ Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP 
   stays NULL and document search will use `tsv` keywords only. Event search is keywords only
   either way — v1 does not embed events.
   A key turns the vector arm on; without one the merge runs over the keyword list alone.
+  To turn it on, copy `.env.example` to `.env`, set `OPENAI_API_KEY`,
+  and run `up` again so the api container is recreated.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
 
 ### Pointing an agent at it
@@ -209,7 +233,8 @@ docker compose exec -T api sillok mcp
 
 On stdio, **stdout carries the protocol and nothing else**; startup logs go to stderr.
 Either entrance answers `initialize` and `tools/list`, and every tool takes the `project` label.
-Indexing blocks the instance it runs on, so point the agent at it after the run finishes.
+Point the agent at it after the ingest run finishes.
+Until then do not treat the index as complete.
 
 ## Status
 
