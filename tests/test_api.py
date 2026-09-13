@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -25,6 +27,41 @@ def _config(**overrides) -> Config:
     )
     base.update(overrides)
     return Config(**base)
+
+
+# plan.md §5 의 업무 라우트 아홉. 경로로 고른다 — 함수 이름을 바꿔도 검사가 따라온다.
+BUSINESS_ROUTES = [
+    "/v1/events",
+    "/v1/stats/events",
+    "/v1/status",
+    "/v1/search/docs",
+    "/v1/search/events",
+    "/v1/ingest",
+    "/v1/events/{event_id}",
+    "/v1/files",
+    "/v1/docs/proposals",
+]
+
+
+def test_business_routes_are_not_coroutines():
+    """업무 라우트는 `def` 여야 한다 — `async def` 면 모든 요청이 줄을 선다.
+
+    본문이 동기 `service.*` 한 번이라 `await` 할 것이 없는데 `async def` 로 두면
+    그 DB 왕복 동안 이벤트 루프가 잡힌다. 실측으로 동시 여덟 건이 이상적 병렬의
+    여덟 배였다. `def` 면 Starlette 가 스레드풀에서 돌린다.
+
+    **시간을 재지 않는다** — 느린 기계에서 거짓 실패가 난다. 바꾼 그 키워드를 본다.
+    """
+    app = api.create_app(_config())
+    by_path = {r.path: r for r in app.routes if hasattr(r, "endpoint")}
+
+    missing = [p for p in BUSINESS_ROUTES if p not in by_path]
+    assert not missing, missing
+
+    coroutines = [
+        p for p in BUSINESS_ROUTES if inspect.iscoroutinefunction(by_path[p].endpoint)
+    ]
+    assert coroutines == [], coroutines
 
 
 class _Body(BaseModel):
