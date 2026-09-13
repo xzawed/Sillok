@@ -254,7 +254,7 @@ Until then do not treat the index as complete.
 | `POST /v1/events`, `GET /v1/stats/events`, `GET /v1/status` | Working |
 | Search — `POST /v1/search/docs` and `/v1/search/events` | Working. Without a key vector search is empty, which is the designed normal state |
 | `get_event`, `get_file`, `save_doc` | Working. `get_file` opens indexed rows only and answers with a 4000-character window; `save_doc` returns a proposal and never writes Git |
-| Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL. `POST /v1/ingest` runs inline, so that instance stops answering until the run ends |
+| Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL |
 | MCP tools | Working. Eight tools over `POST /mcp` and stdio (`sillok mcp`); each answers with the same envelope as its HTTP face |
 | Search log — `kb_query_logs` | Working. The two search tools write one row per query; `kb_status` counts the zero-hit ones from it |
 
@@ -277,7 +277,7 @@ The design documents are written in Korean.
 | [docs/conventions.md](docs/conventions.md) | Document map, conflict resolution, the documentation gate |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | Problem framing · schema · API and MCP contract |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | The storage decision tree — which writes become documents and which become events |
-| [docs/operations.md](docs/operations.md) | Backup, restore, restart, and that the process answers one request at a time |
+| [docs/operations.md](docs/operations.md) | Backup, restore and restart. Events are the only backup target |
 | [docs/open-questions.md](docs/open-questions.md) | What has no answer yet |
 | [AGENTS.md](AGENTS.md) | How a change ships, and what counts as evidence |
 

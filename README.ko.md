@@ -253,7 +253,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
 | 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 검색이 비는데 그것이 설계상 정상이다 |
 | `get_event` · `get_file` · `save_doc` | 된다. `get_file`은 색인된 행만 열고 4000자 창으로 답하며, `save_doc`은 제안만 돌려주고 Git을 건드리지 않는다 |
-| 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다. `POST /v1/ingest` 는 인라인으로 돌아 그 인스턴스가 run 이 끝날 때까지 답하지 않는다 |
+| 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다 |
 | MCP 도구 | 된다. `POST /mcp` 와 stdio(`sillok mcp`)로 여덟 개. 각 도구는 HTTP 얼굴과 같은 봉투로 답한다 |
 | 검색 로그 — `kb_query_logs` | 된다. 검색 도구 둘이 질의마다 한 행을 남기고, `kb_status` 가 0건 질의를 그 표에서 센다 |
 
@@ -276,7 +276,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 | [docs/conventions.md](docs/conventions.md) | 문서 지도, 충돌 판정, 문서 게이트 |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | 문제 정의 · 스키마 · API와 MCP 계약 |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 결정 트리 — 무엇이 문서가 되고 무엇이 이벤트가 되는가 |
-| [docs/operations.md](docs/operations.md) | 백업·복구·재기동, 그리고 한 번에 한 요청만 답한다는 것 |
+| [docs/operations.md](docs/operations.md) | 백업·복구·재기동. 백업 대상은 이벤트 원장뿐 |
 | [docs/open-questions.md](docs/open-questions.md) | 아직 답이 없는 것 |
 | [AGENTS.md](AGENTS.md) | 한 변경이 나가는 절차와 무엇이 증거인가 |
 

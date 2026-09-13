@@ -26,7 +26,7 @@ module: null
 | [data-model.md](data-model.md) | 테이블·인덱스·제약 | `schema` | DDL, 컬럼 enum 값 |
 | [service-and-mcp.md](service-and-mcp.md) | HTTP API와 MCP 도구 계약 | `api` | 엔드포인트, 도구 8개, 요청·응답 JSON, 에러 코드 enum |
 | [skills/sillok-storage/SKILL.md](skills/sillok-storage/SKILL.md) | 저장 위치 규칙 (타 프로젝트 배포용) | `other` | 이벤트 필수 필드, 결정 트리, 거절 규칙 |
-| [operations.md](operations.md) | 운영 절차 | `runbook` | **백업·복구·재기동, 마이그레이션 실패, 검사 DB 정리, 요청 직렬성** |
+| [operations.md](operations.md) | 운영 절차 | `runbook` | **백업·복구·재기동, 마이그레이션 실패, 검사 DB 정리** |
 | [open-questions.md](open-questions.md) | 아직 답이 없는 것 | `other` | 미해결 질문 전체 |
 | [../README.md](../README.md) | 방문자용 소개 (영문 정본) | `readme` *(경로에서 유도, D29)* | 프로젝트 소개, 빠른 시작, 코드 배치 |
 | [../README.ko.md](../README.ko.md) | 같은 내용의 한국어 사본 | `readme` *(경로에서 유도, D29)* | 없음 — 어긋나면 영문이 이긴다 |

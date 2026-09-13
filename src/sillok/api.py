@@ -288,33 +288,38 @@ def since_filter(raw: str | None) -> datetime | None:
 def _mount_v1(app: FastAPI, cfg: Config) -> None:
     """4–7단계의 라우트 (plan §7). 여기서 SQL 을 쓰지 않는다 — service 함수만 부른다."""
 
+    # **업무 라우트는 `def` 다.** 본문이 동기 `service.*` 한 번이라 `await` 할 것이 없는데
+    # `async def` 로 두면 그 DB 왕복 동안 이벤트 루프를 잡아 **모든 요청이 줄을 선다**
+    # (실측: 동시 8건이 이상적 병렬 예상의 여덟 배였다). `def` 면 Starlette 가
+    # 스레드풀에서 돌려 서로를 막지 않는다. 풀·비동기 드라이버·워커는 더하지 않는다 —
+    # `connect()` 는 호출마다 새 연결이고 D32 가 v1 에 풀이 없음을 전제한다.
     @app.post("/v1/events")
-    async def save_event(body: dict[str, Any]) -> JSONResponse:
+    def save_event(body: dict[str, Any]) -> JSONResponse:
         return ok(service.save_event(cfg.database_url, body))
 
     @app.get("/v1/stats/events")
-    async def event_stats(
+    def event_stats(
         project: str, module: str | None = None, since: str | None = None
     ) -> JSONResponse:
         return ok(service.event_stats(cfg.database_url, project, module, since_filter(since)))
 
     @app.get("/v1/status")
-    async def kb_status(project: str) -> JSONResponse:
+    def kb_status(project: str) -> JSONResponse:
         return ok(service.kb_status(cfg.database_url, project))
 
     @app.post("/v1/search/docs")
-    async def search_docs(body: dict[str, Any]) -> JSONResponse:
+    def search_docs(body: dict[str, Any]) -> JSONResponse:
         # 빈 결과는 오류가 아니다 — 200 에 {"results": []} 다 (D21).
         # 모델이 채울 문장을 여기서 넣지 않는다.
         return ok(service.search_docs(cfg.database_url, body, cfg.openai_api_key))
 
     @app.post("/v1/search/events")
-    async def search_events(body: dict[str, Any]) -> JSONResponse:
+    def search_events(body: dict[str, Any]) -> JSONResponse:
         # v1 은 이벤트를 임베딩하지 않는다 (D34) — 키가 필요 없다.
         return ok(service.search_events(cfg.database_url, body))
 
     @app.post("/v1/ingest")
-    async def run_ingest(body: dict[str, Any]) -> JSONResponse:
+    def run_ingest(body: dict[str, Any]) -> JSONResponse:
         # 운영자 진입점은 CLI 다 (D20). 여기는 같은 Service 함수의 HTTP 얼굴이고
         # 인자까지 같다 — 변경 파일 목록을 받지 않는다 (D30).
         # run 행이 생긴 모든 경우에 ok: true 다. ok: false 는 락 거절과 D37 거절뿐이다.
@@ -329,19 +334,19 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
         )
 
     @app.get("/v1/events/{event_id}")
-    async def get_event(event_id: int, project: str) -> JSONResponse:
+    def get_event(event_id: int, project: str) -> JSONResponse:
         # project 는 필수다 (D35). 없으면 FastAPI 요청 검증이 VALIDATION 으로 접는다.
         # 정수가 아닌 {id} 도 같은 자리에서 걸린다.
         return ok(service.get_event(cfg.database_url, event_id, project))
 
     @app.get("/v1/files")
-    async def get_file(project: str, path: str, offset: int | None = None) -> JSONResponse:
+    def get_file(project: str, path: str, offset: int | None = None) -> JSONResponse:
         # 뿌리는 하나다 (D37). project 는 원장의 라벨이지 경로 성분이 아니다.
         # offset 의 기본값(0)은 **Service 한 곳에만** 둔다 — 두 얼굴이 같은 값을 쓰게 (D36·D46).
         return ok(service.get_file(cfg.database_url, project, path, offset, cfg.workspace))
 
     @app.post("/v1/docs/proposals")
-    async def save_doc(body: dict[str, Any]) -> JSONResponse:
+    def save_doc(body: dict[str, Any]) -> JSONResponse:
         # v1 은 제안 본문과 diff 만 돌려준다. Git 에 쓰지 않는다 (D3·D38).
         return ok(service.save_doc(cfg.database_url, body, cfg.workspace))
 
