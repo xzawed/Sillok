@@ -199,7 +199,7 @@ curl -s -X POST http://127.0.0.1:8080/v1/search/docs \
     "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
 ```
 
-An install without `OPENAI_API_KEY` — this walk — ranks by keyword.
+An install without `OPENAI_API_KEY` — this example — ranks by keyword.
 `score` is not a similarity; it is only comparable inside this response, and a key changes it.
 `excerpt` is shortened here for page width — that `…` is the page's, not the service's.
 The service clips at 800 characters.
