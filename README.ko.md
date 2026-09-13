@@ -63,7 +63,7 @@ Sillok은 RAG 플랫폼이 **아닙니다.**
 ## 빠른 시작
 
 아래 걸음은 HTTP 입니다. 에이전트는 같은 기능을 MCP 로 부릅니다.
-여기의 이벤트는 라벨 `demo` 를 쓰고 색인은 `sillok` 을 쓰는데, 이유는 마지막 절에 있습니다.
+여기의 이벤트는 라벨 `demo` 를 쓰고 색인은 `sillok` 을 쓰는데, 이유는 색인 절에 있습니다.
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
 첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
@@ -177,6 +177,29 @@ docker compose exec api sillok ingest --project sillok
 검색과 `get_file`과 통계가 모두 같은 라벨을 받습니다.
 색인하지 않은 라벨을 물으면 빈 결과가 돌아오고, 그것이 올바른 답입니다.
 
+### 검색은 행을 돌려준다
+
+색인은 `sillok` 에 있습니다. 한 행만 물어봅니다.
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: application/json' \n  -d '{"project":"sillok","query":"Sillok","top_k":1}'
+```
+
+```json
+{ "ok": true, "data": { "results": [
+  { "path": "docs/plan.md",
+    "heading_path": "Sillok — 구현 계약 > 0. 한 줄",
+    "excerpt": "Sillok — 구현 계약 > 0. 한 줄 Git에는 현재 진실만. …",
+    "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
+```
+
+키 없는 설치 — 이 산책이 그렇습니다 — 는 키워드로 순위를 매깁니다.
+`score`는 유사도가 아니며 이 응답 안에서만 비교되고, 키가 있으면 달라집니다.
+`excerpt`는 페이지 폭 때문에 여기서 줄인 것이고 `…` 도 서비스가 아니라 이 페이지가 붙였습니다.
+서비스는 800자에서 자릅니다.
+`commit_sha`는 v1 내내 빈 문자열입니다. 나머지 필드는
+[docs/service-and-mcp.md](docs/service-and-mcp.md)에 있습니다.
+
 ## 어떻게 도는가
 
 ```text
@@ -194,6 +217,10 @@ docker compose exec api sillok ingest --project sillok
   문서 검색은 `tsv` 키워드만 씁니다. 이벤트 검색은 키가 있어도 키워드만입니다 —
   v1 은 이벤트를 임베딩하지 않습니다.
   키가 있으면 벡터 팔이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
+  켜려면 `.env.example` 을 `.env` 로 복사해 `OPENAI_API_KEY` 를 넣고,
+  api 컨테이너가 다시 만들어지도록 `up` 을 한 번 더 돌리십시오.
+  이미 색인된 청크는 ingest 가 백필할 때까지 NULL 로 남으므로,
+  그다음에 색인을 한 번 더 돌리십시오.
 - **비밀은 환경변수로만 옵니다.** [.env.example](.env.example)을 참조하십시오.
 
 ### 에이전트를 붙이는 곳
@@ -208,7 +235,8 @@ docker compose exec -T api sillok mcp
 
 stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr 로 갑니다.
 어느 입구든 `initialize` 와 `tools/list` 에 답하고, 모든 도구가 `project` 라벨을 받습니다.
-색인은 그것이 도는 인스턴스를 막으므로, run 이 끝난 뒤에 에이전트를 붙이십시오.
+에이전트는 ingest run 이 끝난 뒤에 붙이십시오.
+그 전까지는 인덱스를 완료된 것으로 보지 마십시오.
 
 ## 상태
 
@@ -218,7 +246,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
 | 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 팔이 비는데 그것이 설계상 정상이다 |
 | `get_event` · `get_file` · `save_doc` | 된다. `get_file`은 색인된 행만 열고 4000자 창으로 답하며, `save_doc`은 제안만 돌려주고 Git을 건드리지 않는다 |
-| 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다 |
+| 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다. `POST /v1/ingest` 는 인라인으로 돌아 그 인스턴스가 run 이 끝날 때까지 답하지 않는다 |
 | MCP 도구 | 된다. `POST /mcp` 와 stdio(`sillok mcp`)로 여덟 개. 각 도구는 HTTP 얼굴과 같은 봉투로 답한다 |
 | 질의 원장 — `kb_query_logs` | 된다. 검색 도구 둘이 질의마다 한 행을 남기고, `kb_status` 가 0건 질의를 그 표에서 센다 |
 

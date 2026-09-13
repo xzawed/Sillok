@@ -63,7 +63,7 @@ Indexing is not one of the eight. The operator entry point is `sillok ingest`.
 ## Quick start
 
 The walk below is HTTP. An agent reaches the same functions over MCP.
-Events here use the label `demo` and indexing uses `sillok`; the last subsection is why.
+Events here use the label `demo` and indexing uses `sillok`; the indexing subsection is why.
 
 Requires Docker. Nothing else — the API container carries its own Python.
 The first `up` builds that image, so the build sandbox has to reach PyPI.
@@ -178,6 +178,29 @@ A tree without them gives a run that ends `failed` with no files seen.
 Search, `get_file` and statistics all take the same label.
 Asking for a label you never indexed returns an empty result, and that is the correct answer.
 
+### Search returns rows
+
+The index is on `sillok`. Ask for one row:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: application/json' \n  -d '{"project":"sillok","query":"Sillok","top_k":1}'
+```
+
+```json
+{ "ok": true, "data": { "results": [
+  { "path": "docs/plan.md",
+    "heading_path": "Sillok — 구현 계약 > 0. 한 줄",
+    "excerpt": "Sillok — 구현 계약 > 0. 한 줄 Git에는 현재 진실만. …",
+    "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
+```
+
+A keyless install — this walk — ranks by keyword.
+`score` is not a similarity; it is only comparable inside this response, and a key changes it.
+`excerpt` is shortened here for page width — that `…` is the page's, not the service's.
+The service clips at 800 characters.
+`commit_sha` is empty for all of v1. The remaining fields are in
+[docs/service-and-mcp.md](docs/service-and-mcp.md).
+
 ## How it works
 
 ```text
@@ -195,6 +218,10 @@ Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP 
   stays NULL and document search will use `tsv` keywords only. Event search is keywords only
   either way — v1 does not embed events.
   A key turns the vector arm on; without one the merge runs over the keyword list alone.
+  To turn it on, copy `.env.example` to `.env`, set `OPENAI_API_KEY`,
+  and run `up` again so the api container is recreated.
+  Chunks already indexed keep their NULL embeddings until an ingest run backfills them,
+  so index again after that.
 - **Secrets come from the environment only.** See [.env.example](.env.example).
 
 ### Pointing an agent at it
@@ -209,7 +236,8 @@ docker compose exec -T api sillok mcp
 
 On stdio, **stdout carries the protocol and nothing else**; startup logs go to stderr.
 Either entrance answers `initialize` and `tools/list`, and every tool takes the `project` label.
-Indexing blocks the instance it runs on, so point the agent at it after the run finishes.
+Point the agent at it after the ingest run finishes.
+Until then do not treat the index as complete.
 
 ## Status
 
@@ -219,7 +247,7 @@ Indexing blocks the instance it runs on, so point the agent at it after the run 
 | `POST /v1/events`, `GET /v1/stats/events`, `GET /v1/status` | Working |
 | Search — `POST /v1/search/docs` and `/v1/search/events` | Working. Without a key the vector arm is empty, which is the designed normal state |
 | `get_event`, `get_file`, `save_doc` | Working. `get_file` opens indexed rows only and answers with a 4000-character window; `save_doc` returns a proposal and never writes Git |
-| Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL |
+| Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL. `POST /v1/ingest` runs inline, so that instance stops answering until the run ends |
 | MCP tools | Working. Eight tools over `POST /mcp` and stdio (`sillok mcp`); each answers with the same envelope as its HTTP face |
 | Query ledger — `kb_query_logs` | Working. The two search tools write one row per query; `kb_status` counts the zero-hit ones from it |
 
