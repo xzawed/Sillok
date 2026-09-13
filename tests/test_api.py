@@ -6,9 +6,8 @@
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
+from starlette._utils import is_async_callable
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -51,6 +50,8 @@ def test_business_routes_are_not_coroutines():
     여덟 배였다. `def` 면 Starlette 가 스레드풀에서 돌린다.
 
     **시간을 재지 않는다** — 느린 기계에서 거짓 실패가 난다. 바꾼 그 키워드를 본다.
+    Starlette 가 디스패치에 쓰는 술어를 그대로 쓴다 — `iscoroutinefunction` 은
+    `functools.partial(async_fn)` 을 놓친다.
     """
     app = api.create_app(_config())
     by_path = {r.path: r for r in app.routes if hasattr(r, "endpoint")}
@@ -59,7 +60,7 @@ def test_business_routes_are_not_coroutines():
     assert not missing, missing
 
     coroutines = [
-        p for p in BUSINESS_ROUTES if inspect.iscoroutinefunction(by_path[p].endpoint)
+        p for p in BUSINESS_ROUTES if is_async_callable(by_path[p].endpoint)
     ]
     assert coroutines == [], coroutines
 

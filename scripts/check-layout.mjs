@@ -427,8 +427,8 @@ for (const p of md) {
 const RETIRED = [
   ['answers one request at a time', '라우트를 def 로 바꿔 직렬성이 사라졌다'],
   ['한 번에 한 요청만 답한다', '라우트를 def 로 바꿔 직렬성이 사라졌다'],
-  ['stops answering until the run ends', 'ingest 는 이제 스레드풀에서 돌아 인스턴스를 막지 않는다'],
-  ['run 이 끝날 때까지 답하지 않는다', 'ingest 는 이제 스레드풀에서 돌아 인스턴스를 막지 않는다'],
+  ['that instance stops answering until the run ends', 'ingest 는 이제 스레드풀에서 돌아 인스턴스를 막지 않는다'],
+  ['그 인스턴스가 run 이 끝날 때까지 답하지 않는다', 'ingest 는 이제 스레드풀에서 돌아 인스턴스를 막지 않는다'],
   ['v1 확정 결정 D1–D65', 'ADR 제목에서 범위를 뺐다 — D 가 늘 때마다 낡는 구조다'],
   ['같은 구조다', 'D6 유추 (ingest 는 별도 프로세스다)'],
   ['업무 라우트는 아직 없다', '4단계에서 라우트가 생겼다'],
