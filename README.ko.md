@@ -2,7 +2,8 @@
 
 # Sillok · 실록
 
-**저장 위치를 강제하는 지식 원장.**<br>
+**로컬 지식 원장: 현재 규범은 Git 에, 무슨 일이 있었는지는 Postgres 에,
+모델에는 행 몇 개만.**<br>
 현재 진실은 Git에, 무슨 일이 있었는지는 Postgres에. AI는 행 몇 개만 읽습니다.
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -23,9 +24,9 @@
 
 ## 무엇인가
 
-Sillok은 RAG 플랫폼이 **아닙니다.**
-프로젝트의 **규범**과 **이력**을 일부러 다른 곳에 두는 작고 완고한 저장소입니다 —
-위키가 로그가 되지 않게 하려는 것입니다.
+Sillok 은 Git 저장소 옆에서 돌리는 작고 완고한 저장소입니다.
+프로젝트의 **규범**과 **이력**을 일부러 다른 곳에 둡니다 — 위키가 로그가 되지 않게요.
+RAG 플랫폼이 **아닙니다.**
 
 - **Git**은 현재 진실을 담습니다. 현재형으로 쓴 최신본 하나면 됩니다.
 - **Postgres**는 사건 원장과 Git 문서의 검색 인덱스를 담습니다.
@@ -63,7 +64,8 @@ Sillok은 RAG 플랫폼이 **아닙니다.**
 ## 빠른 시작
 
 아래 걸음은 HTTP 입니다. 에이전트는 같은 기능을 MCP 로 부릅니다.
-여기의 이벤트는 라벨 `demo` 를 쓰고 색인은 `sillok` 을 쓰는데, 이유는 색인 절에 있습니다.
+여기의 이벤트는 라벨 `demo` 를, 색인은 `sillok` 을 씁니다 — 둘 다 원장의 라벨이지
+디렉터리가 아니고, 같을 필요도 없습니다.
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
 첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
@@ -182,7 +184,9 @@ docker compose exec api sillok ingest --project sillok
 색인은 `sillok` 에 있습니다. 한 행만 물어봅니다.
 
 ```bash
-curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: application/json' \n  -d '{"project":"sillok","query":"Sillok","top_k":1}'
+curl -s -X POST http://127.0.0.1:8080/v1/search/docs \
+  -H 'Content-Type: application/json' \
+  -d '{"project":"sillok","query":"Sillok","top_k":1}'
 ```
 
 ```json
@@ -193,7 +197,7 @@ curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: appli
     "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
 ```
 
-키 없는 설치 — 이 산책이 그렇습니다 — 는 키워드로 순위를 매깁니다.
+`OPENAI_API_KEY` 가 없는 설치 — 이 예제가 그렇습니다 — 는 키워드로 순위를 매깁니다.
 `score`는 유사도가 아니며 이 응답 안에서만 비교되고, 키가 있으면 달라집니다.
 `excerpt`는 페이지 폭 때문에 여기서 줄인 것이고 `…` 도 서비스가 아니라 이 페이지가 붙였습니다.
 서비스는 800자에서 자릅니다.
@@ -216,7 +220,7 @@ curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: appli
 - **임베딩은 설계상 선택입니다.** `OPENAI_API_KEY`가 없으면 `embedding`은 NULL이고
   문서 검색은 `tsv` 키워드만 씁니다. 이벤트 검색은 키가 있어도 키워드만입니다 —
   v1 은 이벤트를 임베딩하지 않습니다.
-  키가 있으면 벡터 팔이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
+  키가 있으면 벡터 검색이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
   켜려면 `.env.example` 을 `.env` 로 복사해 `OPENAI_API_KEY` 를 넣고,
   api 컨테이너가 다시 만들어지도록 `up` 을 한 번 더 돌리십시오.
   이미 색인된 청크는 ingest 가 백필할 때까지 NULL 로 남으므로,
@@ -244,7 +248,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 |---|---|
 | Compose · 마이그레이션 · FastAPI 골격 | 된다 |
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
-| 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 팔이 비는데 그것이 설계상 정상이다 |
+| 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 검색이 비는데 그것이 설계상 정상이다 |
 | `get_event` · `get_file` · `save_doc` | 된다. `get_file`은 색인된 행만 열고 4000자 창으로 답하며, `save_doc`은 제안만 돌려주고 Git을 건드리지 않는다 |
 | 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다. `POST /v1/ingest` 는 인라인으로 돌아 그 인스턴스가 run 이 끝날 때까지 답하지 않는다 |
 | MCP 도구 | 된다. `POST /mcp` 와 stdio(`sillok mcp`)로 여덟 개. 각 도구는 HTTP 얼굴과 같은 봉투로 답한다 |
