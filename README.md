@@ -2,9 +2,8 @@
 
 # Sillok · 실록
 
-**A local knowledge ledger: current rules in Git, what happened in Postgres,
-a few rows to the model.**<br>
-Current truth lives in Git. What happened lives in Postgres. AI reads a handful of rows.
+**A local knowledge ledger: current truth in Git, what happened in Postgres.
+The agent gets a few rows, not the files.**
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -24,16 +23,17 @@ A personal tool that happens to be public — no support, no compatibility promi
 
 ## What it is
 
-Sillok is a small, opinionated store you run next to a Git repository.
+Sillok is a small, opinionated store. You point it at one Git working tree.
 It keeps a project's **rules** and its **history** in separate places, on purpose —
 so a wiki never turns into a log. It is **not** a RAG platform.
 
 - **Git** holds current truth: one latest version, written in the present tense.
 - **Postgres** holds the event ledger plus a search index over the Git documents.
-- **AI** reaches both through a narrow tool surface that returns a few rows, never whole files.
+- **An agent** reaches both through a narrow tool surface that returns rows, never a whole file.
+  `get_file` is a window into one indexed path, not a dump.
 
 The point is that **token cost per query stays roughly flat as the corpus grows** —
-the model is sent a handful of rows, not the matching files.
+the agent is sent a handful of rows, not the matching files.
 Returning "all the relevant documents" is treated as a design violation, not a feature.
 
 ## Why
@@ -64,7 +64,7 @@ Indexing is not one of the eight. The operator entry point is `sillok ingest`.
 
 ## Quick start
 
-The walk below is HTTP. An agent reaches the same functions over MCP.
+The examples below use HTTP. An agent reaches the same functions over MCP.
 Events here use the label `demo` and indexing uses `sillok` — two labels on the ledger,
 not directories, and they do not have to match.
 
@@ -167,7 +167,7 @@ Backup, restore and restart are in [docs/operations.md](docs/operations.md).
 
 ### Indexing uses a label, not a path
 
-The walk above writes events under `demo`. Documents are a separate step:
+The examples above write events under `demo`. Documents are a separate step:
 
 ```bash
 docker compose exec api sillok ingest --project sillok
@@ -203,6 +203,7 @@ An install without `OPENAI_API_KEY` — this walk — ranks by keyword.
 `score` is not a similarity; it is only comparable inside this response, and a key changes it.
 `excerpt` is shortened here for page width — that `…` is the page's, not the service's.
 The service clips at 800 characters.
+`excerpt` begins with the heading path — that is what the service returns, not a duplicate.
 `commit_sha` is empty for all of v1. The remaining fields are in
 [docs/service-and-mcp.md](docs/service-and-mcp.md).
 
@@ -211,16 +212,17 @@ The service clips at 800 characters.
 ```text
 [1] PostgreSQL + pgvector   kb_documents · kb_chunks · kb_events · logs
 [2] Knowledge Service       FastAPI. The only door to the database
-[3] Exits                   MCP tools · Skill · JSON status API
+[3] Access                  MCP tools · Skill (the storage decision tree) · JSON status API
 ```
 
-Layers 1 and 2 are running. Layer 3 exposes both the JSON API and the eight MCP tools.
+Layers 1 and 2 are the running parts. Layer 3 is how you reach them —
+the JSON API and the eight MCP tools.
 
-- **The unit of the invariant is the Service function, not HTTP.**
+- **The only code that talks to the database is the Service.**
   MCP and any human UI must go through the HTTP API; the CLI calls the same functions in-process.
   What is forbidden is a second SQL layer anywhere.
 - **Embeddings are optional by design.** Without `OPENAI_API_KEY` the `embedding` column
-  stays NULL and document search will use `tsv` keywords only. Event search is keywords only
+  stays NULL and document search uses keyword matching only. Event search is keywords only
   either way — v1 does not embed events.
   A key turns vector search on; without one the merge runs over the keyword list alone.
   To turn it on, copy `.env.example` to `.env`, set `OPENAI_API_KEY`,
@@ -254,7 +256,7 @@ Until then do not treat the index as complete.
 | `get_event`, `get_file`, `save_doc` | Working. `get_file` opens indexed rows only and answers with a 4000-character window; `save_doc` returns a proposal and never writes Git |
 | Indexing — `sillok ingest` and `POST /v1/ingest` | Working. Embeddings need a key; without one the vectors stay NULL. `POST /v1/ingest` runs inline, so that instance stops answering until the run ends |
 | MCP tools | Working. Eight tools over `POST /mcp` and stdio (`sillok mcp`); each answers with the same envelope as its HTTP face |
-| Query ledger — `kb_query_logs` | Working. The two search tools write one row per query; `kb_status` counts the zero-hit ones from it |
+| Search log — `kb_query_logs` | Working. The two search tools write one row per query; `kb_status` counts the zero-hit ones from it |
 
 > The source of truth for progress is [docs/plan.md](docs/plan.md) §7 and §9.
 
@@ -275,7 +277,7 @@ The design documents are written in Korean.
 | [docs/conventions.md](docs/conventions.md) | Document map, conflict resolution, the documentation gate |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | Problem framing · schema · API and MCP contract |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | The storage decision tree — which writes become documents and which become events |
-| [docs/operations.md](docs/operations.md) | Backup, restore and restart. Events are the only backup target |
+| [docs/operations.md](docs/operations.md) | Backup, restore, restart, and that the process answers one request at a time |
 | [docs/open-questions.md](docs/open-questions.md) | What has no answer yet |
 | [AGENTS.md](AGENTS.md) | How a change ships, and what counts as evidence |
 
