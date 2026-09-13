@@ -2,8 +2,8 @@
 
 # Sillok · 실록
 
-**저장 위치를 강제하는 지식 원장.**<br>
-현재 진실은 Git에, 무슨 일이 있었는지는 Postgres에. AI는 행 몇 개만 읽습니다.
+**로컬 지식 원장: 현재 진실은 Git 에, 무슨 일이 있었는지는 Postgres 에.
+에이전트에는 파일이 아니라 행 몇 개만 갑니다.**
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -23,15 +23,17 @@
 
 ## 무엇인가
 
-Sillok은 RAG 플랫폼이 **아닙니다.**
-프로젝트의 **규범**과 **이력**을 일부러 다른 곳에 두는 작고 완고한 저장소입니다 —
-위키가 로그가 되지 않게 하려는 것입니다.
+Sillok 은 작고 완고한 저장소입니다. Git 작업 나무 하나에 겨눠 씁니다.
+프로젝트의 **규범**과 **이력**을 일부러 다른 곳에 둡니다 — 위키가 로그가 되지 않게요.
+RAG 플랫폼이 **아닙니다.**
 
 - **Git**은 현재 진실을 담습니다. 현재형으로 쓴 최신본 하나면 됩니다.
 - **Postgres**는 사건 원장과 Git 문서의 검색 인덱스를 담습니다.
-- **AI**는 좁은 도구 표면을 통해서만 닿고, 문서가 아니라 **행**을 받습니다.
+- **에이전트**는 좁은 도구 표면을 통해서만 닿고, 파일이 아니라 **행**을 받습니다.
+  `get_file` 도 색인된 경로 하나의 창이지 통째 덤프가 아닙니다.
 
-핵심은 **적재량이 늘어도 질의당 비용이 거의 고정**이라는 점입니다.
+핵심은 **적재량이 늘어도 질의당 토큰 비용이 거의 고정**이라는 점입니다 —
+에이전트가 받는 것은 맞는 파일이 아니라 행 몇 개입니다.
 "관련 문서 전부" 반환은 기능이 아니라 설계 위반으로 봅니다.
 
 ## 왜
@@ -62,8 +64,9 @@ Sillok은 RAG 플랫폼이 **아닙니다.**
 
 ## 빠른 시작
 
-아래 걸음은 HTTP 입니다. 에이전트는 같은 기능을 MCP 로 부릅니다.
-여기의 이벤트는 라벨 `demo` 를 쓰고 색인은 `sillok` 을 쓰는데, 이유는 색인 절에 있습니다.
+아래 예제는 HTTP 입니다. 에이전트는 같은 기능을 MCP 로 부릅니다.
+여기의 이벤트는 라벨 `demo` 를, 색인은 `sillok` 을 씁니다 — 둘 다 원장의 라벨이지
+디렉터리가 아니고, 같을 필요도 없습니다.
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
 첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
@@ -163,7 +166,7 @@ curl -s "http://127.0.0.1:8080/v1/stats/events?project=demo"
 
 ### 색인은 경로가 아니라 라벨로 한다
 
-위 산책은 이벤트를 `demo` 아래에 씁니다. 문서는 따로 넣습니다.
+위 예제는 이벤트를 `demo` 아래에 씁니다. 문서는 따로 넣습니다.
 
 ```bash
 docker compose exec api sillok ingest --project sillok
@@ -182,7 +185,9 @@ docker compose exec api sillok ingest --project sillok
 색인은 `sillok` 에 있습니다. 한 행만 물어봅니다.
 
 ```bash
-curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: application/json' \n  -d '{"project":"sillok","query":"Sillok","top_k":1}'
+curl -s -X POST http://127.0.0.1:8080/v1/search/docs \
+  -H 'Content-Type: application/json' \
+  -d '{"project":"sillok","query":"Sillok","top_k":1}'
 ```
 
 ```json
@@ -193,10 +198,11 @@ curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: appli
     "commit_sha": "", "status": "current", "score": 0.016393 } ] } }
 ```
 
-키 없는 설치 — 이 산책이 그렇습니다 — 는 키워드로 순위를 매깁니다.
+`OPENAI_API_KEY` 가 없는 설치 — 이 예제가 그렇습니다 — 는 키워드로 순위를 매깁니다.
 `score`는 유사도가 아니며 이 응답 안에서만 비교되고, 키가 있으면 달라집니다.
 `excerpt`는 페이지 폭 때문에 여기서 줄인 것이고 `…` 도 서비스가 아니라 이 페이지가 붙였습니다.
 서비스는 800자에서 자릅니다.
+`excerpt` 는 heading 경로로 시작합니다 — 서비스가 그렇게 돌려주는 것이지 중복이 아닙니다.
 `commit_sha`는 v1 내내 빈 문자열입니다. 나머지 필드는
 [docs/service-and-mcp.md](docs/service-and-mcp.md)에 있습니다.
 
@@ -205,18 +211,19 @@ curl -s -X POST http://127.0.0.1:8080/v1/search/docs \n  -H 'Content-Type: appli
 ```text
 [1] PostgreSQL + pgvector   kb_documents · kb_chunks · kb_events · 로그
 [2] Knowledge Service       FastAPI. DB를 만지는 유일한 문
-[3] 출구                    MCP 도구 · Skill · JSON 현황 API
+[3] 접근                    MCP 도구 · Skill (저장 위치 결정 트리) · JSON 현황 API
 ```
 
-[1]과 [2]는 서 있고 [3]은 JSON API와 MCP 도구 여덟을 함께 냅니다.
+[1]과 [2]가 도는 부분이고, [3]은 그것에 닿는 길입니다 —
+JSON API 와 MCP 도구 여덟입니다.
 
-- **불변식의 단위는 Service 함수이지 HTTP가 아닙니다.** MCP와 사람용 UI는 HTTP API를 통해야 하고,
+- **DB 에 말을 거는 코드는 Service 뿐입니다.** MCP와 사람용 UI는 HTTP API를 통해야 하고,
   CLI는 같은 함수를 인프로세스로 부릅니다.
   금지되는 것은 어디서든 **두 번째 SQL 계층**이 생기는 것입니다.
 - **임베딩은 설계상 선택입니다.** `OPENAI_API_KEY`가 없으면 `embedding`은 NULL이고
-  문서 검색은 `tsv` 키워드만 씁니다. 이벤트 검색은 키가 있어도 키워드만입니다 —
+  문서 검색은 키워드 대조만 씁니다. 이벤트 검색은 키가 있어도 키워드만입니다 —
   v1 은 이벤트를 임베딩하지 않습니다.
-  키가 있으면 벡터 팔이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
+  키가 있으면 벡터 검색이 켜지고, 없으면 병합이 키워드 목록 하나 위에서만 돕니다.
   켜려면 `.env.example` 을 `.env` 로 복사해 `OPENAI_API_KEY` 를 넣고,
   api 컨테이너가 다시 만들어지도록 `up` 을 한 번 더 돌리십시오.
   이미 색인된 청크는 ingest 가 백필할 때까지 NULL 로 남으므로,
@@ -244,11 +251,11 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 |---|---|
 | Compose · 마이그레이션 · FastAPI 골격 | 된다 |
 | `POST /v1/events` · `GET /v1/stats/events` · `GET /v1/status` | 된다 |
-| 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 팔이 비는데 그것이 설계상 정상이다 |
+| 검색 — `POST /v1/search/docs` 와 `/v1/search/events` | 된다. 키가 없으면 벡터 검색이 비는데 그것이 설계상 정상이다 |
 | `get_event` · `get_file` · `save_doc` | 된다. `get_file`은 색인된 행만 열고 4000자 창으로 답하며, `save_doc`은 제안만 돌려주고 Git을 건드리지 않는다 |
 | 색인 — `sillok ingest` 와 `POST /v1/ingest` | 된다. 임베딩은 키가 있어야 하고, 없으면 벡터가 NULL 로 남는다. `POST /v1/ingest` 는 인라인으로 돌아 그 인스턴스가 run 이 끝날 때까지 답하지 않는다 |
 | MCP 도구 | 된다. `POST /mcp` 와 stdio(`sillok mcp`)로 여덟 개. 각 도구는 HTTP 얼굴과 같은 봉투로 답한다 |
-| 질의 원장 — `kb_query_logs` | 된다. 검색 도구 둘이 질의마다 한 행을 남기고, `kb_status` 가 0건 질의를 그 표에서 센다 |
+| 검색 로그 — `kb_query_logs` | 된다. 검색 도구 둘이 질의마다 한 행을 남기고, `kb_status` 가 0건 질의를 그 표에서 센다 |
 
 > 진행 상태의 정본은 [docs/plan.md](docs/plan.md) §7·§9입니다.
 
@@ -269,7 +276,7 @@ stdio 에서는 **stdout 이 프로토콜만 나르고** 기동 로그는 stderr
 | [docs/conventions.md](docs/conventions.md) | 문서 지도, 충돌 판정, 문서 게이트 |
 | [docs/spec.md](docs/spec.md) · [docs/data-model.md](docs/data-model.md) · [docs/service-and-mcp.md](docs/service-and-mcp.md) | 문제 정의 · 스키마 · API와 MCP 계약 |
 | [docs/skills/sillok-storage/SKILL.md](docs/skills/sillok-storage/SKILL.md) | 저장 위치 결정 트리 — 무엇이 문서가 되고 무엇이 이벤트가 되는가 |
-| [docs/operations.md](docs/operations.md) | 백업·복구·재기동. 백업 대상은 이벤트 원장뿐 |
+| [docs/operations.md](docs/operations.md) | 백업·복구·재기동, 그리고 한 번에 한 요청만 답한다는 것 |
 | [docs/open-questions.md](docs/open-questions.md) | 아직 답이 없는 것 |
 | [AGENTS.md](AGENTS.md) | 한 변경이 나가는 절차와 무엇이 증거인가 |
 
