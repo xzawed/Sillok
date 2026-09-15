@@ -111,6 +111,40 @@ def test_a_query_with_no_lexemes_returns_nothing(indexed):
     assert docs({"query": "???"}) == []
 
 
+def test_a_key_without_vectors_still_returns_nothing(indexed, db, monkeypatch):
+    """**D65 의 조건은 키가 아니라 문서 벡터다.**
+
+    키만 있고 `embedding` 이 NULL 이면 벡터 팔이 `IS NOT NULL` 에 걸려 비므로
+    필터 없는 0건이 그대로 난다. 문서가 `키가 있으면 0건이 안 난다` 로 적었던 자리이고,
+    실제로 그 상태의 원장에 필터 없는 `hit_count=0` 행이 남아 있다.
+
+    실제 키를 쓰지 않는다 — `_embed` 를 갈아끼워 질의 벡터만 만든다.
+    """
+    # 영벡터를 쓰지 않는다 — 코사인 거리가 `0/0` 이라 NaN 이고(실측), 그러면 이 검사가
+    # `팔이 찬다` 가 아니라 `NaN 이 정렬된다` 를 잠근다. 거리가 정의되는 값을 쓴다.
+    KNOWN = [0.5, -0.25, 0.125] + [0.0] * 1533
+    monkeypatch.setattr(service, "_embed", lambda texts, api_key: [KNOWN])
+
+    null_chunks = db.execute(
+        "SELECT count(*) AS n FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
+        " WHERE d.project = %s AND c.embedding IS NULL",
+        (PROJECT,),
+    ).fetchone()["n"]
+    assert null_chunks > 0, "이 fixture 는 키 없이 색인한다"
+
+    body = {"project": PROJECT, "query": "이런낱말은없다xyz"}
+    assert service.search_docs(DSN, body, "sk-not-real")["results"] == []
+
+    # **대조군.** 이것이 없으면 `언제나 빈 배열` 버그도 초록이다.
+    db.execute(
+        "UPDATE kb_chunks SET embedding = %s::vector WHERE id = ("
+        "  SELECT c.id FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
+        "  WHERE d.project = %s ORDER BY c.id LIMIT 1)",
+        (str(KNOWN), PROJECT),
+    )
+    assert len(service.search_docs(DSN, body, "sk-not-real")["results"]) >= 1
+
+
 # --- 필터 (D33 §1) ----------------------------------------------------------
 
 
