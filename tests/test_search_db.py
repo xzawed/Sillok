@@ -120,7 +120,10 @@ def test_a_key_without_vectors_still_returns_nothing(indexed, db, monkeypatch):
 
     실제 키를 쓰지 않는다 — `_embed` 를 갈아끼워 질의 벡터만 만든다.
     """
-    monkeypatch.setattr(service, "_embed", lambda texts, api_key: [[0.0] * 1536])
+    # 영벡터를 쓰지 않는다 — 코사인 거리가 `0/0` 이라 NaN 이고(실측), 그러면 이 검사가
+    # `팔이 찬다` 가 아니라 `NaN 이 정렬된다` 를 잠근다. 거리가 정의되는 값을 쓴다.
+    KNOWN = [0.5, -0.25, 0.125] + [0.0] * 1533
+    monkeypatch.setattr(service, "_embed", lambda texts, api_key: [KNOWN])
 
     null_chunks = db.execute(
         "SELECT count(*) AS n FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
@@ -137,7 +140,7 @@ def test_a_key_without_vectors_still_returns_nothing(indexed, db, monkeypatch):
         "UPDATE kb_chunks SET embedding = %s::vector WHERE id = ("
         "  SELECT c.id FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
         "  WHERE d.project = %s ORDER BY c.id LIMIT 1)",
-        (str([0.0] * 1536), PROJECT),
+        (str(KNOWN), PROJECT),
     )
     assert len(service.search_docs(DSN, body, "sk-not-real")["results"]) >= 1
 
