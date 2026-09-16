@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 import psycopg
 import pytest
 from psycopg.rows import dict_row
@@ -13,6 +15,7 @@ from psycopg.rows import dict_row
 from sillok import search, service
 
 from dbcheck import DSN, needs_db
+from test_service import vector_mechanism_in
 
 PROJECT = "t_step6"
 FM = "---\ntitle: T\ndoc_type: other\nstatus: current\nmodule: null\n---\n\n"
@@ -148,10 +151,39 @@ def test_a_key_without_vectors_still_returns_nothing(indexed, db, monkeypatch):
 # --- 필터 (D33 §1) ----------------------------------------------------------
 
 
-def test_filters_are_applied_in_the_arm_not_after_the_merge(indexed):
-    """병합 뒤에 거르면 걸러질 행이 후보 칸을 먹는다."""
-    assert docs({"query": "검색"})
-    assert docs({"query": "검색", "doc_type": "adr"}) == []
+def test_filters_are_applied_in_the_arm_not_after_the_merge(indexed, tmp_path):
+    """병합 뒤에 거르면 걸러질 행이 후보 칸을 먹는다.
+
+    **옛 본문은 이 고장을 못 봤다.** 색인에 `doc_type=adr` 문서가 없어서 두 구현이
+    똑같이 빈 목록을 냈다 — 팔에서 걸러도 병합 뒤에 걸러도 결과가 같다 (Grok 지적).
+
+    고장이 보이려면 **풀이 실제로 자라야 한다.** 걸릴 문서를 `CANDIDATE_POOL` 보다 많이
+    쌓고, 찾는 문서 하나를 그 홍수보다 뒤로 보낸다. 팔에서 걸면 필터가 홍수를 먼저
+    지워 그 하나가 풀에 들고, 병합 뒤에 걸면 홍수가 풀을 채워 그 하나가 사라진다.
+    """
+    docs_dir = tmp_path / "docs"
+    body = FM + "# 홍수\n\n필터낱말 본문\n"
+    for i in range(search.CANDIDATE_POOL + 5):
+        (docs_dir / f"z{i:03d}.md").write_text(body, encoding="utf-8")
+    # 같은 낱말을 갖지만 `doc_type` 이 다르고, **이름이 홍수보다 뒤다.**
+    # `adr/` 에 두면 경로가 `docs/` 보다 앞서 정렬돼 필터 없이도 늘 1위가 된다 —
+    # 그러면 아래 대조군이 아무것도 증명하지 못한다 (실측으로 한 번 걸렸다).
+    # `doc_type` 은 경로가 아니라 front matter 가 정한다 (D29).
+    (docs_dir / "zzzz-target.md").write_text(
+        "---\ntitle: T\ndoc_type: adr\nstatus: current\nmodule: null\n---\n\n# 대상\n\n필터낱말 본문\n",
+        encoding="utf-8",
+    )
+    service.ingest(DSN, PROJECT, str(tmp_path))
+
+    got = docs({"query": "필터낱말", "doc_type": "adr", "top_k": 8})
+    assert [r["path"] for r in got] == ["docs/zzzz-target.md"], (
+        "필터가 팔이 아니라 병합 뒤에 걸렸다 — 홍수가 후보 칸을 먹었다"
+    )
+    # 필터 없이 부르면 홍수가 상위를 채운다. 위 결과가 우연이 아님을 보인다.
+    flooded = {r["path"] for r in docs({"query": "필터낱말", "top_k": 8})}
+    assert "docs/zzzz-target.md" not in flooded
+
+    # 집합을 비우는 필터는 여전히 빈 목록이다 (D33 §1).
     assert docs({"query": "검색", "status": "stale"}) == []
 
 
@@ -230,6 +262,49 @@ def test_the_cap_does_not_refill(indexed, tmp_path):
 
 
 # --- 순서 (D33 §7) ----------------------------------------------------------
+
+
+def test_the_candidate_pool_boundary_uses_c_collation(indexed, tmp_path, db):
+    """D33 §3 의 `COLLATE "C"` 행. **위 동점 검사로는 못 잡는다** — 실측으로 확인했다.
+
+    최종 순서는 파이썬이 정하므로(`order_and_cut`) SQL 의 `COLLATE` 를 지워도 출력 순서가
+    안 바뀐다. `COLLATE "C"` 가 실제로 사는 자리는 **후보 풀 60행을 고르는 `ORDER BY`** 다.
+    그래서 **풀이 실제로 자를 만큼** 동점 행을 만들어야 이 규칙이 보인다.
+
+    동점 청크를 `CANDIDATE_POOL + 1` 개 만든다. 이름 하나만 로케일이 가르는 것으로 둔다:
+        C 정렬   docs/_x.md < docs/a00.md      → `_x` 가 풀에 들고 `a59` 가 잘린다
+        DB 기본  docs/a00.md < … < docs/_x.md → `_x` 가 잘린다
+    `COLLATE "C"` 를 지우면 `_x` 가 결과에서 사라진다.
+
+    **이 검사가 무는 것은 키워드 팔의 `COLLATE` 다.** 벡터 팔의 같은 절은 키가 없는
+    v1 에서 아예 실행되지 않으므로 여기서 잠기지 않는다 (Grok 지적).
+    """
+    # **공허해질 수 있는 검사라 먼저 대조한다.** DB 기본 정렬이 이미 C 면 `COLLATE` 를
+    # 지워도 순서가 같아 이 검사가 초록인 채로 아무것도 증명하지 않는다 — 이 PR 이
+    # 없애려는 바로 그 부류다. 조용히 지나가지 않게 이유를 적고 skip 한다.
+    #
+    # `VALUES (...)` 로 쓰지 않는다 — `test_db_tests_only_touch_their_own_project` 의
+    # 그물이 그 모양의 첫 문자열을 project 이름으로 읽는다. 실제로 한 번 물렸다.
+    row = db.execute(
+        """
+        SELECT ('_x' < 'a00') AS by_default,
+               ('_x' COLLATE "C" < 'a00' COLLATE "C") AS by_c
+        """
+    ).fetchone()
+    if row["by_default"] == row["by_c"]:
+        pytest.skip("이 DB 의 기본 정렬이 C 와 같아 COLLATE 제거를 관측할 수 없다")
+    docs_dir = tmp_path / "docs"
+    body = FM + "# 동점\n\n풀경계낱말 본문이 완전히 같다\n"
+    for i in range(search.CANDIDATE_POOL):
+        (docs_dir / f"a{i:02d}.md").write_text(body, encoding="utf-8")
+    (docs_dir / "_x.md").write_text(body, encoding="utf-8")
+    service.ingest(DSN, PROJECT, str(tmp_path))
+
+    got = docs({"query": "풀경계낱말", "top_k": 12})
+    paths = [r["path"] for r in got]
+    assert len(got) == 12
+    # 전부 동점이므로 파이썬 정렬은 키 오름차순이고, `_` 는 `a` 보다 앞이다.
+    assert paths[0] == "docs/_x.md", f"풀이 C 순서로 잘리지 않았다: {paths[:3]}"
 
 
 def test_the_same_query_returns_the_same_rows(indexed):
@@ -338,6 +413,32 @@ def test_commit_sha_is_empty_and_status_comes_from_the_document(indexed):
 # --- 이벤트 (D34) -----------------------------------------------------------
 
 
+def _captured_sql(monkeypatch, call) -> list[str]:
+    """`call()` 이 Postgres 로 실제로 보낸 질의문을 전부 모아 돌려준다.
+
+    감싸는 곳은 psycopg 의 Connection·Cursor 네 클래스다. 로컬 커서만 감싸면
+    도우미가 `connect()` 를 새로 여는 순간 새어 나간다.
+    `test_event_stats_never_sends_a_vector_query` 와 같은 기전이다.
+    """
+    seen: list[str] = []
+    for target, names in (
+        (psycopg.Connection, ("execute",)),
+        (psycopg.Cursor, ("execute", "executemany")),
+        (psycopg.ClientCursor, ("execute", "executemany")),
+        (psycopg.ServerCursor, ("execute", "executemany")),
+    ):
+        for name in names:
+            original = getattr(target, name)
+
+            def spy(self, query, *args, _original=original, **kwargs):
+                seen.append(str(query))
+                return _original(self, query, *args, **kwargs)
+
+            monkeypatch.setattr(target, name, spy)
+    call()
+    return seen
+
+
 def _add_event(db, title, summary, root_cause=None, resolution=None, kind="failure"):
     return db.execute(
         "INSERT INTO kb_events (project, kind, title, summary, root_cause, resolution,"
@@ -387,17 +488,22 @@ def test_event_score_is_the_single_list_rrf(clean, db):
     assert got[0]["score"] == round(1.0 / (search.RRF_K + 1), search.SCORE_DIGITS)
 
 
-def test_events_have_no_vector_arm(clean, db):
+def test_events_have_no_vector_arm(clean, db, monkeypatch):
     """v1 은 이벤트를 임베딩하지 않는다 (D34 §5).
 
-    전부 NULL 인 컬럼에 거리를 걸면 정렬이 물리 순서가 되고 오류는 없다.
+    **옛 본문은 데이터를 셌다** — `embedding IS NOT NULL` 이 0행인지. 그것으로는
+    `search_events` 에 `ORDER BY embedding <=> …` 를 더해도 초록이다. 컬럼이 전부
+    NULL 이면 거리 정렬이 그냥 물리 순서가 되고 오류도 안 나기 때문이다 (Grok 지적).
+
+    D34 가 약속한 것은 **SQL 에 벡터 연산자가 없다** 이므로 실행된 질의문을 잡아서 본다.
+    `event_stats` 가 이미 같은 감시를 쓴다 — 잡는 대상만 틀려 있었다.
     """
     _add_event(db, "벡터없음", "요약")
-    left = db.execute(
-        "SELECT count(*) AS n FROM kb_events WHERE project = %s AND embedding IS NOT NULL",
-        (PROJECT,),
-    ).fetchone()["n"]
-    assert left == 0
+    seen = _captured_sql(monkeypatch, lambda: events({"query": "벡터없음"}))
+
+    assert seen, "질의를 하나도 잡지 못했다 — 캡처가 비면 이 검사는 공허하다"
+    offenders = {sql: found for sql in seen if (found := vector_mechanism_in(sql))}
+    assert offenders == {}, f"search_events 가 벡터 기전을 썼다: {offenders}"
 
 
 def test_the_event_tsv_expression_matches_the_module_constant(clean, db):
@@ -421,6 +527,27 @@ def test_the_event_tsv_expression_matches_the_module_constant(clean, db):
     assert fields(actual) == fields(service.EVENT_TSV_INPUT_SQL)
     assert fields(actual) == ["title", "summary", "root_cause", "resolution"]
     assert f"'{service.TS_CONFIG}'" in actual
+
+
+@needs_db
+def test_the_query_side_uses_the_same_dictionary(clean, db, monkeypatch):
+    """**짝의 반대쪽이다.** 위 검사는 DDL 의 구성만 못 박는다.
+
+    질의 쪽이 다른 사전을 쓰면 색인과 질의가 갈라지는데, **한국어는 어느 사전에서나
+    같은 렉심이라** 네 필드 검사가 전부 초록인 채로 지나간다 (D34 §2, Grok 지적).
+
+    `inspect.getsource` 로 보지 않는다. 이 저장소의 선례가 그것을 기각했다 —
+    기전은 소스 텍스트가 아니라 **Postgres 에 가는 질의문**이고, 소스로 보면
+    상수를 변수로 이어 붙이거나 본문이 위임으로 바뀌는 순간 놓친다.
+    위 검사가 들인 감시가 렌더된 SQL 을 그대로 준다.
+    """
+    _add_event(db, "사전낱말", "요약")
+    seen = _captured_sql(monkeypatch, lambda: events({"query": "사전낱말"}))
+
+    assert seen, "질의를 하나도 잡지 못했다 — 캡처가 비면 이 검사는 공허하다"
+    configs = {c for sql in seen for c in re.findall(r"to_tsquery\(\s*'([^']+)'", sql)}
+    assert configs, f"질의문에 tsquery 구성이 없다: {seen}"
+    assert configs == {service.TS_CONFIG}, f"질의 쪽이 다른 사전을 썼다: {configs}"
 
 
 # --- HTTP 얼굴 --------------------------------------------------------------
@@ -487,6 +614,9 @@ def test_sql_rank_keeps_ties_as_ties(indexed, tmp_path, db):
     **동점이 사라지고 알파벳 순서가 그대로 점수가 된다.** 그것이 이 결정이 막으려는 것이다.
     같은 텍스트를 가진 두 문서는 `ts_rank` 가 같으므로 `score` 도 같아야 한다.
     """
+    # 이름은 그냥 두 개면 된다. **로케일을 가르는 것은 이 검사가 아니다** —
+    # `COLLATE "C"` 는 출력 순서가 아니라 후보 풀을 고르는 자리에 살고,
+    # 그 자리는 아래 `test_the_candidate_pool_boundary_uses_c_collation` 이 맡는다.
     for name in ("aaa", "zzz"):
         (tmp_path / "docs" / f"{name}.md").write_text(
             FM + "# 같음\n\n동점낱말 본문이 완전히 같다\n", encoding="utf-8"
