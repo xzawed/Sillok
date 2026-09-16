@@ -644,3 +644,55 @@ def test_a_repeated_offset_takes_the_last_value(monkeypatch):
     r = _client().get("/v1/files?project=p&path=docs/a.md&offset=1&offset=2")
     assert r.status_code == 200
     assert 2 in seen["args"] and 1 not in seen["args"], seen["args"]
+
+
+# --- 질의 임베딩 실패 (D33 §4 가 약속한 검사) --------------------------------
+
+# 예외 문구에 비밀을 싣는다. 봉투가 예외를 그대로 실어 나르면 이 문자열이 응답에 뜬다.
+# **`sk-` 뒤를 16자 이상으로 늘리지 않는다** — 게이트의 키 모양 검사(D56)가 `tests/` 도 보고,
+# 늘리는 순간 "비밀을 가리는지 보는 검사"가 "비밀이 있다"로 붉어진다.
+EMBED_SECRET = "key=sk-live-hunter2 dsn=postgresql://u:pw@h/db"
+
+# `connect` 에 닿았다는 **구별되는 신호**다. 일부러 VALIDATION 이라 422 로 나간다 —
+# 닿지 않는 DSN 을 쓰면 연결 실패가 INTERNAL 500 이 되어 임베딩 실패와 구별되지 않는다.
+# 그 구별이 없으면 갈음 구현을 주입해도 검사가 초록이다 (실측으로 확인했다).
+DB_REACHED = "DB WAS REACHED"
+
+
+def _embed_boom(texts, api_key):  # noqa: ARG001 - 서명만 같으면 된다
+    raise RuntimeError(EMBED_SECRET)
+
+
+def _connect_tripwire(dsn, **kwargs):  # noqa: ARG001
+    raise service.ValidationFailed(DB_REACHED)
+
+
+def _search_docs_with_a_broken_embedder(monkeypatch):
+    """임베딩만 고장 낸 채 `search_docs` 를 때린다. DB 는 지뢰선이다."""
+    monkeypatch.setattr(service, "_embed", _embed_boom)
+    monkeypatch.setattr(service, "connect", _connect_tripwire)
+    return _client(openai_api_key="sk-live-hunter2").post(
+        "/v1/search/docs", json={"project": "sillok", "query": "검색"}
+    )
+
+
+def test_query_embedding_failure_is_internal_not_a_keyword_fallback(monkeypatch):
+    """D33 §4 가 약속하고 트리에 없던 검사다 — `임베딩을 실패시키고 500과 고정 문구를 단언`.
+
+    **`service.search_docs` 를 가로채면 이 고장을 잠그지 못한다.** 그 자리를 가로채면
+    구현이 키워드 결과로 갈음해도 검사가 초록이다. `_embed` 를 실패시켜야
+    D33 이 막으려던 것 — 고장이 D2 의 정상 상태와 같은 모양으로 200 에 나가는 것 — 을 본다.
+
+    지뢰선이 무는 422 는 갈음이 일어났다는 뜻이다. 500 고정 문구만이 통과다.
+
+    **누수 주사를 여기 함께 둔다** (`test_unhandled_exception_leaks_nothing` 의 모양).
+    따로 떼면 그 검사가 지뢰선의 422 본문에도 통과한다 — 그 본문에도 비밀이 없어서다.
+    상태와 봉투를 먼저 못 박은 뒤에 훑어야 훑는 대상이 정해진다 (Grok 지적).
+    """
+    r = _search_docs_with_a_broken_embedder(monkeypatch)
+
+    assert r.status_code == 500, f"임베딩 실패가 삼켜졌다: {r.status_code} {r.text}"
+    assert r.json() == {"ok": False, "error": {"code": "INTERNAL", "message": "internal error"}}
+    raw = r.text
+    for secret in ("sk-live-hunter2", "postgresql://", "hunter2", "Traceback", "RuntimeError"):
+        assert secret not in raw, raw
