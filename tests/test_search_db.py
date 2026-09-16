@@ -155,6 +155,54 @@ def test_filters_are_applied_in_the_arm_not_after_the_merge(indexed):
     assert docs({"query": "검색", "status": "stale"}) == []
 
 
+# --- 질의 파서 (D33 §4 · D34 §4 가 약속한 검사) ------------------------------
+#
+# **두 파서 다 예외를 내지 않는 종류다.** `to_tsquery` 로 바꾸면 사용자 오타 하나가
+# `INTERNAL 500` 이 된다 — 클라이언트 잘못도 서버 결함도 아닌 것이 서버 결함으로 나간다.
+# 두 표의 그 칸이 약속한 검사인데 트리에 없었다 (2026-09-16 전수 대조).
+
+# **생존 집합이다.** `to_tsquery` 가 거절하는 입력들이 아니라, 두 검색이 어느 것에도
+# 예외를 내지 않아야 하는 입력들이다. 클라이언트는 문자열 하나를 칠 뿐 파서를 고르지 않는다.
+# 상수를 한곳에 둬 두 검색이 **같은 입력**으로 잠긴다.
+#
+# 전부가 가르지는 않는다 — 세 호출부를 `to_tsquery` 로 바꿔 주입하니 **스물둘 중 열여덟**이
+# 물었다. 남은 넷은 `-단어`·`""` **두 입력이 두 검사에 걸린 것**이고(입력 넷이 아니다),
+# 그 둘은 그 파서도 받는다. 그래도 뺄 수 없다 — **D33 §4 가 이름으로 든 셋이 그 둘을 포함한다.**
+# 빼면 검사가 자기가 인용한 문장보다 좁아진다.
+SURVIVAL_QUERIES = ["&", "|", "!", "-단어", '""', "(", ")", "( 검색", "a & & b", ":*", "<->"]
+
+
+@pytest.mark.parametrize("bad", SURVIVAL_QUERIES)
+def test_docs_survive_a_query_that_would_break_to_tsquery(indexed, bad):
+    """D33 §4 — `&`·`-단어`·`""` 입력이 예외 없이 지나는지.
+
+    걸리는 것을 요구하지 않는다. **예외가 나지 않고 봉투가 성립하는 것**이 계약이다.
+    `to_tsquery` 로 바꾸면 여기서 psycopg 구문 오류가 나고 D21 이 그것을 500 으로 접는다.
+    """
+    got = docs({"query": bad})
+    assert isinstance(got, list)
+    for row in got:
+        assert "path" in row and "score" in row
+
+
+@pytest.mark.parametrize("bad", SURVIVAL_QUERIES)
+def test_events_survive_a_query_that_would_break_to_tsquery(clean, db, bad):
+    """D34 §4 — 깨진 질의 문자열에 200 과 빈 배열을 단언.
+
+    이벤트 쪽 파서는 `websearch_to_tsquery` 다. 괄호 하나가 `INTERNAL` 이 되면 안 된다.
+
+    **빈 배열을 단언하지 않는다.** `websearch_to_tsquery` 에서 `-단어` 는 깨진 입력이 아니라
+    **유효한 NOT** 이라 행을 돌려준다. `== []` 로 박으면 파서 의미론에 지는 검사가 된다.
+    0 렉심이 0건이라는 것은 이미 다른 검사가 소유한다 (D34 §3 의 셋째 갈래).
+    여기서 못 박는 것은 **예외가 없다** 와, 행이 오면 **모양이 계약대로다** 둘이다 (Grok 지적).
+    """
+    _add_event(db, "제목", "요약")
+    got = events({"query": bad})
+    assert isinstance(got, list)
+    for row in got:
+        assert "id" in row and row["score"] is not None
+
+
 def test_a_null_filter_field_does_not_filter(indexed):
     assert len(docs({"query": "검색", "module": None})) == len(docs({"query": "검색"}))
 

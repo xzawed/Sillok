@@ -592,15 +592,42 @@ const TRGM = [
   ['similarity(', 'trgm 유사도 함수'],
   ['word_similarity(', 'trgm 유사도 함수'],
   ['pg_trgm.', 'trgm GUC'],
+  // **D34 §4 가 이 셋을 이름으로 적어 두었는데 목록에 없었다** (2026-09-16 전수 대조).
+  // `상시 게이트가 trgm 연산자(%·%>·<%)와 연산자 클래스를 찾는다` 가 그 문장이다.
+  // 연산자가 더 나쁘다 — `%` 의 경계는 SQL 이 아니라 세션 GUC 라서 같은 질의가
+  // 서버 설정에 따라 다른 집합을 돌려준다. 함수 이름과 달리 눈에도 안 띈다.
+  //
+  //
+  // **형태가 둘이고, 나무마다 다르다.** psycopg 는 자리표시자가 있는 SQL 에서 리터럴 `%` 를
+  // 이중으로 쓰게 강제한다. 살아 있는 DB 에 대고 쟀다:
+  //   'ab' %  %(x)s  → ProgrammingError: incomplete placeholder
+  //   'ab' %% %(x)s  → 돈다
+  // 그래서 **`.py` 의 진짜 trgm 은 `%%`·`%%>`·`<%%` 이고 `.sql` 은 `%`·`%>`·`<%` 다.**
+  // `%>`·`<%` 는 이중형을 부분문자열로 이미 잡으므로(`%%>` ⊃ `%>`, `<%%` ⊃ `<%`) 나무를 안 가린다.
+  // `<<%`·`%>>`(엄격 교환자)도 같은 이유로 이 둘에 걸린다.
+  //
+  // **`%` 하나짜리는 나무를 가려야 한다.** `.py` 에서 ` % ` 를 찾으면 나머지 연산자
+  // (`files_seen % 2`)와 옛 서식(`"%s" % x`)을 문다 — 오탐이 검사를 죽인다 (Grok 지적).
+  // `.py` 에서 실행 가능한 형태는 `%%` 뿐이므로 각각 그쪽만 본다.
+  //
+  // 정규식이라 줄바꿈·탭도 공백으로 본다. 붙여 쓴 `title%'x'` 는 못 잡는다 — 그 구멍은
+  // 남겨 둔다. 이 검사는 덫이지 증명이 아니고, 스키마 쪽은 DB 검사가 따로 문다 (D34).
+  [/\s%\s/, 'trgm 유사도 연산자 (경계가 세션 GUC 다)', 'sql'],
+  [/\s%%\s/, 'trgm 유사도 연산자 — psycopg 가 이중으로 쓰게 하는 그 형태', 'py'],
+  ['%>', 'trgm word_similarity 연산자'],
+  ['<%', 'trgm word_similarity 연산자 (교환자)'],
 ]
 const trgmish = all.filter(
   (p) => (p.startsWith('src/') && p.endsWith('.py')) || (p.startsWith('migrations/') && p.endsWith('.sql'))
 )
 for (const p of trgmish) {
   const body = readFileSync(join(ROOT, p), 'utf8')
-  for (const [needle, what] of TRGM) {
+  const tree = p.endsWith('.py') ? 'py' : 'sql'
+  for (const [needle, what, only] of TRGM) {
     // 001 은 확장을 설치하는 파일이다. 설치 자체는 D34 가 남기기로 한 것이라 세지 않는다.
-    if (body.includes(needle)) fail(`${p} : ${what} "${needle}" — pg_trgm 은 v1 미사용이다 (D34)`)
+    if (only && only !== tree) continue
+    const hit = needle instanceof RegExp ? needle.test(body) : body.includes(needle)
+    if (hit) fail(`${p} : ${what} "${needle}" — pg_trgm 은 v1 미사용이다 (D34)`)
   }
 }
 

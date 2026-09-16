@@ -484,6 +484,66 @@ const CASES = [
     mutate: write('src/sillok/_probe.py', 'SQL = "select similarity(a,b)"' + NL),
   },
   {
+    // **D34 §4 가 이름으로 적어 둔 셋인데 바늘 목록에 없었다** (2026-09-16 전수 대조).
+    // 함수 이름은 눈에 띄지만 연산자는 안 띈다 — 그리고 `%` 의 경계는 SQL 이 아니라
+    // 세션 GUC 라 같은 질의가 서버 설정에 따라 다른 집합을 돌려준다. 더 나쁜 쪽이 안 잡혔다.
+    //
+    // **생 SQL 에 심는다.** `.py` 에 이 형태를 심으면 psycopg 가 실행조차 못 하는 문자열을
+    // 덫으로 삼는 것이다 — 그쪽의 진짜 형태는 26g 가 맡는다 (Grok 지적).
+    id: '26d migrations 에 trgm 유사도 연산자가 들어오면 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용'],
+    mutate: write('migrations/900_probe.sql', "SELECT 1 WHERE title % 'x';" + NL),
+  },
+  {
+    // 줄바꿈으로 갈라 써도 잡는가. 정규식으로 바꾼 이유가 이것이다.
+    id: '26h 줄을 넘겨 쓴 연산자도 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용'],
+    mutate: write('migrations/900_probe.sql', "SELECT 1 WHERE title %" + NL + "      'x';" + NL),
+  },
+  {
+    // `<%` 바늘에 자기 주입이 없었다 — 지워도 아무 케이스가 안 붉어졌다 (Grok 지적).
+    id: '26i strict word_similarity 연산자도 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용', '<%'],
+    mutate: write('migrations/900_probe.sql', "SELECT 1 WHERE title <% 'x';" + NL),
+  },
+  {
+    // **대조군 둘.** `.py` 의 나머지 연산자와 옛 서식은 trgm 이 아니다.
+    // 나무를 안 가르면 이 둘이 매일 붉어지고, 오탐이 검사를 죽인다.
+    id: '26j 파이썬의 나머지 연산자와 옛 서식은 물지 않는다',
+    expect: 'pass',
+    mutate: write(
+      'src/sillok/_probe.py',
+      'def f(n):' + NL + '    if n % 2 == 0:' + NL + '        return "%s" % n' + NL
+    ),
+  },
+  {
+    // **`.py` 에서 진짜로 쓰이는 형태다.** psycopg 가 자리표시자와 함께 쓰는 리터럴 `%` 를
+    // 이중으로 강제하므로, 생 SQL 의 `%` 를 찾는 바늘로는 이 자리를 못 본다 (실측).
+    id: '26g src 의 이중 % 형 trgm 연산자도 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용'],
+    mutate: write('src/sillok/_probe.py', 'SQL = "select 1 where title %% %(q)s"' + NL),
+  },
+  {
+    id: '26e migrations 에 word_similarity 연산자가 들어와도 운다',
+    expect: 'fail',
+    mentions: ['pg_trgm 은 v1 미사용', '%>'],
+    mutate: write('migrations/900_probe.sql', "SELECT 1 WHERE title %> 'x';" + NL),
+  },
+  {
+    // **대조군.** 이 저장소의 `%` 는 전부 `%(name)s`·`%s` 다. 그 둘을 물면 게이트가
+    // 매일 붉어지고 아무도 안 본다 — 오탐이 검사를 죽이는 길이다.
+    id: '26f 파라미터 자리표시자는 물지 않는다',
+    expect: 'pass',
+    mutate: write(
+      'src/sillok/_probe.py',
+      'SQL = "select %(a)s, %s from t"' + NL + 'MSG = "본 %d · 바뀐 %d"' + NL
+    ),
+  },
+  {
     // 단계가 하나 늘 때 세 문서 중 하나만 고치면 게이트가 초록인 채로 옛 단계를 말한다.
     // 실측으로 한 번 났다 — plan 과 CLAUDE 는 1–5, open-questions 는 1–6 이었다.
     // **1–5 로 주입하지 않는다.** 그 문자열은 RETIRED 에도 있어 검사 11 이 함께 운다 —
@@ -1061,8 +1121,27 @@ const META = [
   },
   {
     id: 'M10 검사 13(pg_trgm)을 끄면 trgm 사용이 통과한다',
-    disable: (s) => s.replace('for (const [needle, what] of TRGM) {', 'for (const [needle, what] of []) {'),
+    disable: (s) =>
+      s.replace('for (const [needle, what, only] of TRGM) {', 'for (const [needle, what, only] of []) {'),
     inject: append('src/sillok/search.py', NL + '# gin_trgm_ops' + NL),
+  },
+  {
+    // **M10 만으로는 부족하다.** 그 주입은 `gin_trgm_ops` 라, 루프를 꺼도 통과하는 것이
+    // *연산자 바늘 때문인지* 연산자 클래스 바늘 때문인지 가리지 못한다 (Grok 지적).
+    // 정규식 바늘만 죽인다 — 그러면 `%` 한 짜리를 무는 것이 그 둘뿐임이 드러난다.
+    id: 'M24 정규식 연산자 바늘만 끄면 % 주입이 통과한다',
+    disable: (s) =>
+      s.replace(
+        'needle instanceof RegExp ? needle.test(body) : body.includes(needle)',
+        'needle instanceof RegExp ? false : body.includes(needle)'
+      ),
+    inject: write('migrations/900_probe.sql', "SELECT 1 WHERE title % 'x';" + NL),
+  },
+  {
+    // `<%` 바늘 자신을 뺀다. 라벨에 역슬래시가 없어 문자열로 지울 수 있다.
+    id: 'M25 <% 바늘을 빼면 그 연산자가 통과한다',
+    disable: (s) => s.replace("['<%', 'trgm word_similarity 연산자 (교환자)'],", ''),
+    inject: write('migrations/900_probe.sql', "SELECT 1 WHERE title <% 'x';" + NL),
   },
   {
     id: 'M16 검사 15(두 walk)를 끄면 갈라진 목록이 통과한다',
