@@ -436,6 +436,18 @@ const CASES = [
     mutate: append('docs/spec.md', NL + 'Not yet — those routes honestly return 404' + NL),
   },
   {
+    // zero_hit_queries 에 기간 창이 없다. `최근` 은 보존 규칙이 생긴 뒤의 선택을
+    // 이미 고른 것처럼 적은 사본이었고, ADR 이 그 사본을 적어 두고도 지우지 않았다.
+    // **메타는 M3 가 이미 덮는다** — 새 검사가 아니라 검사 11 의 새 항목이다.
+    id: '25h 폐기한 `최근` 수식어가 되살아나면 운다',
+    expect: 'fail',
+    mentions: ['폐기된 문구', 'zero_hit_queries'],
+    mutate: append(
+      'docs/spec.md',
+      NL + '상태는 문서 수, 최근 hit_count=0 질의 수, 벡터가 빈 청크 수를 돌려준다.' + NL
+    ),
+  },
+  {
     // 2026-09-06 감사가 고친 넷의 **대조군**. 넷 다 문맥에 따라 참이 되므로 RETIRED 에 넣지 않았다.
     // 그래서 이 넷은 통과해야 한다 — 누가 다시 등록하면 여기가 붉어져 거짓 양성을 드러낸다.
     // **문자열은 등록될 바늘과 글자까지 같아야 한다.** 앞선 판에서 링크 href 를 `plan.md` 로
@@ -1070,6 +1082,25 @@ const META = [
 ]
 
 let failures = 0
+
+// 아이디가 겹치면 **출력이 두 케이스를 같은 이름으로 적는다.** 붉은불이 떴을 때
+// 어느 쪽인지 가릴 수 없고, 한쪽을 지운 사람이 다른 쪽을 지웠다고 믿는다.
+// 2026-09-16 리뷰가 실제로 잡았다 — `25g` 를 이미 있는데 다시 썼다 (Grok 지적).
+// 세는 것은 앞머리 토큰이다. 뒤의 설명은 자유롭게 바뀐다.
+{
+  const seen = new Map()
+  const dupes = []
+  for (const c of [...CASES, ...META]) {
+    const tag = c.id.split(' ')[0]
+    if (seen.has(tag)) dupes.push(`${tag} (${seen.get(tag)} / ${c.id})`)
+    else seen.set(tag, c.id)
+  }
+  if (dupes.length) {
+    console.log(`BAD  케이스 아이디가 겹친다: ${dupes.join(', ')}`)
+    process.exit(1)
+  }
+}
+
 for (const c of CASES) {
   const dir = copyRepo()
   try {

@@ -431,6 +431,9 @@ const RETIRED = [
   ['키가 있으면 search_docs 는 필터 없이 0건을', 'D65 의 조건은 키가 아니라 문서 벡터다'],
   ['키가 있으면 이 수의 뜻이 좁아진다', 'D65 의 조건은 키가 아니라 문서 벡터다'],
   ['키가 들어온 뒤에는 조건이 붙는다', 'D65 의 조건은 키가 아니라 문서 벡터다'],
+  // zero_hit_queries 에 기간 창은 없다. `최근` 은 보존 규칙이 생긴 뒤의 선택을
+  // 이미 고른 것처럼 적은 사본이었다 — 그 선택은 ADR 이 미뤄 둔 자리다 (D48–D52).
+  ['최근 hit_count=0 질의 수', 'zero_hit_queries 에 기간 창이 없다 — 구현은 남은 행 전부를 센다'],
   ['answers one request at a time', '라우트를 def 로 바꿔 직렬성이 사라졌다'],
   ['한 번에 한 요청만 답한다', '라우트를 def 로 바꿔 직렬성이 사라졌다'],
   ['that instance stops answering until the run ends', 'ingest 는 이제 스레드풀에서 돌아 인스턴스를 막지 않는다'],

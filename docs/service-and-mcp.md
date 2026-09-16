@@ -271,7 +271,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 `GET /v1/status?project=`
 
-문서 수, 청크 수, 이벤트 수, 마지막 ingest, 최근 hit_count=0 질의 수, 벡터가 빈 청크 수.
+문서 수, 청크 수, 이벤트 수, 마지막 ingest, hit_count=0 질의 수, 벡터가 빈 청크 수.
 
 ```json
 {

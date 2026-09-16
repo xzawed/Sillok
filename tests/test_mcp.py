@@ -270,3 +270,59 @@ def test_the_mcp_path_is_one_place(client):
     assert mcp_server.MCP_PATH == "/mcp"
     paths = {getattr(route, "path", None) for route in client.app.router.routes}
     assert {"/mcp", "/mcp/"} <= paths
+
+
+# --- 질의 임베딩 실패, MCP 얼굴 (D33 §4 · D44 · D46) --------------------------
+
+# `sk-` 뒤를 16자 이상으로 늘리지 않는다 — 게이트의 키 모양 검사가 `tests/` 도 본다 (D56).
+EMBED_SECRET = "key=sk-live-hunter2 dsn=postgresql://u:pw@h/db"
+
+# `connect` 에 닿았다는 구별되는 신호다. 이 파일의 기본 DSN 은 죽은 것이라
+# 지뢰선이 없으면 연결 실패가 같은 INTERNAL 을 내고 갈음 구현이 초록으로 지나간다.
+DB_REACHED = "DB WAS REACHED"
+
+
+def _embed_boom(texts, api_key):  # noqa: ARG001 - 서명만 같으면 된다
+    raise RuntimeError(EMBED_SECRET)
+
+
+def _connect_tripwire(dsn, **kwargs):  # noqa: ARG001
+    raise service.ValidationFailed(DB_REACHED)
+
+
+def _break_the_embedder(monkeypatch):
+    monkeypatch.setattr(service, "_embed", _embed_boom)
+    monkeypatch.setattr(service, "connect", _connect_tripwire)
+
+
+@pytest.mark.parametrize("client", [{"openai_api_key": "sk-live-hunter2"}], indirect=True)
+def test_query_embedding_failure_is_a_normal_result_with_the_fixed_message(client, monkeypatch):
+    """HTTP 얼굴과 **같은 봉투다** (D46). 프로토콜 오류로 접지 않는다 (D44).
+
+    `_text` 가 `api.classify` 를 타므로 매핑은 한 벌이어야 한다. 도구 실패가
+    JSON-RPC `error` 로 나가면 모델은 코드를 못 보고 같은 인자로 재시도한다.
+    """
+    _break_the_embedder(monkeypatch)
+    body = call(client, "search_docs", {"project": "sillok", "query": "검색"})
+    assert body == {"ok": False, "error": {"code": "INTERNAL", "message": "internal error"}}
+
+
+@pytest.mark.parametrize("client", [{"openai_api_key": "sk-live-hunter2"}], indirect=True)
+def test_query_embedding_failure_leaks_nothing_on_the_mcp_face(client, monkeypatch):
+    """**전문 전체를 본다.** 위 검사의 `call()` 은 `result.content[0].text` 만 펼친다 —
+    `isError`·프로토콜 `error`·둘째 `content`·`structuredContent` 는 안 본다.
+    안쪽 봉투가 고정 문구인 채로 바깥이 비밀을 실을 수 있고, 그것이 다른 주장이다.
+
+    먼저 **고정 봉투가 실제로 들어 있는지** 못 박는다. 그러지 않으면 지뢰선의
+    422 본문에도 이 훑기가 통과한다 — 훑는 대상이 정해지지 않는다 (Grok 지적).
+    """
+    _break_the_embedder(monkeypatch)
+    raw = rpc(
+        client,
+        "tools/call",
+        {"name": "search_docs", "arguments": {"project": "sillok", "query": "검색"}},
+    ).text
+
+    assert '\\"code\\":\\"INTERNAL\\"' in raw, raw
+    for secret in ("sk-live-hunter2", "postgresql://", "hunter2", "Traceback", "RuntimeError"):
+        assert secret not in raw, raw
