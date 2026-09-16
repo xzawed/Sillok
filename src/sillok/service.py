@@ -533,9 +533,40 @@ def _embed(texts: list[str], api_key: str) -> list[list[float]]:
     return [item.embedding for item in result.data]
 
 
+# 게이트의 키 모양을 그대로 쓴다 (D56, `scripts/check-layout.mjs` 의 SECRETS 첫 줄).
+# 새 모양을 발명하지 않는다 — `sk-proj-`·PEM·`ghp-` 는 이 컬럼으로 오는 길을 재지 않았다.
+_OPENAI_KEY = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}")
+
+# 직렬화가 **시작되는** 자리다 — 여는 중괄호 뒤에 바로 따옴표가 오는 모양.
+# dict repr(`{'error': …`)과 JSON(`{"error": …`) 둘 다이고, 그 둘이 제공자가 보내는 것이다.
+# **맨 `{` 로 끊지 않는다.** 그러면 중괄호가 든 도메인 요약이 통째로 날아간다 —
+# `doc_type "{invented}" is outside the taxonomy` 가 `doc_type "` 만 남는 것을 실측했다.
+# 그 값이야말로 이 컬럼이 있는 이유다.
+_PAYLOAD_START = re.compile(r"\{\s*[\"']")
+
+
 def _clip(text: object) -> str:
-    """error 는 첫 실패의 첫 줄이고 상한에서 자른다. run 하나가 로그가 되면 안 된다 (D32)."""
-    lines = migrations.redact_dsn(str(text)).splitlines()
+    """error 는 첫 실패의 첫 줄이고 상한에서 자른다. run 하나가 로그가 되면 안 된다 (D32).
+
+    **D31 이 요구하는 것이 하나 더 있다 — `키·DSN·응답 본문을 싣지 않는다`.**
+    D32 의 첫 줄 자르기는 그것을 못 한다: 제공자 예외는 본문을 *같은 줄에* 붙여 온다.
+    2026-09-16 실측에서 이 컬럼이 OpenAI 응답 본문을 통째로 들고 있었다.
+
+    그래서 **직렬화가 시작되는 자리에서 끊는다** — 여는 중괄호 뒤에 따옴표가 오는 모양.
+    `[` 로는 끊지 않는다 — `[Errno 111]`·`[WinError …]` 가 직렬화가 아니라 실패 요약
+    그 자체라서다. 맨 `{` 로도 끊지 않는다 — 중괄호가 든 도메인 요약이 날아간다
+    (둘 다 Grok 이 짚었고 둘 다 실측했다). `Error code: 401` 은 본문이 아니라
+    남겨야 하는 요약이고, 그 뒤의 dict 가 본문이다.
+
+    이 함수는 DB 컬럼과 서버 로그 **둘 다** 먹인다. 갈라 두지 않는다 —
+    표면 하나에만 세정기를 다는 것이 애초에 이 결함을 만든 부류다.
+    """
+    body = str(text)
+    payload = _PAYLOAD_START.search(body)
+    if payload:
+        body = body[: payload.start()].rstrip()
+    body = _OPENAI_KEY.sub("***", migrations.redact_dsn(body))
+    lines = body.splitlines()
     return (lines[0] if lines else "")[:ERROR_MAX]
 
 
