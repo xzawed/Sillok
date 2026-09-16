@@ -425,3 +425,106 @@ def test_status_counts_chunks_without_embedding(db, clean_project):
 def test_status_for_unknown_project_is_zeros_not_error():
     """404 대 빈 결과는 Q12(get_event)의 문제다. 여기서는 0 을 준다."""
     assert service.kb_status(DSN, "t_step4_never_used")["events"] == 0
+
+
+# --- _clip 이 컬럼에 무엇을 남기는가 (D31 · D32) -------------------------------
+#
+# 이 묶음은 DB 가 필요 없다. 세정기는 순수 로직이고, 이 저장소는 세정기가
+# 검사 없이 나가서 결함을 낸 적이 있다 (`redact_dsn` 의 libpq 대체 형식).
+#
+# **문자열 안에 `sk-` + 영숫자 16자 이상을 리터럴로 쓰지 않는다** — 게이트의
+# 키 모양 검사(D56)가 `tests/` 도 본다. 아래 둘째 검사는 런타임에 이어 붙인다.
+
+# 2026-09-16 실측에서 `kb_ingest_runs.error` 에 실제로 들어 있던 문자열이다.
+# `*` 는 키 모양의 문자 집합 밖이라 이 리터럴은 게이트를 물지 않는다.
+MEASURED_OPENAI_FAILURE = (
+    "Error code: 401 - {'error': {'message': 'Incorrect API key provided: "
+    "sk-proj-************************-use. You can find your API key at "
+    "https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', "
+    "'code': 'invalid_api_key', 'param': None}, 'status': 401}"
+)
+
+
+def test_clip_drops_the_provider_response_body():
+    """D31: `키·DSN·응답 본문을 싣지 않는다`. 실측한 그 문자열로 잠근다.
+
+    장난감 예외(`RuntimeError("401 Unauthorized")`)로는 이 자리가 보이지 않았다 —
+    본문도 키도 없는 입력이라 세정기가 할 일이 없었고 검사는 늘 초록이었다.
+    """
+    got = service._clip(MEASURED_OPENAI_FAILURE)
+
+    # **남은 것까지 못 박는다.** 부재만 단언하면 앞머리에 쓰레기가 붙어도 통과한다 (Grok 지적).
+    # 이 값은 복제 스택에서 고친 코드가 실제로 저장한 그것이다.
+    # 꼬리의 ` -` 는 제공자가 쓴 구분자다. 떼지 않는다 — 떼면 구분자 규약을 발명하는 것이고,
+    # 자른 자리가 보이는 편이 정직하다.
+    assert got == "Error code: 401 -"
+    assert "401" in got
+    assert "{" not in got
+    assert "Incorrect API key" not in got
+    assert "invalid_api_key" not in got
+    assert "platform.openai.com" not in got
+    assert "sk-" not in got
+
+
+def test_clip_redacts_a_key_shape_that_has_no_body_around_it():
+    """본문 자르기만으로는 부족하다 — 중괄호 없이 키만 오는 예외가 있을 수 있다.
+
+    리터럴로 쓰면 게이트가 이 파일을 비밀 보유로 문다. 런타임에 만든다.
+    """
+    key = "sk-" + "a" * 20
+    got = service._clip(f"auth failed for {key} at the edge")
+
+    assert key not in got
+    assert "***" in got
+    assert got.startswith("auth failed for ")
+
+
+def test_clip_cuts_json_payloads_too_not_just_dict_reprs():
+    """제공자가 JSON 으로 오면 `{"` 다. 둘 다 직렬화의 시작이다."""
+    assert service._clip('Error code: 500 - {"error": {"message": "boom"}}') == "Error code: 500 -"
+
+
+def test_clip_keeps_a_brace_that_is_not_a_payload():
+    """**맨 `{` 로 끊으면 안 된다.** 중괄호가 든 도메인 요약이 통째로 날아간다.
+
+    첫 판이 그랬다 — `doc_type "{invented}" is outside the taxonomy` 가
+    `doc_type "` 만 남았다. 그 값이야말로 이 컬럼이 있는 이유다 (Grok 이 자기 설계에서 찾았다).
+    front matter 는 YAML 파서를 타지 않아 값에 무엇이 오든 그대로 문구가 된다.
+    """
+    taxonomy = 'docs/bad.md: doc_type "{invented}" is outside the taxonomy'
+    assert service._clip(taxonomy) == taxonomy
+
+    braced_path = "UTF-8 로 읽을 수 없다: docs/{slug}.md"
+    assert service._clip(braced_path) == braced_path
+
+
+def test_clip_keeps_bracketed_errno_summaries():
+    """`[` 로는 끊지 않는다 — `[Errno 111]` 은 직렬화가 아니라 실패 요약 그 자체다.
+
+    끊으면 DB 연결 실패가 `connection failed: ` 만 남아 아무 말도 못 한다 (Grok 지적).
+    """
+    got = service._clip("connection failed: [Errno 111] Connection refused")
+    assert got == "connection failed: [Errno 111] Connection refused"
+
+
+def test_clip_still_redacts_a_dsn_in_the_summary():
+    """D32 의 DSN 규칙을 되돌리지 않는다."""
+    got = service._clip("could not connect to postgresql://sillok:hunter2@db:5432/sillok")
+    assert "hunter2" not in got
+    assert "***" in got
+
+
+def test_clip_still_takes_the_first_line_and_the_cap():
+    """D32 의 크기 규칙도 그대로다 — 자르기를 더하면서 잃기 쉬운 자리다."""
+    assert service._clip("first line\nsecond line") == "first line"
+    assert len(service._clip("x" * (service.ERROR_MAX + 200))) == service.ERROR_MAX
+
+
+def test_clip_keeps_the_domain_summaries_untouched():
+    """오늘 이 컬럼에 실제로 들어가는 문구들은 하나도 바뀌지 않아야 한다."""
+    for summary in (
+        "UTF-8 로 읽을 수 없다: docs/spec.md",
+        "scan found no .md under the D9 paths",
+        "interrupted",
+    ):
+        assert service._clip(summary) == summary

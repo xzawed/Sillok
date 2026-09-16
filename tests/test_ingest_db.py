@@ -12,6 +12,8 @@ from psycopg.rows import dict_row
 
 from sillok import service
 
+from test_service import MEASURED_OPENAI_FAILURE
+
 from dbcheck import DSN, needs_db
 
 PROJECT = "t_step5"
@@ -366,12 +368,18 @@ def test_without_a_key_the_run_is_ok_and_vectors_stay_null(db, clean, workspace)
 
 
 def test_backfill_stops_at_the_first_failure(db, clean, workspace, monkeypatch):
-    """인증·한도 실패는 남은 청크에서도 똑같이 실패한다. 계속하면 실패 호출만 는다."""
+    """인증·한도 실패는 남은 청크에서도 똑같이 실패한다. 계속하면 실패 호출만 는다.
+
+    **던지는 문자열은 실측한 그것이다.** 전에는 `RuntimeError("401 Unauthorized")` 라는
+    장난감이었고, 본문도 키도 없으니 `"401" in error` 가 늘 통과했다 — 그래서
+    이 컬럼이 제공자 응답 본문을 통째로 들고 있는 것을 2026-09-16 까지 아무도 못 봤다.
+    약한 도구가 만든 0 위반이다 (D31 은 `키·DSN·응답 본문을 싣지 않는다` 고 적혀 있었다).
+    """
     calls: list[int] = []
 
     def boom(texts, api_key):
         calls.append(1)
-        raise RuntimeError("401 Unauthorized")
+        raise RuntimeError(MEASURED_OPENAI_FAILURE)
 
     monkeypatch.setattr(service, "_embed", boom)
     got = run(workspace, key="sk-not-real")
@@ -380,7 +388,12 @@ def test_backfill_stops_at_the_first_failure(db, clean, workspace, monkeypatch):
     assert len(calls) == 1
     row = db.execute("SELECT * FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
     assert row["status"] == "partial"
+    # 상태는 요약이라 남는다. D31 이 버리라고 한 것은 본문이다.
     assert "401" in row["error"]
+    assert "{" not in row["error"]
+    assert "Incorrect API key" not in row["error"]
+    assert "invalid_api_key" not in row["error"]
+    assert "sk-" not in row["error"]
     # 텍스트 색인 결과는 백필 실패로 되돌아가지 않는다 (D31 이 D32 에 건 제약).
     assert len(docs(db)) == 3
 
