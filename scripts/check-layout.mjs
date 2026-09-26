@@ -23,6 +23,19 @@ const STATUSES = ['current', 'draft', 'superseded', 'stale']
 // 일부러 안 잡는 둘: CR 만 쓰는 줄끝(git 이 통과시키지 않는다)과 빈 front matter (`---\n---`).
 // 둘 다 "게이트는 초록인데 첫 화면에 표가 뜨는" 부류가 아니다 — 빈 것은 표로 그릴 행이 없다.
 const FRONT_MATTER = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---/
+// front matter 값의 주석을 뗀다 — 공백 뒤에 오는 첫 `#` 앞의 공백 줄부터 끝까지. `\s+#.*$` 와 같은 자리다.
+// 정규식은 `#` 없는 긴 공백에서 자리마다 다시 시도해 제곱 시간이었다 (실측: 공백 10만 칸에 5.9초).
+// ingest 의 `_cut_comment` 와 같은 규칙이다 — 파서는 둘이 같아야 한다 (D30 §7).
+function cutComment(value) {
+  for (let i = 1; i < value.length; i++) {
+    if (value[i] === '#' && /\s/.test(value[i - 1])) {
+      let start = i - 1
+      while (start > 0 && /\s/.test(value[start - 1])) start--
+      return value.slice(0, start)
+    }
+  }
+  return value
+}
 // 루트 README* — D9 색인 대상이면서 front matter 를 갖지 **않는** 유일한 부류다 (D29).
 const isRootReadme = (p) => /^README[^/]*$/i.test(p)   // D9 경로 판정은 확장자·대소문자를 가리지 않는다
 
@@ -105,7 +118,7 @@ for (const p of indexed) {
   if (!m) { fail(`${p} : front matter 없음`); continue }
   const fm = Object.fromEntries(
     m[1].split(/\r?\n/).filter((l) => l.includes(':'))
-      .map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).replace(/\s+#.*$/, '').trim()])
+      .map((l) => [l.slice(0, l.indexOf(':')).trim(), cutComment(l.slice(l.indexOf(':') + 1)).trim()])
   )
   for (const k of ['title', 'doc_type', 'status']) if (!fm[k]) fail(`${p} : front matter 에 ${k} 없음`)
   if (!('module' in fm)) fail(`${p} : front matter 에 module 키 없음 (값은 null 가능)`)
@@ -822,9 +835,7 @@ function frontMatterOf(p) {
         l.slice(0, l.indexOf(':')).trim(),
         // 따옴표를 벗긴다. 안 벗기면 `superseded_by: "docs/x.md"` 가 **참인데 실패한다** —
         // 여기는 YAML 파서가 아니므로 그 한 겹만 본다 (Grok 재검토).
-        l
-          .slice(l.indexOf(':') + 1)
-          .replace(/\s+#.*$/, '')
+        cutComment(l.slice(l.indexOf(':') + 1))
           .trim()
           .replace(/^(["'])(.*)\1$/, '$2'),
       ])

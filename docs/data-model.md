@@ -51,6 +51,7 @@ CREATE TABLE kb_documents (
   source_mtime  timestamptz,
   indexed_at    timestamptz NOT NULL DEFAULT now(),
   token_count   int,
+  rules_version int NOT NULL DEFAULT 0,  -- D71. 유도 규칙의 판. 006 이 더한다
   UNIQUE (project, repo, path)
 );
 ```

@@ -42,6 +42,7 @@ def test_discover_orders_by_version():
         "003_ingest_counters.sql",
         "004_event_tsv.sql",
         "005_query_log_index.sql",
+        "006_rules_version.sql",
     ]
 
 
@@ -323,6 +324,7 @@ def test_apply_returns_what_it_applied(applied):
         "003_ingest_counters.sql",
         "004_event_tsv.sql",
         "005_query_log_index.sql",
+        "006_rules_version.sql",
     ]
 
 
@@ -512,6 +514,28 @@ def test_ingest_run_counters_are_separate(applied, conn):
         """
     ).fetchall()
     assert sorted(r[0] for r in rows) == ["files_changed", "files_deleted", "files_seen"]
+
+
+@needs_db
+def test_rules_version_is_not_null_with_default_zero(applied, conn):
+    """D71. 006 이 더한 컬럼이다. 기본값 0 이 옛 행을 한 번 다시 만들게 한다."""
+    row = conn.execute(
+        """
+        SELECT is_nullable, column_default, data_type FROM information_schema.columns
+        WHERE table_name = 'kb_documents' AND column_name = 'rules_version'
+        """
+    ).fetchone()
+    assert row == ("NO", "0", "integer")
+
+
+def test_the_rules_migration_never_resets_the_version():
+    """러너는 매 기동 모든 .sql 을 다시 돌린다 (D17). `UPDATE` 가 있으면 `serve` 마다 판이 0 으로 돌아가
+    전량 재색인이 된다 — 006 은 `ADD COLUMN IF NOT EXISTS` 하나여야 한다."""
+    sql = _migration_text("006_rules_version.sql")
+    statements = [s.strip() for s in strip_sql_comments(sql).split(";") if s.strip()]
+    assert statements == [
+        "ALTER TABLE kb_documents ADD COLUMN IF NOT EXISTS rules_version int NOT NULL DEFAULT 0"
+    ]
 
 
 @needs_db

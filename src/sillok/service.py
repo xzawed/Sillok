@@ -684,17 +684,21 @@ def _write_document(conn: psycopg.Connection, project: str, doc: dict[str, Any])
         row = cur.execute(
             """
             INSERT INTO kb_documents
-              (project, repo, path, doc_type, module, status, title, content_hash, source_mtime)
+              (project, repo, path, doc_type, module, status, title, content_hash, source_mtime,
+               rules_version)
             VALUES (%(project)s, '', %(path)s, %(doc_type)s, %(module)s, %(status)s, %(title)s,
-                    %(content_hash)s, %(source_mtime)s)
+                    %(content_hash)s, %(source_mtime)s, %(rules_version)s)
             ON CONFLICT (project, repo, path) DO UPDATE SET
               doc_type = EXCLUDED.doc_type,
               module = EXCLUDED.module,
               status = EXCLUDED.status,
               title = EXCLUDED.title,
               content_hash = EXCLUDED.content_hash,
-              source_mtime = EXCLUDED.source_mtime,
-              indexed_at = now()
+              rules_version = EXCLUDED.rules_version,
+              -- 판만 낡아 다시 만든 행은 내용이 바뀌지 않았다 (D71) — 두 시각을 그대로 둔다.
+              source_mtime = CASE WHEN %(content_changed)s
+                                  THEN EXCLUDED.source_mtime ELSE kb_documents.source_mtime END,
+              indexed_at = CASE WHEN %(content_changed)s THEN now() ELSE kb_documents.indexed_at END
             RETURNING id
             """,
             {"project": project, **doc},
@@ -829,7 +833,9 @@ def _index_file(
         os.close(fd)
     text = ingest_rules.normalize(raw, item.path)
     digest = ingest_rules.content_hash(text)
-    if known.get(item.path) == digest:
+    stored_hash, stored_rules = known.get(item.path, (None, None))
+    same_body = stored_hash == digest
+    if same_body and stored_rules >= ingest_rules.RULES_VERSION:
         return
     meta = ingest_rules.derive_meta(item.path, text)
     _validate_meta(item.path, meta)
@@ -843,10 +849,15 @@ def _index_file(
             "content_hash": digest,
             "source_mtime": datetime.fromtimestamp(mtime, tz=timezone.utc),
             "chunks": pieces,
+            "rules_version": ingest_rules.RULES_VERSION,
+            # 판만 낡았으면 내용은 바뀌지 않았다 — `indexed_at`·`source_mtime` 을 건드리지 않고
+            # `files_changed` 에 세지 않는다 (D71). 한 일은 `chunks_upserted` 가 센다.
+            "content_changed": not same_body,
             **meta,
         },
     )
-    counters["files_changed"] += 1
+    if not same_body:
+        counters["files_changed"] += 1
     counters["chunks_upserted"] += len(pieces)
 
 
@@ -883,9 +894,10 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
 
         with conn.cursor() as cur:
             known = {
-                r["path"]: r["content_hash"]
+                r["path"]: (r["content_hash"], r["rules_version"])
                 for r in cur.execute(
-                    "SELECT path, content_hash FROM kb_documents WHERE project = %s AND repo = ''",
+                    "SELECT path, content_hash, rules_version FROM kb_documents"
+                    " WHERE project = %s AND repo = ''",
                     (project,),
                 ).fetchall()
             }

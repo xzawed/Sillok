@@ -43,8 +43,20 @@ STATUSES = frozenset({"current", "draft", "superseded", "stale"})
 # front matter 에서 읽는 키는 넷뿐이다 (D30 §7). 나머지는 무시한다.
 _META_KEYS = ("title", "doc_type", "status", "module")
 
-_ATX = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+# 유도 규칙(청크·`heading_path`·메타)의 판 (D71). 규칙이 바뀌면 올린다 — 본문이 같은 문서도 한 번 다시 만든다.
+# 올리지 않고 바꾸면 tests/test_ingest.py 의 digest 검사가 운다.
+RULES_VERSION = 1
+
+# CommonMark 6형 HTML 블록을 여는 태그 (D29 — 빈 줄에서 끝난다). 제목 찾기만 쓴다; 청크는 보지 않는다 (D30 §5).
+_HTML_BLOCK_TAGS = frozenset(
+    "address article aside base basefont blockquote body caption center col colgroup dd details dialog"
+    " dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header"
+    " hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search"
+    " section source summary table tbody td tfoot th thead title tr track ul".split()
+)
+_HTML_BLOCK_START = re.compile(r" {0,3}</?([A-Za-z][A-Za-z0-9]*)(?:[ \t>]|/>|$)")
 
 
 class DecodeFailed(Exception):
@@ -263,31 +275,193 @@ def split_front_matter(text: str) -> tuple[dict[str, str], str]:
         if ":" not in line:
             continue
         key, _, value = line.partition(":")
-        meta[key.strip()] = re.sub(r"\s+#.*$", "", value).strip()
+        meta[key.strip()] = _cut_comment(value).strip()
     return meta, text[m.end() :]
 
 
-def strip_inline(text: str) -> str:
-    """제목에서 인라인 마크업을 벗긴다. 형식 정본은 docs/service-and-mcp.md 다.
+def _cut_comment(value: str) -> str:
+    """`\\s+#.*$` 와 같은 자리를 자른다 — 공백 뒤에 오는 첫 `#` 앞의 공백 줄부터 끝까지.
 
-    링크는 표시 텍스트만 남긴다. 강조·코드 스팬 표시는 지운다.
+    정규식은 `#` 없는 긴 공백에서 자리마다 다시 시도해 제곱 시간이었다 (Sonar S8786). 한 번 훑는다.
+    게이트(scripts/check-layout.mjs)의 `cutComment` 와 같은 규칙이다 (D30 §7).
     """
-    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = text.replace("`", "")
-    text = re.sub(r"\*{1,3}|_{1,3}", "", text)
-    return text.strip()
+    for i in range(1, len(value)):
+        if value[i] == "#" and value[i - 1].isspace():
+            start = i - 1
+            while start > 0 and value[start - 1].isspace():
+                start -= 1
+            return value[:start]
+    return value
+
+
+def _atx(line: str) -> tuple[int, str] | None:
+    """ATX 제목이면 `(레벨, 텍스트)`. `^(#{1,6})\\s+(.*)$` 와 같은 판정이다.
+
+    정규식은 `\\s+` 와 `(.*)` 가 공백을 두고 겹쳐 Sonar 가 제곱 시간으로 봤다. 세어서 가른다.
+    """
+    level = len(line) - len(line.lstrip("#"))
+    if not 1 <= level <= 6 or level == len(line) or not line[level].isspace():
+        return None
+    rest = line[level:]
+    return level, rest[len(rest) - len(rest.lstrip()) :]
+
+
+def strip_inline(text: str) -> str:
+    """제목에서 인라인 마크업을 벗긴다 (D29 · D30 §5). 형식 정본은 docs/service-and-mcp.md 다.
+
+    왼쪽에서 오른쪽으로 한 번 훑는다. **코드 스팬은 안의 글자를 그대로 둔다** — 예전에는 `_`·`*` 를 전부 지워
+    `` `event_stats` `` 가 `eventstats` 였다 (2026-09-26 감사 F099). 링크·이미지는 표시 텍스트만 남기고 그 텍스트도
+    같은 규칙을 탄다. 강조 `*`·`_` 는 **짝이 맞는 구분자만** 지운다 — CommonMark 의 flanking 이고, 단어 안의 `_` 는
+    글자다. 백슬래시 이스케이프는 그 글자다. 참조 링크·HTML 태그는 벗기지 않는다.
+    이 규칙이 바뀌면 `RULES_VERSION` 을 올린다 (D71).
+    """
+    return "".join(_emphasis(_inline_tokens(text))).strip()
+
+
+_ASCII_PUNCT = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+
+
+@dataclass
+class _Delim:
+    """강조 구분자 한 줄기 (`*`·`**`·`_` …). 짝이 맞으면 `count` 가 줄어든다."""
+
+    char: str
+    count: int
+    can_open: bool
+    can_close: bool
+
+
+def _inline_tokens(text: str) -> list[str | _Delim]:
+    out: list[str | _Delim] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        link = _link_at(text, i) if ch in "![" else None
+        if ch == "\\" and i + 1 < n and text[i + 1] in _ASCII_PUNCT:
+            out.append(text[i + 1])
+            i += 2
+        elif ch == "`":
+            i = _code_span(text, i, out)
+        elif link is not None:
+            # 링크 텍스트에는 `]` 가 없으므로 이 재귀는 한 겹이다.
+            out.extend(_inline_tokens(link[0]))
+            i = link[1]
+        elif ch in "*_":
+            j = i
+            while j < n and text[j] == ch:
+                j += 1
+            out.append(_delim(text, i, j))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return out
+
+
+def _code_span(text: str, i: int, out: list[str | _Delim]) -> int:
+    """`i` 의 백틱 줄기가 같은 길이의 줄기로 닫히면 안의 글자를 그대로 싣는다. 못 닫으면 백틱은 글자다."""
+    n = len(text)
+    j = i
+    while j < n and text[j] == "`":
+        j += 1
+    run = j - i
+    k = j
+    while True:
+        k = text.find("`", k)
+        if k < 0:
+            out.append(text[i:j])
+            return j
+        m = k
+        while m < n and text[m] == "`":
+            m += 1
+        if m - k == run:
+            inner = text[j:k]
+            # CommonMark: 양끝이 모두 공백이고 공백뿐이 아니면 한 칸씩 벗긴다.
+            if len(inner) >= 2 and inner[0] == " " and inner[-1] == " " and inner.strip(" "):
+                inner = inner[1:-1]
+            out.append(inner)
+            return m
+        k = m
+
+
+def _link_at(text: str, i: int) -> tuple[str, int] | None:
+    """`[텍스트](목적지)`·`![…](…)` 이면 `(텍스트, 끝)`.
+
+    예전 정규식 `!?\\[([^\\]]*)\\]\\([^)]*\\)` 과 같은 모양을 본다 — 텍스트는 첫 `]` 까지, 목적지는 첫 `)` 까지.
+    """
+    start = i + 1 if text[i] == "!" else i
+    if start >= len(text) or text[start] != "[":
+        return None
+    close = text.find("]", start + 1)
+    if close < 0 or close + 1 >= len(text) or text[close + 1] != "(":
+        return None
+    end = text.find(")", close + 2)
+    if end < 0:
+        return None
+    return text[start + 1 : close], end + 1
+
+
+def _is_space(ch: str) -> bool:
+    return ch.isspace()
+
+
+def _is_punct(ch: str) -> bool:
+    return unicodedata.category(ch)[0] in "PS"
+
+
+def _delim(text: str, i: int, j: int) -> _Delim:
+    """CommonMark 의 left/right-flanking. 줄의 처음과 끝은 공백으로 본다."""
+    before = text[i - 1] if i > 0 else " "
+    after = text[j] if j < len(text) else " "
+    left = not _is_space(after) and (not _is_punct(after) or _is_space(before) or _is_punct(before))
+    right = not _is_space(before) and (not _is_punct(before) or _is_space(after) or _is_punct(after))
+    if text[i] == "*":
+        return _Delim("*", j - i, left, right)
+    # `_` 는 단어 안에서 열거나 닫지 않는다 — `snake_case` 는 글자다.
+    return _Delim("_", j - i, left and (not right or _is_punct(before)), right and (not left or _is_punct(after)))
+
+
+def _emphasis(tokens: list[str | _Delim]) -> list[str]:
+    """닫는 구분자마다 같은 글자의 가장 가까운 여는 구분자와 짝짓고, 짝지은 만큼 지운다. 남은 것은 글자다."""
+    openers: list[_Delim] = []
+    for tok in tokens:
+        if not isinstance(tok, _Delim):
+            continue
+        if tok.can_close:
+            at = next((k for k in range(len(openers) - 1, -1, -1) if openers[k].char == tok.char), None)
+            if at is not None:
+                opener = openers[at]
+                used = min(opener.count, tok.count)
+                opener.count -= used
+                tok.count -= used
+                # 사이에 있던 여는 구분자는 더는 짝을 찾지 못한다 (CommonMark).
+                del openers[at + 1 :]
+                if opener.count == 0:
+                    openers.pop()
+        if tok.can_open and tok.count:
+            openers.append(tok)
+    return [tok if isinstance(tok, str) else tok.char * tok.count for tok in tokens]
 
 
 def first_h1(text: str) -> str | None:
     """코드 펜스 밖 첫 `# ` 제목의 텍스트 (D29).
 
     HTML 블록은 CommonMark 6형이라 **빈 줄에서 끝난다** — `</div>` 를 기다리지 않는다.
-    그래서 줄 단위로 훑으면 `<div align="center">` 다음의 H1 이 그대로 잡힌다.
+    그래서 `<div align="center">` · 빈 줄 · H1 이면 그 H1 이 잡힌다. 빈 줄 없이 블록 **안에** 든 `# ` 는
+    제목이 아니다 — 예전에는 그것을 잡았다 (2026-09-26 감사 F020). 청크는 HTML 블록을 보지 않는다 (D30 §5).
     """
+    in_html = False
     for line in _outside_fences(text):
-        m = _ATX.match(line)
-        if m and len(m.group(1)) == 1:
-            return strip_inline(m.group(2)) or None
+        if in_html:
+            in_html = bool(line.strip(" \t"))
+            continue
+        start = _HTML_BLOCK_START.match(line)
+        if start and start.group(1).lower() in _HTML_BLOCK_TAGS:
+            in_html = True
+            continue
+        head = _atx(line)
+        if head and head[0] == 1:
+            return strip_inline(head[1]) or None
     return None
 
 
@@ -305,15 +479,16 @@ def derive_meta(rel_path: str, text: str) -> dict[str, str | None]:
     for key in _META_KEYS:
         raw = meta.get(key, "")
         # 빈 값과 null 은 NULL 이다. 이 한 줄이 없으면 문자열 "null" 이 들어간다.
-        out[key] = None if raw in ("", "null", "~") else raw
+        # `~` 는 NULL 이 아니다 — D30 §7 에 없고 게이트도 접지 않는다 (2026-09-26 감사 F020).
+        out[key] = None if raw in ("", "null") else raw
     if out["doc_type"] is None:
         out["doc_type"] = "other"
     if out["status"] is None:
         out["status"] = "current"
-    if out["title"] is None:
-        # front matter 가 없으면 title 은 D29 의 첫 H1 규칙으로 유도한다 (D30 §7).
-        # 이 저장소에서는 게이트가 먼저 막지만, D5 가 말하는 다른 project 에서는
-        # front matter 가 없는 것이 정상이다.
+    if _FRONT_MATTER.match(text) is None:
+        # front matter 가 **없을 때만** title 을 D29 의 첫 H1 규칙으로 유도한다 (D30 §7).
+        # 있는데 title 이 비면 NULL 이다 — 예전에는 채웠고 front matter 안의 `# 주석` 줄까지 훑었다 (F020).
+        # 이 저장소에서는 게이트가 먼저 막지만, D5 가 말하는 다른 project 에서는 없는 것이 정상이다.
         out["title"] = first_h1(text)
     return out
 
@@ -366,17 +541,17 @@ def chunk(body: str) -> list[Chunk]:
                 fence = None
             section.append(line)
             continue
-        head = None if fence is not None else _ATX.match(line)
+        head = None if fence is not None else _atx(line)
         if head is None:
             section.append(line)
             continue
 
         flush()
-        level = len(head.group(1))
+        level, title = head
         # 레벨을 건너뛰면 빈 칸을 채우지 않고 스택에 그대로 쌓는다 — 없는 제목을 만들지 않는다.
         while stack and stack[-1][0] >= level:
             stack.pop()
-        stack.append((level, strip_inline(head.group(2))))
+        stack.append((level, strip_inline(title)))
         heading_path = HEADING_SEPARATOR.join(t for _, t in stack)
 
     flush()

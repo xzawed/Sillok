@@ -145,6 +145,58 @@ def test_second_run_changes_nothing(db, clean, workspace):
     assert {r["path"]: r["indexed_at"] for r in docs(db)} == before
 
 
+def _rows(db):
+    return {
+        r["path"]: r
+        for r in db.execute(
+            "SELECT path, content_hash, indexed_at, source_mtime, title, rules_version FROM kb_documents"
+            " WHERE project = %s",
+            (PROJECT,),
+        ).fetchall()
+    }
+
+
+def test_a_rules_bump_rebuilds_a_same_hash_document(db, clean, workspace, write):
+    """D71. 유도 규칙이 바뀌면 본문이 같아도 청크와 메타를 다시 만든다 — 해시만 보면 낡은 heading_path 가 영영 남았다
+    (감사 F099: `event_stats` 가 `eventstats`). `indexed_at` 은 내용이 바뀐 시각이라 그대로이고 `files_changed` 에 세지 않는다."""
+    write("docs/c.md", FM + "## `event_stats` 응답\n\n본문 다\n")
+    run(workspace)
+    # 옛 판의 행을 흉내 낸다 — 옛 규칙이 남긴 heading_path 와 판 0.
+    db.execute(
+        "UPDATE kb_chunks SET heading_path = 'eventstats 응답' WHERE document_id ="
+        " (SELECT id FROM kb_documents WHERE project = %s AND path = 'docs/c.md')",
+        (PROJECT,),
+    )
+    db.execute("UPDATE kb_documents SET rules_version = 0 WHERE project = %s", (PROJECT,))
+    before = _rows(db)
+
+    got = run(workspace)
+    assert got["status"] == "ok"
+    assert got["files_changed"] == 0
+    assert got["chunks_upserted"] == len(chunks(db))
+    after = _rows(db)
+    for path, row in after.items():
+        assert row["rules_version"] == service.ingest_rules.RULES_VERSION
+        assert row["content_hash"] == before[path]["content_hash"]
+        assert row["indexed_at"] == before[path]["indexed_at"]
+        assert row["source_mtime"] == before[path]["source_mtime"]
+    assert [c["heading_path"] for c in chunks(db) if c["path"] == "docs/c.md"] == ["event_stats 응답"]
+
+    # 판이 맞으면 다시 쓰지 않는다 (D30 §4 그대로).
+    again = run(workspace)
+    assert again["chunks_upserted"] == 0
+    assert _rows(db) == after
+
+
+def test_a_changed_body_stores_the_current_rules_version(db, clean, workspace, write):
+    """새로 넣거나 본문이 바뀐 문서는 지금 판으로 적힌다 — 다음 run 이 판 때문에 다시 쓰지 않는다."""
+    run(workspace)
+    write("docs/a.md", FM + "# 가\n\n바뀐 본문\n")
+    got = run(workspace)
+    assert got["files_changed"] == 1
+    assert {r["rules_version"] for r in _rows(db).values()} == {service.ingest_rules.RULES_VERSION}
+
+
 def test_line_ending_change_alone_is_not_a_change(db, clean, workspace):
     """같은 커밋을 두 OS 에서 색인해도 전량 재색인이 되지 않는다."""
     run(workspace)
