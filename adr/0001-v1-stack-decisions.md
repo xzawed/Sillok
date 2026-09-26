@@ -1901,9 +1901,9 @@ CREATE INDEX IF NOT EXISTS kb_events_tsv ON kb_events USING gin (tsv);
 ### 3. 질의 쪽
 
 - `websearch_to_tsquery('simple', query)` 를 쓴다. 어떤 문자열도 오류 없이 받는다(실측).
+  `to_tsquery` 는 문법 오류를 던지고 D21이 그것을 `INTERNAL` 로 접는다 — 클라이언트 입력 문제가 서버 결함으로 보고된다.
   → **D68: 문법으로는 그렇고 길이는 다르다.** 약 2만 낱말에서 `StatementTooComplex` 였다 —
   이제 벗긴 질의가 2000자를 넘으면 SQL 전에 `VALIDATION` 이다.
-  `to_tsquery` 는 문법 오류를 던지고 D21이 그것을 `INTERNAL` 로 접는다 — 클라이언트 입력 문제가 서버 결함으로 보고된다.
 - **필터가 먼저다.** `project`·`kind`·`module`·기간을 건 뒤 남은 집합에 `tsv` 를 건다.
   필터 조립은 `event_stats` 의 관용구를 넓혀 쓴다.
 - **질의의 세 갈래.** 규칙의 소유자는 **D33** 이고 여기서는 이벤트 쪽 결과만 적는다.
@@ -2646,7 +2646,7 @@ CREATE INDEX IF NOT EXISTS kb_query_logs_project_time
 `kb_status` 가 부를 때마다 `WHERE project = … AND hit_count = 0` 을 세는데 이 표에는 PK 말고 인덱스가 없었다.
 
 - **v1 은 지우지 않는다.** append-only 이고 질의량을 따라 자란다. 정리 명령을 만들지 않는다.
-  → D68: 남는 `query` 는 벗긴 2000자 이하다. 넘으면 `VALIDATION` 이라 남지 않는다 (D50)
+  → D68: D68 이후에 남는 `query` 는 벗긴 2000자 이하다. 넘으면 `VALIDATION` 이라 남지 않는다 (D50)
 - **백업 대상이 아니다.** `kb_events` 와 다르다 — 이것은 Git 이 재현하지 못하는 지식이 아니라 v1 성공 조건의 *측정*이다.
   잃으면 측정을 잃지 지식을 잃지 않는다
 
@@ -3004,9 +3004,9 @@ D35 의 표는 *만들었다면* 의 규칙으로 남는다 — 그 표도 단�
 |---|---|
 | [docs/plan.md](../docs/plan.md) §2 | 확정 스택 표 전체 |
 | [CLAUDE.md](../CLAUDE.md) | 확정 스택 표 (도구 컨텍스트용 미러), Q32 요약 |
-| [docs/data-model.md](../docs/data-model.md) | `vector(1536)`, 모델 ID, 확장 목록, 질의 로그 컬럼 의미 (D48–D52) |
+| [docs/data-model.md](../docs/data-model.md) | `vector(1536)`, 모델 ID, 확장 목록, 질의 로그 컬럼 의미 (D48–D52), 자유 텍스트·`query` 천장 주석 (D68) |
 | [docs/service-and-mcp.md](../docs/service-and-mcp.md) | 서비스 주소, 인증, `top_k`, 색인 경로, `kb_status` 가 로그를 쓰지 않는다는 것(D48), 입력 천장(D68). **`heading_path` 형식은 그쪽이 정본** |
-| [docs/skills/sillok-storage/SKILL.md](../docs/skills/sillok-storage/SKILL.md) | 이벤트 필드 천장과 거절 목록 (D25·D58·D68) |
+| [docs/skills/sillok-storage/SKILL.md](../docs/skills/sillok-storage/SKILL.md) | 이벤트 필드 천장의 수 (D25·D58·D68). 수의 정본은 이 파일이고, 거절 규칙의 서술은 SKILL 이 소유한다 |
 | [scripts/check-layout.mjs](../scripts/check-layout.mjs) | ingest 확장자 필터 `.md` (D30 이 정본) |
 | [migrations/002_schema.sql](../migrations/002_schema.sql) | `kb_ingest_runs.status` 값 주석 (D32) |
 | [AGENTS.md](../AGENTS.md) | 확정 전제 요약 블록 |
@@ -3271,9 +3271,12 @@ D21 이 인증을 `VALIDATION` 으로 접지 않은 이유(모델이 인자를 �
 
 `/v1` 만 막으면 `/mcp` 가 평문 413 으로 갈린다 — D67 이 닫은 그 모양이다.
 앱 층을 SDK 와 **같은 수·같은 비교(`>`)**로 두면 SDK 의 413 에는 닿지 않는다.
-순수 ASGI 층이다. 게이트들은 `BaseHTTPMiddleware` 라 본문을 먼저 버퍼링할 수 있고, 미들웨어에서 올린 예외는
-핸들러 밖이라 500 이 된다. `Content-Length` 를 믿지 않고 바이트를 센다 — 청크 전송에는 그 헤더가 없다.
-stdio 에는 이 층이 없다. ①–④·⑥·⑦ 은 Service 에 있으므로 두 얼굴에 같다.
+순수 ASGI 층이고 **두 게이트보다 바깥이다** — 모든 경로가 게이트 판정과 무관하게 같은 문턱을 먼저 본다.
+그래서 토큰 모드에서 인증 없는 큰 본문도 401 이 아니라 422 다. 미들웨어에서 올린 예외는 핸들러 밖이라 500 이 되므로
+봉투를 직접 보낸다. `Content-Length` 를 믿지 않고 바이트를 센다 — 청크 전송에는 그 헤더가 없다.
+SDK 에도 같은 수를 명시해 넘긴다 — SDK 기본값이 바뀌는 날 `/mcp` 만 갈리지 않게.
+stdio 에는 이 층이 없다. ②–④·⑥·⑦ 은 Service 에 있으므로 두 얼굴에 같다. ① 은 HTTP 만이다 —
+MCP 에서는 배열 `kind` 를 SDK 가 먼저 거절한다 (D42 1항).
 
 ### D68 선택지
 
@@ -3296,7 +3299,11 @@ stdio 에는 이 층이 없다. ①–④·⑥·⑦ 은 Service 에 있으므로
 ### D68 이 닫지 않는 것
 
 - **이미 저장된 긴 행은 그대로다.** `get_event` 가 옛 행에서 천장보다 긴 필드를 돌려줄 수 있다 (D59)
-- **검색 필터 문자열(`module` 등)에는 천장이 없다.** `kb_query_logs.filters` 에 들어가지만 본문 상한이 그 크기를 묶는다
+- **검색 필터 문자열(`module` 등)에는 천장이 없다.** 본문으로 오는 필터는 `kb_query_logs.filters` 에 들어가고
+  본문 상한이 그 크기를 묶는다. `event_stats` 의 `module` 은 질의 인자라 URL 길이 한도에만 묶인다 — 원장에는 남지 않는다 (D48)
+- **`save_doc` 응답에는 천장이 없다.** `diff` 가 색인 문서 전문을 삭제 줄로 돌려줄 수 있다 — `get_file` 의 창과 비대칭이다
+  (D38 그대로. 2026-09-26 리뷰 실측: ADR 에 `body: "x"` 를 제안하니 응답이 160,974바이트였다)
+- **`project` 의 폭 없는 문자(Cf)는 거절하지 않는다.** 공백은 닫았지만 겉보기에 같은 라벨은 여전히 만들 수 있다
 - **MCP 에서 배열 `kind` 는 여전히 SDK 의 봉투 아닌 타입 오류다** (D42 1항). D68 이 닫은 것은 HTTP 의 500 이다
 
 ## 나중에 바꿔도 되는 것 (v1 비범위)

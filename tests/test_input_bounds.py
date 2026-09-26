@@ -263,3 +263,160 @@ def test_an_ordinary_request_is_untouched(client):
     """상한이 본문을 다시 흘려보내는지 — 삼키면 평범한 요청이 빈 본문이 된다."""
     r = client.post("/v1/events", json=_event(kind="typo"))
     assert r.json()["error"]["message"].startswith("kind must be one of")
+
+
+# --- ASGI 수준 — TestClient 는 청크를 한 메시지로 합쳐 버려 누적 계수를 못 잰다 (D68 리뷰) --------------
+
+CHUNK = 64 * 1024
+
+
+def _run_asgi(app, messages, headers=()):
+    """`app` 에 요청 하나를 흘리고 (보낸 응답 메시지들, receive 호출 수, 안쪽이 본 것) 을 돌려준다."""
+    import asyncio
+
+    queue = list(messages)
+    calls = {"n": 0}
+    sent = []
+
+    async def receive():
+        calls["n"] += 1
+        return queue.pop(0) if queue else {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http", "method": "POST", "path": "/v1/events", "raw_path": b"/v1/events",
+        "query_string": b"", "headers": list(headers), "http_version": "1.1", "scheme": "http",
+        "server": ("127.0.0.1", 8080), "client": ("127.0.0.1", 1),
+    }
+    asyncio.run(app(scope, receive, send))
+    return sent, calls["n"]
+
+
+def _inner():
+    seen = {"called": False, "body": None, "more": None}
+
+    async def app(scope, receive, send):
+        seen["called"] = True
+        message = await receive()
+        seen["body"], seen["more"] = message["body"], message["more_body"]
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    return app, seen
+
+
+def _chunks(total: int) -> list[dict]:
+    n = -(-total // CHUNK)
+    return [
+        {"type": "http.request", "body": b"x" * min(CHUNK, total - i * CHUNK), "more_body": i < n - 1}
+        for i in range(n)
+    ]
+
+
+def test_bodylimit_counts_across_messages_and_stops_reading():
+    """여러 메시지에 걸친 합을 센다. 메시지마다 재거나 끝까지 읽은 뒤 재면 여기서 붉어진다."""
+    inner, seen = _inner()
+    sent, reads = _run_asgi(api.BodyLimit(inner), _chunks(api.BODY_MAX + 5 * CHUNK))
+    assert sent[0]["status"] == 422
+    assert not seen["called"]
+    assert reads <= -(-api.BODY_MAX // CHUNK) + 1  # 문턱을 넘는 순간 멈춘다
+
+
+def test_bodylimit_refuses_a_declared_oversize_without_reading():
+    """`Content-Length` 선검사 — Expect: 100-continue 클라이언트가 4 MiB 를 올리지 않게 한다."""
+    inner, seen = _inner()
+    headers = [(b"content-length", str(api.BODY_MAX + 1).encode())]
+    sent, reads = _run_asgi(api.BodyLimit(inner), _chunks(api.BODY_MAX + 1), headers)
+    assert sent[0]["status"] == 422
+    assert reads == 0
+    assert not seen["called"]
+
+
+def test_bodylimit_replays_a_multi_message_body_whole():
+    inner, seen = _inner()
+    sent, _ = _run_asgi(api.BodyLimit(inner), _chunks(3 * CHUNK + 7))
+    assert sent[0]["status"] == 204
+    assert seen["body"] == b"x" * (3 * CHUNK + 7)
+    assert seen["more"] is False
+
+
+def test_bodylimit_does_not_turn_a_disconnect_into_a_complete_body():
+    """본문 도중 끊기면 앞부분이 우연히 유효한 JSON 이어도 요청으로 처리하지 않는다."""
+    inner, seen = _inner()
+    messages = [{"type": "http.request", "body": b'{"a":1}', "more_body": True}, {"type": "http.disconnect"}]
+    sent, _ = _run_asgi(api.BodyLimit(inner), messages)
+    assert sent == []
+    assert not seen["called"]
+
+
+def test_the_body_limit_comes_before_the_bearer_gate():
+    """토큰 모드에서도 같은 문턱이 먼저다 — 인증 없는 큰 본문은 401 이 아니라 422 (D68)."""
+    with TestClient(
+        api.create_app(_config(bearer_token="secret-token")),
+        base_url="http://sillok.example.com",
+        raise_server_exceptions=False,
+    ) as c:
+        for headers in ({}, {"Authorization": "Bearer secret-token"}):
+            for path in ("/v1/events", "/mcp"):
+                r = c.post(path, content=_big(api.BODY_MAX + 1),
+                           headers={"Content-Type": "application/json", **headers})
+                assert r.json() == BODY_REJECTED, (path, headers, r.status_code)
+
+
+def test_mcp_at_exactly_the_limit_is_not_the_sdk_413(client):
+    """SDK 가 비교를 바꾸거나 수를 줄여도 `/mcp` 가 평문 413 으로 갈리지 않는지 경계에서 본다."""
+    r = client.post(
+        "/mcp",
+        content=_big(api.BODY_MAX),
+        headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+    )
+    assert r.status_code != 413, r.text
+
+
+# --- 경계의 나머지 — 주입해도 초록이던 자리 (D68 리뷰) ----------------------------------------
+
+
+@pytest.mark.parametrize("field", ["title", "summary"])
+@pytest.mark.parametrize("bad", [5, ["x"], {"a": 1}])
+def test_non_string_title_or_summary_is_validation_not_500(client, field, bad):
+    """`_is_missing` 이 `.strip()` 앞에서 타입을 본다. 그 가드가 빠지면 여기서 500 이다."""
+    assert _rejected(**{field: bad}) == "title and summary must be strings"
+    r = client.post("/v1/events", json=_event(**{field: bad}))
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["project", "kind", "title", "summary", "occurred_at", "result"])
+def test_an_empty_string_is_missing_for_every_required_field(field):
+    assert _rejected(**{field: ""}) == f"missing required field: {field}"
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("project", "project required"),
+        ("kind", "kind must be one of"),
+        ("result", "result must be one of"),
+        ("occurred_at", "occurred_at is not ISO-8601"),
+    ],
+)
+def test_blank_only_is_missing_for_title_and_summary_only(field, message):
+    """⑦ 은 두 필드뿐이다. 모든 필수 필드로 넓히면 이 넷의 문구가 바뀐다."""
+    assert _rejected(**{field: "   "}).startswith(message)
+
+
+@pytest.mark.parametrize("field", ["kind", "result"])
+@pytest.mark.parametrize("bad", [1, True, 1.5])
+def test_hashable_non_string_enums_keep_the_same_message(field, bad):
+    assert _rejected(**{field: bad}).startswith(f"{field} must be one of")
+
+
+def test_the_numbers_the_documents_state():
+    """ADR D68 · service-and-mcp · SKILL 이 적은 수다. 코드만 바꾸면 여기서 붉어진다 — 문서를 같이 고친다."""
+    assert (service.TITLE_MAX, service.SUMMARY_MAX, service.QUERY_MAX) == (200, 2000, 2000)
+    assert api.BODY_MAX == 4194304
+    assert service._OPTIONAL_TEXT_MAX == {
+        "root_cause": 2000, "resolution": 2000,
+        "module": 200, "created_by": 200, "related_doc_path": 200,
+    }

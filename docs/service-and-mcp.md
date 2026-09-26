@@ -78,6 +78,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 **요청 본문은 4194304바이트(4 MiB)까지다** (D68). 넘으면 모든 경로(`/mcp` 포함)가 `VALIDATION` 봉투로 답한다 —
 문구는 `body larger than 4194304 bytes`. `Content-Length`를 믿지 않고 바이트를 센다(청크 전송도 걸린다).
+**이 문턱이 D7·D67 게이트보다 먼저다** — 토큰 모드에서 인증 없는 큰 본문도 `UNAUTHORIZED`가 아니라 `VALIDATION`이다.
 
 **봉투가 닿지 않는 한 곳:** HTTP 자체가 깨져 ASGI 앱에 도달하지 못한 요청은
 서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인.
@@ -379,7 +380,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 D7 게이트는 앱 미들웨어라 `/mcp`도 덮는다. stdio는 부모 프로세스의 파이프라 토큰이 없다.
 토큰이 없으면 D67 의 `Host` 게이트가 같은 자리에서 `/mcp` 를 먼저 거절한다(봉투, 422).
 SDK 의 리바인딩 보호는 두 모드 모두 끈다 — 경계는 로컬 모드의 이 게이트와 노출 모드의 토큰이다 (D67).
-본문 상한도 앱이 먼저 본다 — SDK 와 같은 4 MiB·같은 비교라 SDK 의 평문 413 에는 닿지 않는다 (D68).
+본문 상한도 앱이 먼저 본다 — SDK 에 같은 4 MiB 를 명시해 넘기고 비교도 같아 SDK 의 평문 413 에는 닿지 않는다 (D68).
 
 ### 인자 (D42)
 
@@ -414,7 +415,7 @@ HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를
 ## 반환 크기
 
 - excerpt / summary: **799자 + `…` 로 합 800자**다 (D33 §8). 원문은 `get_file` / `get_event`.
-- `payload`: `json.dumps(payload, ensure_ascii=False, separators=(",", ":"))`가 2000자를 넘으면
+- `payload`: `json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False)`가 2000자를 넘으면
   `VALIDATION` 이고 문구는 `payload longer than 2000` 이다 (D58).
   **구분자를 빼면 기본값이 공백을 넣어 같은 객체가 재는 사람에 따라 갈린다.**
   `summary`와 같은 숫자다 — `get_event`가 행을 통째로 돌려주므로 같은 이유가 걸린다.

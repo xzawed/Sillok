@@ -217,15 +217,16 @@ BODY_MAX = 4 * 1024 * 1024
 
 
 class BodyLimit:
-    """D68. **순수 ASGI 층이고 가장 바깥이다** — 모든 경로(`/mcp` 포함)를 같은 문턱으로 본다.
+    """D68. **순수 ASGI 층이고 두 게이트보다 바깥이다** — 모든 경로(`/mcp` 포함)가 게이트 판정과
+    무관하게 같은 문턱을 먼저 본다. 그래서 토큰 모드에서 인증 없는 큰 본문도 401 이 아니라 422 다.
 
-    `BaseHTTPMiddleware` 로 두지 않는다. 그쪽은 본문을 먼저 통째로 버퍼링하므로
-    100 MiB 가 상한 검사 전에 메모리로 들어온다(2026-09-26 감사 실측: +111 MiB).
-    예외를 올리지도 않는다 — 미들웨어에서 나온 예외는 `ValidationFailed` 핸들러 밖이라 500 이 된다.
+    예외를 올리지 않는다 — 미들웨어에서 나온 예외는 `ValidationFailed` 핸들러 밖이라 500 이 된다.
     봉투를 직접 보내고 안쪽 앱을 부르지 않는다.
 
     `Content-Length` 가 문턱을 넘으면 읽지 않고 거절한다. 그래도 **바이트를 센다** —
-    청크 전송에는 그 헤더가 없고, 작은 값이 더 큰 본문을 숨길 수 있다. 통과한 본문은 그대로 다시 흘린다.
+    청크 전송에는 그 헤더가 없고, 작은 값이 더 큰 본문을 숨길 수 있다. 덧붙이기 **전에** 재므로
+    문턱을 넘는 메시지는 버퍼에 들어오지 않는다. 통과한 본문은 한 메시지로 다시 흘린다.
+    본문이 끝나기 전에 연결이 끊기면 안쪽 앱을 부르지 않는다 — 앞부분을 완결 본문으로 바꾸지 않는다.
     """
 
     def __init__(self, app, limit: int = BODY_MAX) -> None:
@@ -241,19 +242,18 @@ class BodyLimit:
             await self._refuse(scope, receive, send)
             return
         body = bytearray()
-        rest: list[dict] = []
         more = True
         while more:
             message = await receive()
             if message["type"] != "http.request":
-                rest.append(message)  # http.disconnect — 안쪽 앱이 그대로 보게 한다
-                break
-            body += message.get("body", b"")
-            if len(body) > self.limit:
+                return  # 본문 도중 http.disconnect — 받을 사람이 없다
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > self.limit:
                 await self._refuse(scope, receive, send)
                 return
+            body += chunk
             more = message.get("more_body", False)
-        replay = [{"type": "http.request", "body": bytes(body), "more_body": False}, *rest]
+        replay = [{"type": "http.request", "body": bytes(body), "more_body": False}]
 
         async def replayed():
             return replay.pop(0) if replay else await receive()
@@ -342,8 +342,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.add_middleware(BearerGate, token=cfg.bearer_token)
     else:
         app.add_middleware(HostGate)
-    # **마지막에 더한다 — 가장 바깥이 된다** (D68). 게이트들은 BaseHTTPMiddleware 라 본문을
-    # 버퍼링할 수 있으므로, 그보다 먼저 문턱을 봐야 큰 본문이 메모리에 들어오지 않는다.
+    # **마지막에 더한다 — 게이트보다 바깥이 된다** (D68). 모든 경로가 게이트 판정과 무관하게
+    # 같은 문턱을 먼저 본다. 순서를 바꾸면 토큰 모드의 인증 없는 큰 본문이 422 가 아니라 401 이 된다.
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(RequestValidationError)

@@ -47,8 +47,9 @@ SOURCES = frozenset({"manual", "github_issue", "markdown", "agent"})
 PROJECT_MAX = 64
 TITLE_MAX = 200
 SUMMARY_MAX = 2000
-# 공백은 `str.isspace()` 전부다 (D68) — 앞뒤를 벗기는 `strip()` 과 같은 정의라야 겉보기에 같은
-# 라벨이 다른 project 가 되지 않는다. 여기는 공백 밖의 셋이다.
+# 공백은 `str.isspace()` 전부다 (D68) — 앞뒤를 벗기는 `strip()` 과 같은 정의라야 **공백 때문에**
+# 겉보기에 같은 라벨이 다른 project 가 되지 않는다(폭 없는 문자 Cf 는 D68 이 닫지 않았다).
+# 여기는 공백 밖의 셋이다.
 _PROJECT_FORBIDDEN = ("/", "\\", "\x00")
 # D68. 공백만 있으면 누락으로 본다. 판정만 벗기고 저장은 받은 그대로다 (D25 의 정규화는 project 만).
 _BLANK_IS_MISSING = frozenset({"title", "summary"})
