@@ -4,7 +4,8 @@
 `tests/test_mcp_db.py` 가 한다 (D46).
 
 **클라이언트 SDK 를 쓰지 않고 JSON-RPC 를 그대로 때린다.** 전선 위의 모양이 계약이라서다.
-`Host` 를 바꿔 보내는 이유는 D43·D67 에 적혀 있다 — 로컬 모드의 리바인딩 보호를 끄지 않는다.
+`Host` 를 바꿔 보내는 이유는 D67 에 적혀 있다 — 로컬 모드의 HostGate 는 루프백 Host 만 받는다.
+검사가 막히면 게이트를 끄지 말고 헤더를 고친다.
 """
 
 from __future__ import annotations
