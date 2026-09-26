@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import CallToolResult, TextContent
 
 from . import __version__, api, service
 from .config import Config
@@ -52,11 +53,37 @@ def _text(call: Callable[[], Any]) -> str:
     return json.dumps(body, ensure_ascii=False, separators=(",", ":"))
 
 
+class _Server(MCPServer):
+    """선언 밖 인자를 **Service 에 닿기 전에** 같은 봉투로 거절한다 (D69).
+
+    SDK 는 도구 함수의 서명으로 인자 모델을 만들고 모르는 키를 조용히 버린다 — 오타 `root_casue` 가
+    NULL 로 저장되고 `kindd` 가 필터 없는 검색이 됐다(2026-09-26 감사). HTTP 얼굴은 Service 가
+    `reject_unknown` 으로 막으므로 여기서 같은 함수를 먼저 부른다. SDK 의 `extra='forbid'` 는 쓰지 않는다 —
+    그 실패는 봉투가 아닌 오류라 두 얼굴이 갈린다 (D42·D44·D46).
+    공개 메서드 `call_tool` 만 덮는다. 선언된 인자 이름은 공개 `list_tools` 의 입력 스키마에서 읽는다.
+    """
+
+    _declared: dict[str, frozenset[str]] | None = None
+
+    async def call_tool(self, name, arguments, context=None):
+        if self._declared is None:
+            self._declared = {
+                tool.name: frozenset((tool.input_schema or {}).get("properties", {}))
+                for tool in await self.list_tools()
+            }
+        declared = self._declared.get(name)
+        if declared is not None:
+            text = _text(lambda: service.reject_unknown((arguments or {}).keys(), declared))
+            if not json.loads(text)["ok"]:
+                return CallToolResult(content=[TextContent(type="text", text=text)], is_error=False)
+        return await super().call_tool(name, arguments, context)
+
+
 def build(cfg: Config) -> MCPServer:
     """도구 여덟을 단 서버. 이름은 plan.md §5 가 소유한다 — 여기서 바꾸지 않는다."""
     # version 을 넘기지 않으면 SDK 기본값이 빈 문자열이라 initialize 의
     # serverInfo.version 이 "" 로 나간다 — 에이전트가 보는 유일한 신원 표면이다 (실측).
-    mcp = MCPServer(name=SERVER_NAME, version=__version__)
+    mcp = _Server(name=SERVER_NAME, version=__version__)
 
     # structured_output=False: 봉투 하나만 내보낸다 (D44). 켜 두면 같은 사실이
     # 텍스트와 structuredContent 두 모양으로 나가고, 두 모양은 곧 두 계약이 된다.

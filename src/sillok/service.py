@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,38 @@ _OPTIONAL_TEXT_MAX = {
 }
 # D68. 검색 질의 상한 — summary 와 같은 수. **벗긴** 질의를 잰다 (빈 질의 규칙이 먼저다).
 QUERY_MAX = SUMMARY_MAX
+
+# D69. Service 입력마다 받는 키. 그 밖의 키는 VALIDATION 이다 — 오타가 NULL 로 저장되거나
+# (append-only 라 되살릴 원본이 없다, D24·D59) 필터 없는 검색이 되지 않게 한다.
+# MCP 얼굴은 SDK 가 선언 밖 인자를 여기 오기 전에 떨어뜨리므로 `mcp_server` 가 같은 검사를 앞에서 한다.
+SAVE_EVENT_KEYS = frozenset(REQUIRED_FIELDS) | frozenset(
+    {"module", "root_cause", "resolution", "severity", "resolved_at", "source",
+     "related_doc_path", "payload", "created_by"}
+)
+SEARCH_DOCS_KEYS = frozenset({"project", "query", "top_k", "doc_type", "status", "module"})
+SEARCH_EVENTS_KEYS = frozenset({"project", "query", "top_k", "kind", "module", "since", "until"})
+SAVE_DOC_KEYS = frozenset({"project", "path", "body", "base_hash"})
+INGEST_KEYS = frozenset({"project", "workspace"})
+EVENT_STATS_KEYS = frozenset({"project", "module", "since"})
+KB_STATUS_KEYS = frozenset({"project"})
+GET_FILE_KEYS = frozenset({"project", "path", "offset"})
+GET_EVENT_KEYS = frozenset({"project"})
+
+
+def reject_unknown(keys: Iterable[object], allowed: frozenset[str]) -> None:
+    """모르는 키를 거절한다 (D69). 이름은 **키 하나**만 싣고 값은 싣지 않는다.
+
+    여럿이면 코드점 순으로 첫 키다(결정적이다). 이름으로 실을 수 없는 키 — 비었거나,
+    200자를 넘거나, 담을 수 없는 문자가 있는 키 — 는 잘라 싣지 않고 고정 문구만 낸다
+    (D68 이 긴 질의를 잘라 기록하는 안을 버린 그 이유다).
+    """
+    unknown = sorted(str(k) for k in keys if k not in allowed)
+    if not unknown:
+        return
+    name = unknown[0]
+    if 0 < len(name) <= TITLE_MAX and "\x00" not in name and not _SURROGATE.search(name):
+        raise ValidationFailed(f"unknown field: {name}")
+    raise ValidationFailed("unknown field")
 
 # 짝 없는 서로게이트. `require_text` 가 쓴다 — 왜 거르는지는 그 함수의 docstring 이다.
 _SURROGATE = re.compile("[\ud800-\udfff]")
@@ -284,6 +317,8 @@ def build_event(body: dict[str, Any]) -> Event:
     """요청 본문을 검증된 Event 로 만든다. 관대하게 채우지 않는다 (D10)."""
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
+    # 누락보다 먼저다 — `root_casue` 는 "원인을 비웠다" 가 아니라 "철자를 틀렸다" 이다 (D69).
+    reject_unknown(body, SAVE_EVENT_KEYS)
 
     missing = [f for f in REQUIRED_FIELDS if _is_missing(f, body.get(f))]
     if missing:
@@ -399,12 +434,10 @@ def event_stats(
 ) -> dict[str, Any]:
     """D23. 필터 + COUNT/AVG 만 쓴다. 벡터를 쓰지 않는다."""
     project = normalize_project(project)
-    # `module` 은 두 얼굴 다 **질의 인자**로 들어와 `_filter_text` 를 지나지 않는다.
-    # 그래서 이 부류의 마지막 구멍이었다 (Grok 이 라이브에서 `module=%00` 으로 찾았다).
-    if module is not None:
-        if not isinstance(module, str):
-            raise ValidationFailed("module must be a string")
-        module = require_text(module, "module")
+    # `module` 은 두 얼굴 다 **질의 인자**로 들어온다. 검색 필터와 같은 뜻이다 (D69) —
+    # 벗기고, 공백뿐이거나 비면 거르지 않는다. 예전에는 원문 그대로 비교해 `''` 가 0행이었다.
+    # NUL·서로게이트도 같은 자리에서 걸린다 (Grok 이 라이브에서 `module=%00` 으로 찾았던 구멍).
+    module = _filter_text({"module": module}, "module")
     where, params = _event_filters(project, module, since)
 
     with connect(dsn) as conn, conn.cursor() as cur:
@@ -452,7 +485,8 @@ def event_stats(
             WHERE {where} AND root_cause IS NOT NULL
             GROUP BY module, root_cause
             HAVING count(*) >= {REPEAT_MIN_COUNT}
-            ORDER BY count DESC, root_cause ASC, module ASC NULLS LAST
+            -- COLLATE "C" (D69) — by_module 과 같은 이유다 (D58). LIMIT 이 이 순서로 자른다.
+            ORDER BY count DESC, root_cause COLLATE "C" ASC, module COLLATE "C" ASC NULLS LAST
             LIMIT {REPEAT_LIMIT}
             """,
             params,
@@ -878,12 +912,24 @@ def _filter_text(body: dict[str, Any], field: str) -> str | None:
     return value or None
 
 
+# D69. 닫힌 집합인 필터는 값도 본다 — 오타가 200 빈 결과로 `zero_hit_queries` 를 부풀리지 않게.
+# 쓰기(ingest)가 이미 거절하는 집합과 같다. `module` 은 열린 값이라 여기 없다 (D25 레지스트리 금지).
+_DOC_FILTER_ENUMS = {"doc_type": ingest_rules.DOC_TYPES, "status": ingest_rules.STATUSES}
+
+
+def _enum_filter(value: str | None, field: str, allowed: frozenset[str] | None) -> str | None:
+    """벗긴 **뒤에** 본다 — `"  failure  "` 는 통과하고 공백뿐이면 필터가 아니다 (D69)."""
+    if value is not None and allowed is not None and value not in allowed:
+        raise ValidationFailed(f"{field} must be one of {sorted(allowed)}")
+    return value
+
+
 def _doc_filters(body: dict[str, Any], project: str) -> tuple[str, dict[str, Any]]:
     """필터는 **두 팔의 WHERE** 에 건다. 병합 뒤에 거르면 걸러질 행이 후보 칸을 먹는다."""
     where = ["d.project = %(project)s"]
     params: dict[str, Any] = {"project": project}
     for field in ("module", "doc_type", "status"):
-        value = _filter_text(body, field)
+        value = _enum_filter(_filter_text(body, field), field, _DOC_FILTER_ENUMS.get(field))
         if value is not None:
             where.append(f"d.{field} = %({field})s")
             params[field] = value
@@ -1040,6 +1086,7 @@ def search_docs(
     started = time.perf_counter()
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
+    reject_unknown(body, SEARCH_DOCS_KEYS)  # D69
     project = normalize_project(body.get("project"))
     # search_docs 에서 query 는 필수다 — 질의 말고 신호가 없어 필터만으로는
     # "관련 문서 전부" 가 되고 그것은 설계 위반이다 (D33 §6).
@@ -1154,15 +1201,19 @@ def _event_search_filters(body: dict[str, Any], project: str) -> tuple[str, dict
     where = ["project = %(project)s"]
     params: dict[str, Any] = {"project": project}
     for field in ("kind", "module"):
-        value = _filter_text(body, field)
+        value = _enum_filter(_filter_text(body, field), field, KINDS if field == "kind" else None)
         if value is not None:
             where.append(f"{field} = %({field})s")
             params[field] = value
+    # [since, until) — since 는 포함, until 은 배제다 (D69).
     for field, op in (("since", ">="), ("until", "<")):
         raw = body.get(field)
         if raw is not None:
             params[field] = parse_timestamp(raw, field)
             where.append(f"occurred_at {op} %({field})s")
+    # 순간이 하나도 없는 창은 거절한다. `[t, t)` 를 0건으로 원장에 남기지 않는다 (D69).
+    if "since" in params and "until" in params and params["since"] >= params["until"]:
+        raise ValidationFailed("since is not before until")
     return " AND ".join(where), params
 
 
@@ -1174,6 +1225,7 @@ def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> di
     started = time.perf_counter()
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
+    reject_unknown(body, SEARCH_EVENTS_KEYS)  # D69
     project = normalize_project(body.get("project"))
     top_k = _top_k(body.get("top_k"))
     # search_events 에서 query 는 선택이다 — 필터만으로도 완결된 요청이 된다 (D33 §6).
@@ -1201,6 +1253,9 @@ def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> di
                                     occurred_at DESC, id DESC) AS rk
                 FROM kb_events, websearch_to_tsquery('{TS_CONFIG}', %(query)s) AS tq(q)
                 WHERE {where} AND tsv @@ tq.q
+                  -- 빈 tsvector 에도 참인 질의(부정만 있는 `-낱말`)는 0건이다 (D69).
+                  -- 그런 질의는 코퍼스 거의 전체를 맞힌다 — D33 이 문서에서 websearch 를 버린 그 고장.
+                  AND NOT (''::tsvector @@ tq.q)
                 ORDER BY rk
                 LIMIT %(top_k)s
                 """,
@@ -1445,6 +1500,7 @@ def save_doc(dsn: str, body: dict[str, Any], workspace: str) -> dict[str, Any]:
     """
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
+    reject_unknown(body, SAVE_DOC_KEYS)  # D69
     project = normalize_project(body.get("project"))
     path = _require_path(body.get("path"))
     proposed_raw = body.get("body")

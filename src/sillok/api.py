@@ -399,12 +399,15 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
 
     @app.get("/v1/stats/events")
     def event_stats(
-        project: str, module: str | None = None, since: str | None = None
+        request: Request, project: str, module: str | None = None, since: str | None = None
     ) -> JSONResponse:
+        # 선언 밖 질의 인자는 FastAPI 가 함수에 넣지 않는다 — `?modul=` 이 필터 없는 집계였다 (D69).
+        service.reject_unknown(request.query_params.keys(), service.EVENT_STATS_KEYS)
         return ok(service.event_stats(cfg.database_url, project, module, since_filter(since)))
 
     @app.get("/v1/status")
-    def kb_status(project: str) -> JSONResponse:
+    def kb_status(request: Request, project: str) -> JSONResponse:
+        service.reject_unknown(request.query_params.keys(), service.KB_STATUS_KEYS)  # D69
         return ok(service.kb_status(cfg.database_url, project))
 
     @app.post("/v1/search/docs")
@@ -424,6 +427,8 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
         # 인자까지 같다 — 변경 파일 목록을 받지 않는다 (D30).
         # run 행이 생긴 모든 경우에 ok: true 다. ok: false 는 락 거절과 D37 거절뿐이다.
         # **같은 거절이 이 얼굴에도 걸린다** — CLI 에만 걸면 이 문으로 우회된다 (D37).
+        # `workspce` 같은 오타는 설정된 나무로 조용히 떨어졌다 (D69).
+        service.reject_unknown(body, service.INGEST_KEYS)
         return ok(
             service.ingest(
                 cfg.database_url,
@@ -434,13 +439,15 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
         )
 
     @app.get("/v1/events/{event_id}")
-    def get_event(event_id: int, project: str) -> JSONResponse:
+    def get_event(request: Request, event_id: int, project: str) -> JSONResponse:
+        service.reject_unknown(request.query_params.keys(), service.GET_EVENT_KEYS)  # D69
         # project 는 필수다 (D35). 없으면 FastAPI 요청 검증이 VALIDATION 으로 접는다.
         # 정수가 아닌 {id} 도 같은 자리에서 걸린다.
         return ok(service.get_event(cfg.database_url, event_id, project))
 
     @app.get("/v1/files")
-    def get_file(project: str, path: str, offset: int | None = None) -> JSONResponse:
+    def get_file(request: Request, project: str, path: str, offset: int | None = None) -> JSONResponse:
+        service.reject_unknown(request.query_params.keys(), service.GET_FILE_KEYS)  # D69
         # 뿌리는 하나다 (D37). project 는 원장의 라벨이지 경로 성분이 아니다.
         # offset 의 기본값(0)은 **Service 한 곳에만** 둔다 — 두 얼굴이 같은 값을 쓰게 (D36·D46).
         return ok(service.get_file(cfg.database_url, project, path, offset, cfg.workspace))

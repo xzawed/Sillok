@@ -15,7 +15,7 @@ MCP 도구 표면 · 질의 원장 기록 · CLI `migrate`/`serve`/`ingest`/`mcp
 `GET /v1/events/{id}` · `GET /v1/files` · `POST /v1/docs/proposals`.
 **MCP 는 `POST /mcp`(와 `/mcp/`) 하나이고 stdio 는 `sillok mcp` 다** (D43·D45).
 그 아래 다른 경로는 정직하게 404다. 스텁을 만들지 않는다.
-**열린 Q 는 없다** — Q36 까지 D68 이 닫았다. `GET /v1/docs` 는 만들지 않기로 정했다 (D64).
+**열린 Q 는 없다** — Q37 까지 D69 가 닫았다. `GET /v1/docs` 는 만들지 않기로 정했다 (D64).
 
 저장소 지도는 [docs/conventions.md](docs/conventions.md). **시작점은 [docs/plan.md](docs/plan.md)다.**
 협업 규칙은 [AGENTS.md](AGENTS.md).
@@ -31,7 +31,7 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 - 동작이 명세와 다르면 **코드가 틀린 것으로 본다.**
 - 계약을 바꾸려면 [docs/plan.md](docs/plan.md)와 [adr/0001-v1-stack-decisions.md](adr/0001-v1-stack-decisions.md)를 **먼저** 고치고 나서 구현한다.
 - ADR의 D1–D15는 2026-08-30, D16–D28은 2026-08-31, D29–D34는 2026-09-01,
-  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05, D66은 2026-09-12, D67–D68은 2026-09-26 확정. 임의로 뒤집지 않는다.
+  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05, D66은 2026-09-12, D67–D69는 2026-09-26 확정. 임의로 뒤집지 않는다.
 - 같은 값이 여러 문서에 있으면 사본에 정본 위치가 적혀 있다. 어긋나면 정본이 이긴다.
 - **충돌 판정은 파일 서열보다 사실 소유권이 먼저다.** [docs/conventions.md](docs/conventions.md)의 문서 지도에서 그 사실을 소유한 파일이 이긴다.
   소유자가 지도에 없으면 위 서열로 판정하고, 판정 후 소유자를 지도에 추가한다.
@@ -39,8 +39,8 @@ docs/plan.md = adr/0001-v1-stack-decisions.md   >   docs/ 나머지
 ### 아직 답이 없는 것
 
 [docs/open-questions.md](docs/open-questions.md)에 **지금 열린 질문은 하나도 없다** —
-L절의 Q36까지 D68이 닫았다.
-새 공백을 발견하면 추측으로 채우지 말고 거기에 다음 번호로 열고, 답을 ADR에 D69 이후로 적는다.
+M절의 Q37까지 D69가 닫았다.
+새 공백을 발견하면 추측으로 채우지 말고 거기에 다음 번호로 열고, 답을 ADR에 D70 이후로 적는다.
 
 어느 Q가 어느 D로 닫혔는지는 [docs/open-questions.md](docs/open-questions.md)가 소유한다 —
 여기에 그 이력의 사본을 두지 않는다.
