@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import os
+import signal
+from contextlib import contextmanager
 
 import pytest
 
@@ -196,6 +198,70 @@ def test_failed_opens_do_not_leak_descriptors(tmp_path):
         with pytest.raises(workspace.OpenFailed):
             workspace.open_regular(str(tmp_path), path)
     assert len(os.listdir(fd_dir)) == before, "거절 경로가 서술자를 남긴다"
+
+
+class _Stuck(Exception):
+    """`TimeoutError` 를 쓰지 않는다 — `OSError` 의 하위라 `open_regular` 가 `OpenFailed` 로 접어
+    **고치기 전 코드에서도 초록이었다** (2026-09-26 주입으로 확인)."""
+
+
+@contextmanager
+def _deadline(seconds: int):
+    """회귀하면 `open` 이 영영 멈춘다. 멈춤을 실패로 바꾼다 — 검사가 대신 멈추면 아무것도 증명하지 못한다."""
+
+    def fire(signum, frame):
+        raise _Stuck("FIFO 의 open 에서 멈췄다")
+
+    previous = signal.signal(signal.SIGALRM, fire)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@posix_only
+def test_a_fifo_does_not_block_the_open(tmp_path):
+    """FIFO 는 쓰는 쪽이 올 때까지 `open` 에서 멈춰 4번(`S_ISREG`)에 닿지 못했다 (D36 3번 · D70).
+    `get_file` 의 작업 스레드와 ingest 의 락이 그렇게 묶였다."""
+    (tmp_path / "docs").mkdir()
+    os.mkfifo(tmp_path / "docs" / "x.md")
+    with _deadline(5), pytest.raises(workspace.OpenFailed):
+        workspace.open_regular(str(tmp_path), "docs/x.md")
+
+
+@posix_only
+def test_the_returned_descriptor_is_blocking_again(tmp_path):
+    """`O_NONBLOCK` 은 FIFO 를 거르려고 건 것이다. 돌려주는 서술자에는 남기지 않는다."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_text("본문\n", encoding="utf-8")
+    fd = workspace.open_regular(str(tmp_path), "docs/a.md")
+    try:
+        assert os.get_blocking(fd) is True
+    finally:
+        os.close(fd)
+
+
+@posix_only
+def test_the_refusal_names_the_reason_not_the_path(tmp_path):
+    """경로는 호출자가 갖고 있다. 사유에 또 넣으면 ingest 의 오류가 `경로: 경로: 사유` 가 됐다."""
+    with pytest.raises(workspace.OpenFailed) as caught:
+        workspace.open_regular(str(tmp_path), "docs/none.md")
+    assert "docs/none.md" not in str(caught.value)
+    assert str(caught.value)
+
+
+@posix_only
+def test_require_flags_passes_where_the_walk_is_supported():
+    workspace.require_flags()
+
+
+@windows_only
+def test_require_flags_refuses_where_the_walk_is_not_supported():
+    """ingest 도 이 걸음으로 읽는다 — 플래그가 없으면 스캔 전에 실패한다 (D70 ③)."""
+    with pytest.raises(workspace.PlatformUnsupported):
+        workspace.require_flags()
 
 
 @posix_only

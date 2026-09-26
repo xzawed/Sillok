@@ -55,11 +55,17 @@ def flags_supported() -> bool:
     return hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
 
 
-def _flags() -> tuple[int, int, int]:
+def require_flags() -> None:
+    """걸을 수 없으면 읽기 전에 실패한다 (D36). ingest 는 스캔 전에 부른다 (D70 ③) —
+    파일마다 실패하면 첫 파일 이름이 붙어 사유가 플랫폼이 아니라 그 파일인 것처럼 읽힌다."""
     if not flags_supported():
         raise PlatformUnsupported(
             "O_NOFOLLOW / O_DIRECTORY 가 없는 플랫폼이다. 방어 없이 읽지 않는다 (D36)"
         )
+
+
+def _flags() -> tuple[int, int, int]:
+    require_flags()
     return os.O_NOFOLLOW, os.O_DIRECTORY, getattr(os, "O_CLOEXEC", 0)
 
 
@@ -68,6 +74,9 @@ def open_regular(root: str, rel_path: str) -> int:
 
     뿌리 자체에는 `O_NOFOLLOW` 를 걸지 않는다 — `SILLOK_WORKSPACE` 가 심볼릭 링크인 배치는
     운영자가 정한 것이고, D36 이 막는 것은 그 아래에서 링크를 **따라 나가는** 걸음이다.
+
+    거절 사유에 경로를 넣지 않는다 — 경로는 호출자가 갖고 있고, 넣으면 ingest 의 run 오류가
+    `경로: 경로: 사유` 가 된다 (D70 ③). 호출자가 표시형으로 붙인다 (D32).
     """
     nofollow, directory, cloexec = _flags()
 
@@ -76,7 +85,7 @@ def open_regular(root: str, rel_path: str) -> int:
     # `openat(dirfd, "..")` 는 커널이 허락하는 걸음이라 오면 뿌리 밖으로 나간다.
     # **허용 목록을 넓히는 검사가 아니다** — 좁히기만 하므로 D36 의 요지와 부딪히지 않는다.
     if not rel_path or any(part in ("", ".", "..") for part in parts):
-        raise OpenFailed(f"열 수 없는 경로 성분: {rel_path!r}")
+        raise OpenFailed("열 수 없는 경로 성분")
 
     # **닫는 순서가 소유권이다.** 새 fd 를 먼저 변수에 넣고 옛 것을 닫는다 —
     # 반대로 하면 close 가 실패하는 순간 finally 가 이미 닫힌 fd 를 또 닫고
@@ -87,18 +96,22 @@ def open_regular(root: str, rel_path: str) -> int:
             nxt = os.open(name, os.O_RDONLY | directory | nofollow | cloexec, dir_fd=dirfd)
             dirfd, previous = nxt, dirfd
             _close_quietly(previous)
-        fd = os.open(parts[-1], os.O_RDONLY | nofollow | cloexec, dir_fd=dirfd)
+        # `O_NONBLOCK` — FIFO 는 쓰는 쪽이 올 때까지 여기서 멈춰 아래 `S_ISREG` 에 닿지 못했다.
+        # `get_file` 의 작업 스레드와 ingest 의 락이 그렇게 묶였다 (D36 3번 · D70). 정규 파일에서는 뜻이 없다.
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NONBLOCK | nofollow | cloexec, dir_fd=dirfd)
     except OSError as exc:
         # ENOENT(없다) · ELOOP(링크다) · ENOTDIR(성분이 디렉터리가 아니다) 를 구분하지 않는다.
         # 구분해 알려 주면 뿌리 안의 배치를 응답으로 훑을 수 있다.
-        raise OpenFailed(f"{rel_path}: {exc.strerror}") from exc
+        raise OpenFailed(exc.strerror or type(exc).__name__) from exc
     finally:
         _close_quietly(dirfd)
 
     try:
         # 경로가 아니라 **서술자**를 본다 (D36 4번).
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OpenFailed(f"{rel_path}: 정규 파일이 아니다")
+            raise OpenFailed("정규 파일이 아니다")
+        # FIFO 를 거르려고 건 것이다. 돌려주는 서술자에는 남기지 않는다.
+        os.set_blocking(fd, True)
     except BaseException:
         # fstat 이 터져도 연 파일은 여기서 닫는다. 이 자리를 비워 두면
         # 거절된 요청 하나가 서술자를 하나씩 남기고, 장수 프로세스에서 그것이 쌓인다.

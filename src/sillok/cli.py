@@ -69,6 +69,53 @@ def _force_utf8_output() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
+def _ingest(args: argparse.Namespace) -> int:
+    """`sillok ingest`. 판정은 Service 가 하고 여기는 종료 코드와 stderr 문구다 (D19·D32)."""
+    from . import service
+    from .ingest import printable
+
+    cfg = config.load()
+    try:
+        # D37: SILLOK_WORKSPACE 와 다른 나무는 거절한다. 거절은 CLI 에서 끝난다 —
+        # VALIDATION 은 HTTP 표면의 코드이고(D21), 여기서는 종료 코드와 문구다.
+        run = service.ingest(
+            cfg.database_url,
+            args.project,
+            service.resolve_workspace(args.workspace, cfg.workspace),
+            cfg.openai_api_key,
+        )
+    except service.IngestLocked as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except service.ValidationFailed as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    # 러너와 같은 어투다 — 아는 것보다 더 주장하지 않는다.
+    print(
+        f"run {run['run_id']} {run['status']}: "
+        f"본 {run['files_seen']} · 바뀐 {run['files_changed']} · 지운 {run['files_deleted']} · "
+        f"청크 {run['chunks_upserted']} · 임베딩 {run['chunks_embedded']} · "
+        f"남은 벡터 {run['chunks_pending']}"
+    )
+    # 파일 이름은 운영자 터미널에 닿는다 — 표시형으로 싣는다 (D32). ESC 가 그대로 닿았다.
+    for item in run["skipped"]:
+        print(f"  건너뜀 {printable(item['path'])} ({item['reason']})", file=sys.stderr)
+    if run["status"] != "ok":
+        # 사유는 `kb_ingest_runs.error` 에만 있다 — `service.ingest` 의 dict 에는 없다(D32: HTTP 에
+        # 싣지 않는다). Service 함수로 그 행을 읽어 stderr 에 싣는다 (D19: CLI 는 SQL 을 갖지 않는다).
+        # 사유 읽기는 덧붙임이다. 그 사이 DB 가 사라졌으면 상태 단어로 물러선다 —
+        # 판정(상태 줄과 종료 코드 1)은 이미 나갔고, 여기서 트레이스백으로 죽으면 그것을 덮는다.
+        try:
+            reason = service.ingest_run_error(cfg.database_url, run["run_id"])
+        except Exception:  # noqa: BLE001 - 운영자에게 보이는 문구 하나를 위한 자리다
+            reason = None
+        print(printable(reason) if reason else run["status"], file=sys.stderr)
+    # ok 에만 0 이다. partial·failed·락 거절은 1 이고, 셋의 구분은
+    # 종료 코드가 아니라 stderr 문구와 run 행이 한다 (D32).
+    return 0 if run["status"] == "ok" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_output()
     # stream 을 못 박는다. 기본값도 stderr 이지만, `mcp` 의 stdout 은 프로토콜 채널이라
@@ -112,47 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "ingest":
-        from . import service
-
-        cfg = config.load()
-        try:
-            # D37: SILLOK_WORKSPACE 와 다른 나무는 거절한다. 거절은 CLI 에서 끝난다 —
-            # VALIDATION 은 HTTP 표면의 코드이고(D21), 여기서는 종료 코드와 문구다.
-            run = service.ingest(
-                cfg.database_url,
-                args.project,
-                service.resolve_workspace(args.workspace, cfg.workspace),
-                cfg.openai_api_key,
-            )
-        except service.IngestLocked as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-        except service.ValidationFailed as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-
-        # 러너와 같은 어투다 — 아는 것보다 더 주장하지 않는다.
-        print(
-            f"run {run['run_id']} {run['status']}: "
-            f"본 {run['files_seen']} · 바뀐 {run['files_changed']} · 지운 {run['files_deleted']} · "
-            f"청크 {run['chunks_upserted']} · 임베딩 {run['chunks_embedded']} · "
-            f"남은 벡터 {run['chunks_pending']}"
-        )
-        for item in run["skipped"]:
-            print(f"  건너뜀 {item['path']} ({item['reason']})", file=sys.stderr)
-        if run["status"] != "ok":
-            # 사유는 `kb_ingest_runs.error` 에만 있다 — `service.ingest` 의 dict 에는 없다(D32: HTTP 에
-            # 싣지 않는다). Service 함수로 그 행을 읽어 stderr 에 싣는다 (D19: CLI 는 SQL 을 갖지 않는다).
-            # 사유 읽기는 덧붙임이다. 그 사이 DB 가 사라졌으면 상태 단어로 물러선다 —
-            # 판정(상태 줄과 종료 코드 1)은 이미 나갔고, 여기서 트레이스백으로 죽으면 그것을 덮는다.
-            try:
-                reason = service.ingest_run_error(cfg.database_url, run["run_id"])
-            except Exception:  # noqa: BLE001 - 운영자에게 보이는 문구 하나를 위한 자리다
-                reason = None
-            print(reason or run["status"], file=sys.stderr)
-        # ok 에만 0 이다. partial·failed·락 거절은 1 이고, 셋의 구분은
-        # 종료 코드가 아니라 stderr 문구와 run 행이 한다 (D32).
-        return 0 if run["status"] == "ok" else 1
+        return _ingest(args)
 
     if args.command == "mcp":
         import anyio

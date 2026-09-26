@@ -19,7 +19,7 @@ from psycopg.rows import dict_row
 from sillok import api, service
 from sillok.config import Config
 
-from dbcheck import DSN, needs_db
+from dbcheck import DSN, needs_db, require_walk
 
 PROJECT = "t_step9"
 FM = "---\ntitle: T\ndoc_type: other\nstatus: current\nmodule: null\n---\n\n"
@@ -47,6 +47,7 @@ def ws(tmp_path, db):
         for table in ("kb_query_logs", "kb_ingest_runs", "kb_documents", "kb_events"):
             db.execute(f"DELETE FROM {table} WHERE project = %s", (PROJECT,))
 
+    require_walk()
     wipe()
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "one.md").write_text(TWO_CHUNKS, encoding="utf-8")

@@ -776,11 +776,13 @@ def ingest(dsn: str, project: object, workspace: str, api_key: str = "") -> dict
 
 
 def _validate_meta(path: str, meta: dict[str, Any]) -> None:
-    """taxonomy 밖이면 서비스가 거절한다. DDL 에 CHECK 를 더하지 않는다 (D25)."""
-    if meta["doc_type"] not in ingest_rules.DOC_TYPES:
-        raise IngestFailed(path + ': doc_type "' + str(meta["doc_type"]) + '" is outside the taxonomy')
-    if meta["status"] not in ingest_rules.STATUSES:
-        raise IngestFailed(path + ': status "' + str(meta["status"]) + '" is outside the taxonomy')
+    """taxonomy 밖이면 서비스가 거절한다. DDL 에 CHECK 를 더하지 않는다 (D25). 경로는 표시형이다 (D32)."""
+    # 값도 표시형이다 — front matter 의 ESC 가 행에 그대로 들어갔고 U+2028 이 사유를 잘랐다 (2026-09-26 리뷰).
+    shown = ingest_rules.printable(path)
+    for field, allowed in (("doc_type", ingest_rules.DOC_TYPES), ("status", ingest_rules.STATUSES)):
+        if meta[field] not in allowed:
+            value = ingest_rules.printable(str(meta[field]))
+            raise IngestFailed(f'{shown}: {field} "{value}" is outside the taxonomy')
 
 
 def _finish(
@@ -806,12 +808,26 @@ def _finish(
 def _index_file(
     conn: psycopg.Connection,
     project: str,
+    root: str,
     item: ingest_rules.Scanned,
     known: dict[str, str],
     counters: dict[str, int],
 ) -> None:
-    """파일 하나를 읽고, 바뀌었으면 그 문서의 트랜잭션 하나로 쓴다 (D30 · D32)."""
-    text = ingest_rules.normalize(item.absolute.read_bytes(), item.path)
+    """파일 하나를 읽고, 바뀌었으면 그 문서의 트랜잭션 하나로 쓴다 (D30 · D32).
+
+    **읽기는 `get_file` 과 같은 걸음이다** (D36 · D70 ③). 스캔은 `lstat` 으로 링크를 걸렀지만
+    예전 읽기는 경로를 다시 따라가 그 사이 링크로 바뀐 파일이나 중간 디렉터리의 밖을 색인했다.
+    """
+    if not item.storable:
+        raise ingest_rules.unstorable(item)
+    fd = workspace_rules.open_regular(root, item.path)
+    try:
+        raw = workspace_rules.read_all(fd)
+        # 경로를 다시 stat 하지 않는다 — 읽은 서술자의 것이다.
+        mtime = os.fstat(fd).st_mtime
+    finally:
+        os.close(fd)
+    text = ingest_rules.normalize(raw, item.path)
     digest = ingest_rules.content_hash(text)
     if known.get(item.path) == digest:
         return
@@ -825,7 +841,7 @@ def _index_file(
         {
             "path": item.path,
             "content_hash": digest,
-            "source_mtime": datetime.fromtimestamp(item.mtime, tz=timezone.utc),
+            "source_mtime": datetime.fromtimestamp(mtime, tz=timezone.utc),
             "chunks": pieces,
             **meta,
         },
@@ -855,6 +871,9 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
     skipped: list[dict[str, str]] = []
 
     try:
+        # 걸음을 걸을 수 없으면 **스캔 전에** 실패한다 (D36 · D70 ③). 파일마다 실패하면
+        # 첫 파일 이름이 붙어 사유가 플랫폼이 아니라 그 파일인 것처럼 읽힌다.
+        workspace_rules.require_flags()
         files, skips = ingest_rules.scan(root)
         skipped = [{"path": s.path, "reason": s.reason} for s in skips]
         counters["files_seen"] = len(files)
@@ -871,27 +890,41 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
                 ).fetchall()
             }
 
+        workspace = os.fspath(root)
         for item in files:
+            # 사유·서버 로그에 싣는 경로는 표시형이다 (D32).
+            shown = ingest_rules.printable(item.path)
             try:
-                _index_file(conn, project, item, known, counters)
+                _index_file(conn, project, workspace, item, known, counters)
             except (IngestFailed, ingest_rules.DecodeFailed):
                 raise
+            except workspace_rules.OpenFailed as exc:
+                # 스캔 뒤에 링크로 바뀌었거나 사라졌다 (D70 ③). 예상한 실패라 트레이스백을 남기지 않는다.
+                # 못 읽은 것과 사라진 것을 구분할 수 없으므로 삭제하지 않는다 (D32).
+                raise IngestFailed(f"{shown}: {exc}") from exc
             except Exception as exc:
                 # 예상 밖 실패에도 **경로를 붙인다** (2026-09-26 리뷰) — 청크가 tsvector 한도를 넘거나
                 # 파일 읽기가 실패하면 사유에 어느 파일인지가 없어 운영자가 고칠 곳을 몰랐다.
                 # 트레이스백은 서버 로그에 남는다 (D21). 사유 줄은 세정한다 (D31).
-                log.error("ingest run %s failed on %s", run_id, item.path, exc_info=exc)
-                raise IngestFailed(f"{item.path}: {_run_error(exc)}") from exc
+                log.error("ingest run %s failed on %s", run_id, shown, exc_info=exc)
+                raise IngestFailed(f"{shown}: {_run_error(exc)}") from exc
 
         # 삭제는 백필 앞이다. 뒤에 두면 백필 첫 실패에서 멈추는 run 이
         # 삭제를 영구히 건너뛴다 — 텍스트 색인의 일부인데 벡터 때문에 빠지는 것이다.
+        # 제외(skip)는 삭제 후보가 아니다 (D30 §1). 빼면 파일 하나를 심볼릭 링크로
+        # 바꾸는 것만으로 그 문서가 인덱스에서 지워진다. **링크 아래**도 같다 — 디렉터리를 링크로
+        # 바꾸면 그 아래가 지워졌다. 접두는 `링크 + '/'` 다 — 없으면 `docs/a` 가 `docs/ab.md` 를 살린다.
+        # 표시형(`exact=False`)은 키가 아니다 — 글자 그대로 같은 진짜 이름의 행을 살린다 (D70 ②).
+        keep = [f.path for f in files] + [s.path for s in skips if s.exact]
+        links = [s.path for s in skips if s.exact and s.reason == "symlink"]
         with conn.transaction(), conn.cursor() as cur:
             gone = cur.execute(
                 "DELETE FROM kb_documents WHERE project = %s AND repo = ''"
-                " AND NOT (path = ANY(%s)) RETURNING id",
-                # 제외(skip)는 삭제 후보가 아니다 (D30 §1). 빼면 파일 하나를 심볼릭 링크로
-                # 바꾸는 것만으로 그 문서가 인덱스에서 지워진다.
-                (project, [f.path for f in files] + [s.path for s in skips]),
+                " AND NOT (path = ANY(%s))"
+                " AND NOT EXISTS (SELECT 1 FROM unnest(%s::text[]) AS link(p)"
+                " WHERE starts_with(path, link.p || '/'))"
+                " RETURNING id",
+                (project, keep, links),
             ).fetchall()
             counters["files_deleted"] = len(gone)
 
@@ -905,7 +938,8 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
         # 적고 다시 올려 HTTP 가 INTERNAL 500 이었고 CLI 는 요약 줄 없이 죽었다 (2026-09-26 감사).
         # 예상한 실패가 아니면 서버 로그에 트레이스백을 남긴다 (D21). 메시지 줄은 세정한다 (D31) —
         # 트레이스백 본문은 D21 이 서버 로그에 두기로 한 원문이다.
-        if not isinstance(exc, (IngestFailed, ingest_rules.DecodeFailed)):
+        # 플래그 없는 플랫폼(D70 ③)도 예상한 실패다 — 사유가 전부다.
+        if not isinstance(exc, (IngestFailed, ingest_rules.DecodeFailed, workspace_rules.PlatformUnsupported)):
             log.error("ingest run %s failed: %s", run_id, _run_error(exc), exc_info=exc)
         status, error = "failed", _run_error(exc)
 
@@ -1507,7 +1541,7 @@ def get_file(dsn: str, project: object, path: object, offset: object, workspace:
         fd = _open_in_workspace(workspace, path)
     except workspace_rules.OpenFailed as exc:
         # 행은 남아 있고 파일 쪽이 바뀐 것이다 (D36). 구분은 로그에만 남긴다.
-        log.warning("색인된 행을 열지 못했다: %s (%s)", path, exc)
+        log.warning("색인된 행을 열지 못했다: %s (%s)", ingest_rules.printable(path), exc)
         raise NotFound(NOT_FOUND_FILE) from None
 
     try:
@@ -1529,7 +1563,7 @@ def _read_current(workspace: str, path: str) -> str | None:
     try:
         fd = _open_in_workspace(workspace, path)
     except workspace_rules.OpenFailed as exc:
-        log.warning("제안 대상 파일을 열지 못했다: %s (%s)", path, exc)
+        log.warning("제안 대상 파일을 열지 못했다: %s (%s)", ingest_rules.printable(path), exc)
         return None
     try:
         raw = workspace_rules.read_all(fd)

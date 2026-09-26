@@ -5,7 +5,7 @@
 // ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync as readOpened, readdirSync, statSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,6 +40,17 @@ const problems = []
 const fail = (m) => problems.push(m)
 
 const rel = (p) => relative(ROOT, p).split(sep).join('/')
+// **모든 읽기가 지나는 문 하나다.** FIFO·소켓·장치는 열지 않는다 (D70 ①) — `open` 이 FIFO 에서 쓰는 쪽을
+// 영영 기다린다. walk 만 거르면 이름으로 여는 고정 경로(README·plan·ADR·SKILL …)가 남아
+// `mkfifo README.md` 하나에 게이트가 멈췄다 (2026-09-26 Grok 리뷰, 실측 exit 124).
+// `statSync` 는 열지 않고 본다. 링크는 지금처럼 따라간다 — 멈추는 것은 링크가 아니라 FIFO 를 여는 것이다.
+function readFileSync(path, encoding) {
+  if (!statSync(path).isFile()) {
+    fail(`${rel(path)} : 정규 파일이 아니다 — 열지 않는다 (D70)`)
+    return ''
+  }
+  return readOpened(path, encoding)
+}
 // D47. ingest 의 _SKIP_DIRS 와 **같은 목록**이어야 한다. 정본은 ADR 이다 —
 // 게이트는 JS 이고 ingest 는 파이썬이라 코드로 공유할 수 없다.
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.pytest_cache'])
@@ -47,6 +58,9 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__
 // 게이트도 같이 건너뛰어야 두 walk 이 같은 집합을 본다 — 안 그러면 `.md` 링크 하나가
 // 게이트에서는 색인 대상이고 ingest 에서는 skipped 다 (Grok 적대 리뷰가 잡았다).
 const symlinked = []
+// FIFO·소켓·장치는 **읽지 않는다** — `readFileSync` 가 FIFO 에서 쓰는 쪽을 영영 기다렸다.
+// ingest 는 이것을 `not-regular` 로 건너뛴다 (D70). 같은 사유로 출력한다.
+const irregular = []
 function walk(dir, acc = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (SKIP_DIRS.has(e.name)) continue
@@ -55,7 +69,9 @@ function walk(dir, acc = []) {
       symlinked.push(p)
       continue
     }
-    e.isDirectory() ? walk(p, acc) : acc.push(p)
+    if (e.isDirectory()) walk(p, acc)
+    else if (e.isFile()) acc.push(p)
+    else irregular.push(p)
   }
   return acc
 }
@@ -958,14 +974,18 @@ console.log(`색인 대상 ${indexed.length}개`)
 for (const p of indexed) console.log(`  ${p}`)
 console.log(`제외 확인   ${MUST_EXCLUDE.join(', ')}`)
 // D30 이 "다음 후보" 로 적어 둔 것: **D9 경로 안인데 먹지 않은 파일**을 사유와 함께 보인다.
-// ingest 쪽에는 이미 있다 (`skipped[]` 의 `not-md`·`symlink`). 게이트에도 두어 두 벌이
+// ingest 쪽에는 이미 있다 (`skipped[]`). 게이트에도 두어 두 벌이
 // 갈라지지 않게 한다 — 여기는 실패가 아니라 출력이다. 무엇이 빠졌는지 사람이 보는 자리다.
-// 사유는 ingest 와 같은 둘이다 — `not-md` 와 `symlink` (D30). 하나만 적으면
-// "같은 사실을 보인다" 는 주장이 첫날부터 거짓이 된다.
-// **이 줄이 지워져도 종료 코드는 0 이다.** 그래서 하네스가 출력까지 본다 (케이스 50·51).
+// 사유는 ingest 와 같은 셋이다 — `not-md`·`symlink`·`not-regular` (D30 · D70). 하나라도 빠지면
+// "같은 사실을 보인다" 는 주장이 거짓이 된다. `.md` 가 아닌 비정규 파일은 확장자 판정 그대로 `not-md` 다.
+// 링크는 `이름 + '/'` 도 본다 — 최상위 `docs`·`adr` 자체가 링크면 `docs/` 접두에 걸리지 않아
+// 조용히 빠졌다 (D30 §1, 2026-09-26).
+// **이 줄이 지워져도 종료 코드는 0 이다.** 그래서 하네스가 출력까지 본다 (케이스 50·51·72·73).
+const inD9 = (p) => INCLUDE.some((f) => f(p))
 const excluded = [
-  ...all.filter((p) => INCLUDE.some((f) => f(p)) && !p.endsWith('.md')).map((p) => `${p} (not-md)`),
-  ...symlinked.map(rel).filter((p) => INCLUDE.some((f) => f(p))).map((p) => `${p} (symlink)`),
+  ...all.filter((p) => inD9(p) && !p.endsWith('.md')).map((p) => `${p} (not-md)`),
+  ...irregular.map(rel).filter(inD9).map((p) => `${p} (${p.endsWith('.md') ? 'not-regular' : 'not-md'})`),
+  ...symlinked.map(rel).filter((p) => inD9(p) || inD9(p + '/')).map((p) => `${p} (symlink)`),
 ].sort()
 console.log(excluded.length ? `색인 제외   ${excluded.join(', ')}` : '색인 제외   없다')
 console.log(`FM 없음     ${readmes.join(', ')}`)
