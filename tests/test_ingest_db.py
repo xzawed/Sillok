@@ -169,6 +169,9 @@ def test_a_rules_bump_rebuilds_a_same_hash_document(db, clean, workspace, write)
     )
     db.execute("UPDATE kb_documents SET rules_version = 0 WHERE project = %s", (PROJECT,))
     before = _rows(db)
+    chunk_ids = _chunk_ids(db)
+    # 파일의 mtime 을 움직인다 — 그래야 `source_mtime` 을 지킨다는 단언이 빈말이 아니다 (2026-09-26 리뷰).
+    os.utime(workspace / "docs" / "c.md", (1_700_000_000, 1_700_000_000))
 
     got = run(workspace)
     assert got["status"] == "ok"
@@ -181,20 +184,53 @@ def test_a_rules_bump_rebuilds_a_same_hash_document(db, clean, workspace, write)
         assert row["indexed_at"] == before[path]["indexed_at"]
         assert row["source_mtime"] == before[path]["source_mtime"]
     assert [c["heading_path"] for c in chunks(db) if c["path"] == "docs/c.md"] == ["event_stats 응답"]
+    # 청크가 새로 들어갔다 — 그래서 벡터는 NULL 이 되고 백필이 채운다 (D71 ② · D31).
+    assert not chunk_ids & _chunk_ids(db)
+    assert all(c["embedding"] is None for c in chunks(db))
 
-    # 판이 맞으면 다시 쓰지 않는다 (D30 §4 그대로).
+    # 판이 맞으면 다시 쓰지 않는다 (D30 §2 그대로).
     again = run(workspace)
     assert again["chunks_upserted"] == 0
     assert _rows(db) == after
 
 
-def test_a_changed_body_stores_the_current_rules_version(db, clean, workspace, write):
-    """새로 넣거나 본문이 바뀐 문서는 지금 판으로 적힌다 — 다음 run 이 판 때문에 다시 쓰지 않는다."""
+def _chunk_ids(db) -> set[int]:
+    return {
+        r["id"]
+        for r in db.execute(
+            "SELECT c.id FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id WHERE d.project = %s",
+            (PROJECT,),
+        ).fetchall()
+    }
+
+
+def test_a_newer_rules_version_is_left_alone(db, clean, workspace):
+    """D71 ② 는 `>=` 다 — 새 판의 코드가 쓴 행을 옛 판의 코드가 다시 쓰지 않는다."""
     run(workspace)
+    db.execute(
+        "UPDATE kb_documents SET rules_version = %s WHERE project = %s",
+        (service.ingest_rules.RULES_VERSION + 1, PROJECT),
+    )
+    got = run(workspace)
+    assert got["chunks_upserted"] == 0
+    assert {r["rules_version"] for r in _rows(db).values()} == {service.ingest_rules.RULES_VERSION + 1}
+
+
+def test_a_changed_body_stores_the_current_rules_version(db, clean, workspace, write):
+    """새로 넣거나 본문이 바뀐 문서는 지금 판으로 적힌다 — 다음 run 이 판 때문에 다시 쓰지 않는다.
+    본문이 바뀐 쪽은 D30 §2 그대로 `indexed_at` 을 올리고 `source_mtime` 을 새로 적는다 — 이제 그것이 플래그에 달렸다."""
+    run(workspace)
+    before = _rows(db)
     write("docs/a.md", FM + "# 가\n\n바뀐 본문\n")
+    os.utime(workspace / "docs" / "a.md", (1_700_000_000, 1_700_000_000))
     got = run(workspace)
     assert got["files_changed"] == 1
-    assert {r["rules_version"] for r in _rows(db).values()} == {service.ingest_rules.RULES_VERSION}
+    after = _rows(db)
+    assert {r["rules_version"] for r in after.values()} == {service.ingest_rules.RULES_VERSION}
+    assert after["docs/a.md"]["indexed_at"] > before["docs/a.md"]["indexed_at"]
+    assert after["docs/a.md"]["source_mtime"].timestamp() == 1_700_000_000
+    for path in ("adr/b.md", "README.md"):
+        assert after[path]["indexed_at"] == before[path]["indexed_at"]
 
 
 def test_line_ending_change_alone_is_not_a_change(db, clean, workspace):

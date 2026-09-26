@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import os
 import re
@@ -309,96 +310,141 @@ def _atx(line: str) -> tuple[int, str] | None:
 def strip_inline(text: str) -> str:
     """제목에서 인라인 마크업을 벗긴다 (D29 · D30 §5). 형식 정본은 docs/service-and-mcp.md 다.
 
-    왼쪽에서 오른쪽으로 한 번 훑는다. **코드 스팬은 안의 글자를 그대로 둔다** — 예전에는 `_`·`*` 를 전부 지워
-    `` `event_stats` `` 가 `eventstats` 였다 (2026-09-26 감사 F099). 링크·이미지는 표시 텍스트만 남기고 그 텍스트도
-    같은 규칙을 탄다. 강조 `*`·`_` 는 **짝이 맞는 구분자만** 지운다 — CommonMark 의 flanking 이고, 단어 안의 `_` 는
-    글자다. 백슬래시 이스케이프는 그 글자다. 참조 링크·HTML 태그는 벗기지 않는다.
+    왼쪽에서 오른쪽으로 훑는다. **코드 스팬은 안의 글자를 그대로 둔다** — 예전에는 `_`·`*` 를 전부 지워
+    `` `event_stats` `` 가 `eventstats` 였다 (2026-09-26 감사 F099). 코드 스팬이 링크 괄호보다 먼저다.
+    링크·이미지는 표시 텍스트만 남기고, 그 텍스트의 강조는 그 안에서만 짝을 짓는다.
+    강조 `*`·`_` 는 CommonMark 0.31.2 의 강조 처리 그대로 **짝이 맞는 구분자만** 지운다 — flanking, 단어 안의 `_`,
+    3의 배수 규칙, 남은 닫는 구분자의 재시도까지. 그래서 코드 스팬 밖의 `docs/**/*.md` 도 글자 그대로다.
+    백슬래시 이스케이프는 그 글자다. 참조 링크·HTML 태그는 벗기지 않는다.
+
+    **줄 길이에 거의 선형이다** — 닫는 백틱 줄기는 한 번 세어 둔 목록에서 찾고, 강조 짝은 CommonMark 의
+    openers_bottom 으로 찾으며, 실패한 링크 시도는 되풀이하지 않는다 (2026-09-26 리뷰 실측).
     이 규칙이 바뀌면 `RULES_VERSION` 을 올린다 (D71).
     """
-    return "".join(_emphasis(_inline_tokens(text))).strip()
+    return "".join(_emphasis(_Inline(text).tokens(0, len(text)))).strip()
 
 
 _ASCII_PUNCT = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
-@dataclass
+@dataclass(eq=False)
 class _Delim:
-    """강조 구분자 한 줄기 (`*`·`**`·`_` …). 짝이 맞으면 `count` 가 줄어든다."""
+    """강조 구분자 한 줄기 (`*`·`**`·`_` …). 짝을 지은 만큼 `count` 가 줄고, 남은 것은 글자다."""
 
     char: str
     count: int
     can_open: bool
     can_close: bool
+    length: int = 0  # 원래 길이 — 3의 배수 규칙이 본다
+    prev: _Delim | None = None
+    next: _Delim | None = None
 
 
-def _inline_tokens(text: str) -> list[str | _Delim]:
-    out: list[str | _Delim] = []
-    i, n = 0, len(text)
-    while i < n:
-        ch = text[i]
-        link = _link_at(text, i) if ch in "![" else None
-        if ch == "\\" and i + 1 < n and text[i + 1] in _ASCII_PUNCT:
-            out.append(text[i + 1])
-            i += 2
-        elif ch == "`":
-            i = _code_span(text, i, out)
-        elif link is not None:
-            # 링크 텍스트에는 `]` 가 없으므로 이 재귀는 한 겹이다.
-            out.extend(_inline_tokens(link[0]))
-            i = link[1]
-        elif ch in "*_":
-            j = i
-            while j < n and text[j] == ch:
-                j += 1
-            out.append(_delim(text, i, j))
-            i = j
-        else:
-            out.append(ch)
+class _Inline:
+    """한 제목 줄을 토큰으로 가른다. 백틱 줄기는 한 번 세어 길이별로 둔다."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.runs: dict[int, list[int]] = {}
+        i, n = 0, len(text)
+        while i < n:
+            if text[i] == "`":
+                j = self._run_end(i, n)
+                self.runs.setdefault(j - i, []).append(i)
+                i = j
+            else:
+                i += 1
+
+    def _run_end(self, i: int, end: int) -> int:
+        char = self.text[i]
+        while i < end and self.text[i] == char:
             i += 1
-    return out
+        return i
 
-
-def _code_span(text: str, i: int, out: list[str | _Delim]) -> int:
-    """`i` 의 백틱 줄기가 같은 길이의 줄기로 닫히면 안의 글자를 그대로 싣는다. 못 닫으면 백틱은 글자다."""
-    n = len(text)
-    j = i
-    while j < n and text[j] == "`":
-        j += 1
-    run = j - i
-    k = j
-    while True:
-        k = text.find("`", k)
-        if k < 0:
-            out.append(text[i:j])
-            return j
-        m = k
-        while m < n and text[m] == "`":
-            m += 1
-        if m - k == run:
-            inner = text[j:k]
-            # CommonMark: 양끝이 모두 공백이고 공백뿐이 아니면 한 칸씩 벗긴다.
-            if len(inner) >= 2 and inner[0] == " " and inner[-1] == " " and inner.strip(" "):
-                inner = inner[1:-1]
-            out.append(inner)
-            return m
-        k = m
-
-
-def _link_at(text: str, i: int) -> tuple[str, int] | None:
-    """`[텍스트](목적지)`·`![…](…)` 이면 `(텍스트, 끝)`.
-
-    예전 정규식 `!?\\[([^\\]]*)\\]\\([^)]*\\)` 과 같은 모양을 본다 — 텍스트는 첫 `]` 까지, 목적지는 첫 `)` 까지.
-    """
-    start = i + 1 if text[i] == "!" else i
-    if start >= len(text) or text[start] != "[":
+    def _closer(self, length: int, after: int, end: int) -> int | None:
+        """`after` 부터 `end` 안에서 시작하는, 길이가 **꼭** `length` 인 백틱 줄기의 자리."""
+        spots = self.runs.get(length, [])
+        k = bisect.bisect_left(spots, after)
+        if k < len(spots) and spots[k] + length <= end:
+            return spots[k]
         return None
-    close = text.find("]", start + 1)
-    if close < 0 or close + 1 >= len(text) or text[close + 1] != "(":
-        return None
-    end = text.find(")", close + 2)
-    if end < 0:
-        return None
-    return text[start + 1 : close], end + 1
+
+    def _skip_code(self, i: int, end: int) -> tuple[int, int | None]:
+        """`i` 의 백틱 줄기를 넘는다. `(줄기 끝, 닫는 줄기 자리 또는 None)`."""
+        j = self._run_end(i, end)
+        return j, self._closer(j - i, j, end)
+
+    def _link(self, i: int, end: int) -> tuple[int, int, int] | int:
+        """`[텍스트](목적지)`·`![…](…)` 이면 `(텍스트 시작, 텍스트 끝, 다음 자리)`.
+
+        아니면 **이 자리까지는 링크가 시작될 수 없는** 끝 자리를 돌려준다 — 같은 `]` 를 다시 찾지 않게.
+        텍스트는 코드 스팬 밖의 첫 `]` 까지, 목적지는 첫 `)` 까지다 (예전 정규식과 같은 모양, 코드 스팬만 앞선다).
+        """
+        text = self.text
+        start = i + 1 if text[i] == "!" else i
+        if start >= end or text[start] != "[":
+            return i
+        close = start + 1
+        while close < end and text[close] != "]":
+            close = self._past(close, end)
+        if close >= end:
+            return end
+        if close + 1 >= end or text[close + 1] != "(":
+            return close
+        stop = text.find(")", close + 2, end)
+        return end if stop < 0 else (start + 1, close, stop + 1)
+
+    def _escaped(self, k: int, end: int) -> bool:
+        return self.text[k] == "\\" and k + 1 < end and self.text[k + 1] in _ASCII_PUNCT
+
+    def _past(self, k: int, end: int) -> int:
+        """이스케이프·코드 스팬을 한 덩어리로 넘은 다음 자리."""
+        if self._escaped(k, end):
+            return k + 2
+        if self.text[k] == "`":
+            return self._code(k, end)[1]
+        return k + 1
+
+    def _code(self, i: int, end: int) -> tuple[str, int]:
+        """`i` 의 백틱 줄기. 닫히면 안의 글자, 못 닫으면 백틱 그대로. `(글자, 다음 자리)`."""
+        j, close = self._skip_code(i, end)
+        if close is None:
+            return self.text[i:j], j
+        return _code_text(self.text[j:close]), close + (j - i)
+
+    def tokens(self, start: int, end: int) -> list[str | _Delim]:
+        text = self.text
+        out: list[str | _Delim] = []
+        no_link_until = start  # 이 자리 앞의 `[` 는 이미 실패한 시도와 같은 끝을 만난다
+        i = start
+        while i < end:
+            ch = text[i]
+            piece: str | _Delim
+            if self._escaped(i, end):
+                piece, i = text[i + 1], i + 2
+            elif ch == "`":
+                piece, i = self._code(i, end)
+            elif ch in "![" and i >= no_link_until:
+                link = self._link(i, end)
+                if isinstance(link, tuple):
+                    # 링크 텍스트의 강조는 그 안에서만 짝을 짓는다 (CommonMark).
+                    piece, i = "".join(_emphasis(self.tokens(link[0], link[1]))), link[2]
+                else:
+                    no_link_until, piece, i = link, ch, i + 1
+            elif ch in "*_":
+                j = self._run_end(i, end)
+                piece, i = _delim(text, i, j), j
+            else:
+                piece, i = ch, i + 1
+            out.append(piece)
+        return out
+
+
+def _code_text(inner: str) -> str:
+    """CommonMark: 양끝이 모두 공백이고 공백뿐이 아니면 한 칸씩 벗긴다."""
+    if len(inner) >= 2 and inner[0] == " " and inner[-1] == " " and inner.strip(" "):
+        return inner[1:-1]
+    return inner
 
 
 def _is_space(ch: str) -> bool:
@@ -406,6 +452,7 @@ def _is_space(ch: str) -> bool:
 
 
 def _is_punct(ch: str) -> bool:
+    """CommonMark 0.31.2: 유니코드 P(구두점)와 S(기호) 범주. 0.30 까지는 P 만이었다."""
     return unicodedata.category(ch)[0] in "PS"
 
 
@@ -416,31 +463,79 @@ def _delim(text: str, i: int, j: int) -> _Delim:
     left = not _is_space(after) and (not _is_punct(after) or _is_space(before) or _is_punct(before))
     right = not _is_space(before) and (not _is_punct(before) or _is_space(after) or _is_punct(after))
     if text[i] == "*":
-        return _Delim("*", j - i, left, right)
+        return _Delim("*", j - i, left, right, j - i)
     # `_` 는 단어 안에서 열거나 닫지 않는다 — `snake_case` 는 글자다.
-    return _Delim("_", j - i, left and (not right or _is_punct(before)), right and (not left or _is_punct(after)))
+    return _Delim("_", j - i, left and (not right or _is_punct(before)), right and (not left or _is_punct(after)), j - i)
+
+
+def _unlink(d: _Delim) -> None:
+    if d.prev is not None:
+        d.prev.next = d.next
+    if d.next is not None:
+        d.next.prev = d.prev
+    d.prev = d.next = None
+
+
+def _can_pair(opener: _Delim, closer: _Delim) -> bool:
+    """같은 글자이고, 3의 배수 규칙에 걸리지 않는가 (CommonMark · cmark 의 판정)."""
+    if opener.char != closer.char or not opener.can_open:
+        return False
+    both_sides = opener.can_close or closer.can_open
+    return not both_sides or closer.length % 3 == 0 or (opener.length + closer.length) % 3 != 0
 
 
 def _emphasis(tokens: list[str | _Delim]) -> list[str]:
-    """닫는 구분자마다 같은 글자의 가장 가까운 여는 구분자와 짝짓고, 짝지은 만큼 지운다. 남은 것은 글자다."""
-    openers: list[_Delim] = []
-    for tok in tokens:
-        if not isinstance(tok, _Delim):
+    """CommonMark 의 강조 처리. 짝지은 만큼 지우고 남은 구분자는 글자로 돌려준다.
+
+    닫는 구분자마다 아래로 내려가며 여는 것을 찾되, 한 번 실패한 (글자, 여는가, 길이 % 3) 은 그 아래를 다시 보지 않는다
+    (openers_bottom). 짝을 지으면 사이의 구분자는 글자가 되고, 닫는 것이 남으면 같은 자리에서 다시 찾는다.
+    """
+    delims = [t for t in tokens if isinstance(t, _Delim)]
+    for a, b in zip(delims, delims[1:]):
+        a.next, b.prev = b, a
+    bottoms: dict[tuple[str, bool, int], _Delim | None] = {}
+    closer = delims[0] if delims else None
+    while closer is not None:
+        if not closer.can_close:
+            closer = closer.next
             continue
-        if tok.can_close:
-            at = next((k for k in range(len(openers) - 1, -1, -1) if openers[k].char == tok.char), None)
-            if at is not None:
-                opener = openers[at]
-                used = min(opener.count, tok.count)
-                opener.count -= used
-                tok.count -= used
-                # 사이에 있던 여는 구분자는 더는 짝을 찾지 못한다 (CommonMark).
-                del openers[at + 1 :]
-                if opener.count == 0:
-                    openers.pop()
-        if tok.can_open and tok.count:
-            openers.append(tok)
+        key = (closer.char, closer.can_open, closer.length % 3)
+        opener = _find_opener(closer, bottoms.get(key))
+        if opener is not None:
+            closer = _pair(opener, closer)
+            continue
+        bottoms[key] = closer.prev
+        following = closer.next
+        if not closer.can_open:
+            _unlink(closer)
+        closer = following
     return [tok if isinstance(tok, str) else tok.char * tok.count for tok in tokens]
+
+
+def _find_opener(closer: _Delim, bottom: _Delim | None) -> _Delim | None:
+    opener = closer.prev
+    while opener is not None and opener is not bottom and not _can_pair(opener, closer):
+        opener = opener.prev
+    return None if opener is bottom else opener
+
+
+def _pair(opener: _Delim, closer: _Delim) -> _Delim | None:
+    """짝지은 만큼 지우고 사이의 구분자를 글자로 만든다. 다음에 볼 닫는 구분자를 돌려준다."""
+    used = 2 if opener.count >= 2 and closer.count >= 2 else 1
+    opener.count -= used
+    closer.count -= used
+    between = opener.next
+    while between is not None and between is not closer:
+        following = between.next
+        _unlink(between)
+        between = following
+    if opener.count == 0:
+        _unlink(opener)
+    if closer.count:
+        return closer
+    following = closer.next
+    _unlink(closer)
+    return following
 
 
 def first_h1(text: str) -> str | None:
@@ -469,7 +564,9 @@ def derive_meta(rel_path: str, text: str) -> dict[str, str | None]:
     """루트 `README*` 는 유도하고, 나머지는 front matter 를 읽는다 (D29·D30 §7)."""
     if _ROOT_README.match(rel_path):
         return {
-            "title": first_h1(text),
+            # README 는 front matter 를 갖지 않는다(D29). 다른 project 의 README 에 있으면 그 뒤에서 찾는다 —
+            # 안의 `# 주석` 줄이 제목이 되지 않게 (2026-09-26 리뷰).
+            "title": first_h1(split_front_matter(text)[1]),
             "doc_type": "readme",
             "status": "current",
             "module": None,

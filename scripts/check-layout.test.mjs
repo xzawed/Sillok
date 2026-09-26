@@ -906,6 +906,22 @@ const CASES = [
       edit(dir, 'docs/spec.md', (t) => t.replace(/^title: (.*)$/m, (_, v) => `title: ${v}${' '.repeat(600_000)}끝`)),
   },
   {
+    // 게이트와 ingest 는 **같은 파서**다 (D30 §7). 공백 판정도 파이썬 `str.isspace()` 와 같은 집합이어야 한다 —
+    // JS 의 `\s` 는 U+001C–U+001F·U+0085 를 빼고 U+FEFF 를 넣는다. U+001C 뒤의 `#` 은 ingest 에서 주석이다.
+    id: '76 파이썬이 공백으로 보는 U+001C 뒤의 # 은 게이트에서도 주석이다',
+    expect: 'pass',
+    mutate: (dir) =>
+      edit(dir, 'docs/spec.md', (t) => t.replace(/^status: current$/m, 'status: current' + String.fromCharCode(0x1c) + '# 주석')),
+  },
+  {
+    // 76 의 짝. U+FEFF 는 파이썬이 공백으로 보지 않는다 — 값이 통째로 남아 enum 밖이고 ingest 가 거절한다. 게이트도 운다.
+    id: '77 파이썬이 공백으로 보지 않는 U+FEFF 뒤의 # 은 게이트에서도 값이다',
+    expect: 'fail',
+    mentions: ['status "current', '가 enum 밖'],
+    mutate: (dir) =>
+      edit(dir, 'docs/spec.md', (t) => t.replace(/^status: current$/m, 'status: current' + String.fromCharCode(0xfeff) + '# 주석')),
+  },
+  {
     // 73 의 짝. walk 가 찾은 것만 거르면 **이름으로 여는 고정 경로**가 남는다 — `README.md` 가 FIFO 면
     // 진입점 검사가 `readFileSync` 에서 영영 멈췄다 (2026-09-26 Grok 리뷰, 실측 exit 124).
     // 게이트는 멈추지 않고 울어야 한다. 읽기 문을 되돌리면 시한에 걸려 사유가 없는 실패가 되고, mentions 가 문다.

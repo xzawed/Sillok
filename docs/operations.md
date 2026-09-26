@@ -173,10 +173,18 @@ docker compose build test
 그 파일을 고치고 다시 돌리면 된다. 파일 단계에서 실패한 run 은 삭제를 반영하지 않으므로 색인에서 문서가 사라지지 않는다.
 스캔 뒤에 링크로 바뀐 파일, 이름을 UTF-8 로 담을 수 없는 `.md` 도 경로가 붙는다 (D70).
 호스트(Windows)에서 `sillok ingest` 를 돌리면 `O_NOFOLLOW` 가 없어 스캔 전에 실패한다 — 컨테이너에서 돌린다 (D70).
+사유를 보려고 `5432` 를 열지 않는다 (D16).
 
 **`바뀐 0` 인데 `청크` 가 문서 전체만큼이면** 실패가 아니다 — 청크·제목을 만드는 규칙의 판(`RULES_VERSION`)이
 올라 본문이 같은 문서를 다시 만든 run 이다 (D71). 할 일은 없다 — 판마다 한 번이고 다음 run 은 아무것도 쓰지 않는다.
-사유를 보려고 `5432` 를 열지 않는다 (D16).
+
+**이미지를 D71 앞의 판으로 되돌렸다가 다시 올렸다면** 판이 거짓일 수 있다 — 옛 코드가 옛 규칙으로 쓴 행에
+새 판의 번호가 남는다 (D71). 다시 올린 뒤 한 번 판을 내리고 ingest 한다. 색인은 Git 에서 다시 만들 수 있는 데이터다.
+
+```bash
+docker compose exec -T db psql -U sillok -d sillok -c "UPDATE kb_documents SET rules_version = 0 WHERE project = '<name>'"
+docker compose exec api sillok ingest --project <name>
+```
 
 ## 마이그레이션이 실패할 때
 

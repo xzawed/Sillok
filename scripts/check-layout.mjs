@@ -23,14 +23,17 @@ const STATUSES = ['current', 'draft', 'superseded', 'stale']
 // 일부러 안 잡는 둘: CR 만 쓰는 줄끝(git 이 통과시키지 않는다)과 빈 front matter (`---\n---`).
 // 둘 다 "게이트는 초록인데 첫 화면에 표가 뜨는" 부류가 아니다 — 빈 것은 표로 그릴 행이 없다.
 const FRONT_MATTER = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---/
-// front matter 값의 주석을 뗀다 — 공백 뒤에 오는 첫 `#` 앞의 공백 줄부터 끝까지. `\s+#.*$` 와 같은 자리다.
-// 정규식은 `#` 없는 긴 공백에서 자리마다 다시 시도해 제곱 시간이었다 (실측: 공백 10만 칸에 5.9초).
-// ingest 의 `_cut_comment` 와 같은 규칙이다 — 파서는 둘이 같아야 한다 (D30 §7).
+// front matter 값의 주석을 뗀다 — 공백 뒤에 오는 첫 `#` 앞의 공백 줄부터 끝까지.
+// 옛 정규식 `\s+#.*$` 은 `#` 없는 긴 공백에서 자리마다 다시 시도해 제곱 시간이었다 (실측: 공백 10만 칸에 5.9초).
+// **ingest 의 `_cut_comment` 와 같은 규칙이다** — 파서는 둘이 같아야 한다 (D30 §7). 그래서 공백 판정도 파이썬의
+// `str.isspace()` 와 같은 집합으로 맞춘다: JS 의 `\s` 는 U+FEFF 를 넣고 U+001C–U+001F·U+0085 를 뺀다.
+// 옛 JS 정규식과는 `#` 뒤에 \r·U+2028·U+2029 가 올 때 달랐다 — JS 의 `.` 가 그것을 넘지 못해 자르지 않았다.
+const isSpace = (c) => (c !== '﻿' && /\s/.test(c)) || /[\x1c-\x1f\x85]/.test(c)
 function cutComment(value) {
   for (let i = 1; i < value.length; i++) {
-    if (value[i] === '#' && /\s/.test(value[i - 1])) {
+    if (value[i] === '#' && isSpace(value[i - 1])) {
       let start = i - 1
-      while (start > 0 && /\s/.test(value[start - 1])) start--
+      while (start > 0 && isSpace(value[start - 1])) start--
       return value.slice(0, start)
     }
   }

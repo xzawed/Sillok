@@ -814,7 +814,7 @@ def _index_file(
     project: str,
     root: str,
     item: ingest_rules.Scanned,
-    known: dict[str, str],
+    known: dict[str, tuple[str, int]],
     counters: dict[str, int],
 ) -> None:
     """파일 하나를 읽고, 바뀌었으면 그 문서의 트랜잭션 하나로 쓴다 (D30 · D32).
