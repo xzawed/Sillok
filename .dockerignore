@@ -1,17 +1,24 @@
-.git
-.venv
-.uv
-docs
-adr
-scripts
-*.md
-compose.override.yml
-compose.override.example.yml
-docker-compose.yml
-.env
-.env.local
-__pycache__
-*.py[cod]
-.pytest_cache
-.ruff_cache
-.mypy_cache
+# **허용 목록이다** (D56, 2026-09-27). 전부 막고 Dockerfile 이 COPY 하는 것만 되살린다.
+# 거부 목록은 뿌리 기준이라 `src/sillok/__pycache__` 의 호스트 바이트코드를 이미지에 실었다(실측).
+# 새 COPY 원천을 더하면 여기에 `!경로` 를 더한다 — 빠뜨리면 빌드가 크게 실패한다 (조용히 새지 않는다).
+# tests/test_build_context.py 가 Dockerfile 의 COPY 원천과 이 목록을 맞춘다.
+*
+!pyproject.toml
+!uv.lock
+!src
+!migrations
+!tests
+# 되살린 것 안에서도 로컬 바이트코드·가상환경·env·키·원장 덤프는 뺀다 (.gitignore 와 같은 모양들).
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/venv
+**/.env
+**/.env.*
+**/.envrc
+**/*.pem
+**/*.key
+**/id_rsa*
+**/id_ed25519*
+**/kb_events*.sql*
+**/*.md

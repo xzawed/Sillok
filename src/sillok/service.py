@@ -165,12 +165,17 @@ def connect(dsn: str, *, autocommit: bool = False) -> psycopg.Connection:
     암묵 트랜잭션을 열어 이후 트랜잭션 블록이 전부 세이브포인트가 된다 —
     run 전체가 한 트랜잭션이 되는데 **실패가 아니라 통과로 나온다.**
     """
-    return psycopg.connect(
-        dsn,
-        row_factory=dict_row,
-        connect_timeout=migrations.CONNECT_TIMEOUT_SECONDS,
-        autocommit=autocommit,
-    )
+    try:
+        return psycopg.connect(
+            dsn,
+            row_factory=dict_row,
+            connect_timeout=migrations.CONNECT_TIMEOUT_SECONDS,
+            autocommit=autocommit,
+        )
+    except psycopg.ProgrammingError:
+        # 형식이 틀린 DSN 의 구문 오류 문구는 DSN 을 되읊는다 — `sillok ingest` 는 러너를 거치지 않아
+        # 그 문구가 트레이스백째 나갔다 (2026-09-27 감사 F061). 형은 두고(D21 이 INTERNAL 로 접는다) 문구를 버린다.
+        raise psycopg.ProgrammingError("DATABASE_URL 형식을 읽을 수 없다") from None
 
 
 # --- 검증 (D25) ------------------------------------------------------------

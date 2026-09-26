@@ -8,10 +8,16 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# Env / secrets
+# Env / secrets — 게이트의 검사 17 은 무시된 파일을 보지 않는다 (D56). 여기가 첫 층이다.
 .env
 .env.local
+.env.*
+!.env.example
+.envrc
 *.pem
+*.key
+id_rsa*
+id_ed25519*
 
 # 이벤트 덤프 (docs/operations.md 의 백업 절차가 이 이름으로 만든다).
 # 원장은 Git 에 두지 않는다 — kb_events 는 Git 에 원본이 없는 유일한 데이터다 (D11).

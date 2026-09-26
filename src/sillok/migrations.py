@@ -39,8 +39,15 @@ _NAME = re.compile(r"^(\d+)_[A-Za-z0-9_.-]+\.sql$")
 
 # libpq 는 URI 말고도 "host=... password=..." 키워드 문자열과 ?password= 질의를 받는다.
 # D16 의 정식 DSN 만 가리면 나머지 형태에서 암호가 오류 메시지로 샌다.
-_KEYWORD_PASSWORD = re.compile(r"(?i)(\bpassword\s*=\s*)(?:'(?:[^'\\]|\\.)*'|\S+)")
-_QUERY_PASSWORD = re.compile(r"(?i)([?&]password=)[^&#]*")
+# `sslpassword` 도 비밀이다. 질의 뒤의 `password=` 는 _QUERY_PASSWORD 가 맡는다(lookbehind).
+# 큰따옴표는 libpq 의 인용이 아니지만 사람이 그렇게 쓰면 뒷조각이 샜다 — 같이 가린다 (2026-09-27 감사 F061).
+_KEYWORD_PASSWORD = re.compile(
+    r"""(?i)((?<![?&])\b(?:ssl)?password\s*=\s*)(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\S+)"""
+)
+_QUERY_PASSWORD = re.compile(r"(?i)([?&](?:ssl)?password=)[^&#]*")
+# URI 는 libpq 의 접두사로만 찾는다. 아무 `scheme://` 나 시작으로 보면 암호에 든 `sec://` 가 새 URI 가 되어
+# 그 뒤가 사용자 이름으로 나갔다(실측).
+_URI_START = re.compile(r"(?i)postgres(?:ql)?://")
 
 
 class ConnectionFailed(RuntimeError):
@@ -51,17 +58,29 @@ class ConnectionFailed(RuntimeError):
 
 
 def redact_dsn(dsn: str) -> str:
-    """오류 메시지에 암호를 흘리지 않는다."""
-    if "://" not in dsn:
-        return _KEYWORD_PASSWORD.sub(r"\1***", dsn)
+    """오류 메시지에 암호를 흘리지 않는다. DSN 이 아니라 산문을 받아도 된다 — `service._clip` 이 그렇게 쓴다.
 
-    scheme, _, rest = dsn.partition("://")
-    authority, slash, tail = rest.partition("/")
-    if "@" in authority:
-        credentials, _, host = authority.rpartition("@")
-        user, has_password, _ = credentials.partition(":")
-        authority = f"{user}{':***' if has_password else ''}@{host}"
-    return _QUERY_PASSWORD.sub(r"\1***", f"{scheme}://{authority}{slash}{tail}")
+    가리는 쪽으로 틀리는 것은 받아들인다 — `?user=a@b` 처럼 뒤에 `@` 가 더 있으면 host 까지 가려진다.
+    """
+    # 키워드·질의 비밀을 먼저 가린다 — 값에 든 '://' 나 '@' 가 아래 URI 규칙을 속이지 않게.
+    text = _KEYWORD_PASSWORD.sub(r"\1***", _QUERY_PASSWORD.sub(r"\1***", dsn))
+    # URI 는 **나올 때마다** 가린다. 한 URI 의 userinfo 끝은 다음 URI 전까지의 **마지막 '@'** 다 —
+    # 첫 '/' 로 끊으면 암호에 날것으로 든 '/' 뒤가 그대로 나갔다 (2026-09-27 감사 F061).
+    starts = [m.end() for m in _URI_START.finditer(text)]
+    if not starts:
+        return text
+    out = [text[: starts[0]]]
+    for begin in starts:
+        following = _URI_START.search(text, begin)
+        segment = text[begin : following.start() if following else len(text)]
+        credentials, at, host = segment.rpartition("@")
+        if at:
+            user, has_password, _ = credentials.partition(":")
+            segment = f"{user}{':***' if has_password else ''}@{host}"
+        out.append(segment)
+        if following:
+            out.append(following.group(0))
+    return "".join(out)
 
 
 @dataclass(frozen=True)
@@ -115,9 +134,15 @@ def apply(dsn: str, directory: Path | None = None) -> list[Migration]:
     migrations = discover(directory)
     try:
         connection = psycopg.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS)
+    except psycopg.ProgrammingError:
+        # 형식이 틀린 DSN 의 구문 오류 문구는 DSN 조각(때로 URI 전체)을 따옴표로 되읊는다 — 싣지 않는다.
+        # `from None` 으로 사슬도 끊는다 — 트레이스백을 찍는 로거가 원인을 다시 내보낸다 (2026-09-27 감사 F061).
+        raise ConnectionFailed(
+            f"DB 에 붙을 수 없다 ({redact_dsn(dsn)}): DATABASE_URL 형식을 읽을 수 없다"
+        ) from None
     except psycopg.OperationalError as exc:
         raise ConnectionFailed(
-            f"DB 에 붙을 수 없다 ({redact_dsn(dsn)}): {str(exc).strip()}"
+            f"DB 에 붙을 수 없다 ({redact_dsn(dsn)}): {redact_dsn(str(exc).strip())}"
         ) from exc
 
     with connection as conn:

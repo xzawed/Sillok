@@ -12,7 +12,9 @@
 //
 // 사용: node scripts/check-layout.test.mjs
 
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync, rmSync } from 'node:fs'
+import {
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync, rmSync,
+} from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -37,14 +39,43 @@ const CLAIM_OFF = claim(STAGE_NOW + 1)   // 어긋난 주장. RETIRED 와 겹치
 // 아래 주입이 따로 만들어 확인한다 — 여기서 빼는 것은 우연한 오염을 막기 위해서다.
 const RUNBOOK_ARTIFACT = (name) => /^kb_events.*\.sql/.test(name) || name === 'compose.override.yml'
 
+// **사본은 커밋될 수 있는 것만 담는다** (D56, 2026-09-27) — git 의 추적 파일과 무시되지 않은 미추적 파일.
+// 예전에는 케이스마다 실제 `.env` 를 OS 임시 폴더로 복사했고, 프로세스가 죽으면 그 사본이 남았다 (감사 F120).
+// 게이트의 검사 17 이 보는 집합과 같다 — 무시된 키 파일이 사본에 들어오면 사본에는 .git 이 없어 walk 로 보므로
+// **대조군부터 붉어진다**(실측). git 이 없는 나무에서는 walk 로 복사하되 로컬 비밀 모양은 뺀다.
+const LOCAL_SECRET = (name) =>
+  name === '.env' || (name.startsWith('.env.') && name !== '.env.example') || name === '.envrc' ||
+  /\.(pem|key)$/.test(name) || /^id_(rsa|ed25519)/.test(name)
+function gitCandidates() {
+  try {
+    const git = (...args) =>
+      execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    if (realpathSync.native(git('rev-parse', '--show-toplevel').trim()) !== realpathSync.native(ROOT)) return null
+    return git('ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean)
+  } catch {
+    return null
+  }
+}
+const GIT_LIST = gitCandidates()
 function copyRepo() {
   const dest = mkdtempSync(join(tmpdir(), 'sillok-layout-'))
+  if (GIT_LIST) {
+    for (const rel of GIT_LIST) {
+      const from = join(ROOT, rel)
+      if (!existsSync(from)) continue
+      mkdirSync(dirname(join(dest, rel)), { recursive: true })
+      cpSync(from, join(dest, rel))
+    }
+    return dest
+  }
   cpSync(ROOT, dest, {
     recursive: true,
-    filter: (src) => !SKIP.has(basename(src)) && !RUNBOOK_ARTIFACT(basename(src)),
+    filter: (src) => !SKIP.has(basename(src)) && !RUNBOOK_ARTIFACT(basename(src)) && !LOCAL_SECRET(basename(src)),
   })
   return dest
 }
+// 사본에서 git 을 새로 연다 — 검사 17 의 git 원천을 사본에서 재기 위해서다 (케이스 81·82).
+const gitInit = (dir) => execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
 
 function run(dir) {
   try {
@@ -857,6 +888,60 @@ const CASES = [
     mutate: append('docs/spec.md', NL + '-----BEGIN RSA PRIVATE KEY-----' + NL),
   },
   {
+    // 검사 17 의 대상은 커밋될 수 있는 파일 전부다 (D56, 2026-09-27). 확장자 허용 목록은
+    // `Dockerfile` 의 `ENV`, 확장자 없는 키 파일, `.sh` 를 보지 않았다 (감사 F109, 실측).
+    id: '78 Dockerfile 의 ENV 에 든 키도 운다',
+    expect: 'fail',
+    mentions: ['Dockerfile : OpenAI 키 모양'],
+    mutate: append('Dockerfile', NL + 'ENV OPENAI_API_KEY=sk-abcdefghijklmnop0123456789' + NL),
+  },
+  {
+    id: '79 확장자 없는 사설 키 파일도 운다',
+    expect: 'fail',
+    mentions: ['deploy/id_rsa : 사설 키'],
+    mutate: (dir) => {
+      mkdirSync(join(dir, 'deploy'), { recursive: true })
+      writeFileSync(join(dir, 'deploy', 'id_rsa'), '-----BEGIN OPENSSH PRIVATE KEY-----' + NL, 'utf8')
+    },
+  },
+  {
+    id: '80 셸 스크립트의 비밀 DSN 도 운다',
+    expect: 'fail',
+    mentions: ['scripts/x.sh : 비밀이 든 DSN'],
+    mutate: write('scripts/x.sh', 'psql postgresql://sillok:hunter2@db:5432/sillok' + NL),
+  },
+  {
+    // 확장자 목록을 버렸으니 이진 파일도 대상이다. NUL 이 든 파일은 이진으로 보고 건너뛴다 —
+    // 이미지의 우연한 바이트가 키 모양으로 읽혀 게이트를 붉히지 않게 (D56, 2026-09-27).
+    id: '83 NUL 이 든 이진 파일의 우연한 키 모양은 보지 않는다',
+    expect: 'pass',
+    mutate: write('docs/skills/sillok-storage/logo.bin', String.fromCharCode(0) + 'sk-abcdefghijklmnop0123456789'),
+  },
+  {
+    // git 원천. 무시된 파일은 커밋되지 않으므로 보지 않는다 — walk 로 보면 키가 든 로컬 `.env` 하나가
+    // 매번 게이트를 붉혔다(실측). expectOut 이 원천이 git 이었는지까지 잠근다 — walk 로 물러서면 이 케이스는 운다.
+    id: '81 git 이 무시하는 .env 의 키는 보지 않는다',
+    optional: true,   // git 이 없는 머신에서는 git init 을 할 수 없다
+    expect: 'pass',
+    expectOut: ['비밀 검사   git'],
+    mutate: (dir) => {
+      gitInit(dir)
+      writeFileSync(join(dir, '.env'), 'OPENAI_API_KEY=sk-abcdefghijklmnop0123456789' + NL, 'utf8')
+    },
+  },
+  {
+    // 81 의 대조군. git 원천에서도 커밋될 수 있는 파일의 키는 운다.
+    id: '82 git 원천에서도 추적될 수 있는 파일의 키는 운다',
+    optional: true,   // git 이 없는 머신에서는 git init 을 할 수 없다
+    expect: 'fail',
+    mentions: ['Dockerfile : OpenAI 키 모양'],
+    expectOut: ['비밀 검사   git'],
+    mutate: (dir) => {
+      gitInit(dir)
+      edit(dir, 'Dockerfile', (t) => t + NL + 'ENV OPENAI_API_KEY=sk-abcdefghijklmnop0123456789' + NL)
+    },
+  },
+  {
     // D30 이 "다음 후보" 로 적어 둔 출력. 실패가 아니라 **보이는가** 가 계약이다.
     id: '50 D9 경로의 not-md 파일이 제외 목록에 보인다',
     expect: 'pass',
@@ -1246,8 +1331,14 @@ let failures = 0
   }
 }
 
+let controlBroken = false
 for (const c of CASES) {
   const dir = copyRepo()
+  // 사본에 로컬 비밀이 들어오면 그 자체가 F120 의 회귀다 — 게이트 결과와 따로 센다.
+  if (existsSync(join(ROOT, '.env')) && existsSync(join(dir, '.env'))) {
+    failures++
+    console.log(`BAD  ${c.id}  사본에 .env 가 들어왔다 (D56)`)
+  }
   try {
     try {
       c.mutate(dir)
@@ -1270,7 +1361,8 @@ for (const c of CASES) {
     if (c.id.startsWith('00') && code !== 0) {
       console.log('BAD  00 무손상 복사본이 이미 실패한다. 이후 케이스는 의미가 없다.')
       console.log(out)
-      process.exit(1)
+      controlBroken = true
+      break
     }
     const got = code === 0 ? 'pass' : 'fail'
     let ok = got === c.expect
@@ -1304,6 +1396,7 @@ for (const c of CASES) {
   }
 }
 
+if (controlBroken) process.exit(1)
 for (const m of META) {
   const dir = copyRepo()
   try {

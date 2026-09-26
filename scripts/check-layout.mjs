@@ -5,7 +5,8 @@
 // ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
-import { readFileSync as readOpened, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync as readOpened, readdirSync, realpathSync, statSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -810,14 +811,31 @@ const SECRETS = [
 const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
 // 검사 11 과 같은 이유로 런북 산출물을 뺀다. D56 이 막는 것은 **저장소에 들어온** 모양이고,
 // 그 둘은 `.gitignore` 가 이미 막는다 — 겹치는 세 층 중 첫 층이 그 파일들을 담당한다.
-const scanned = all.filter(
-  (p) =>
-    p !== SECRET_SCAN_EXEMPT &&
-    !RUNBOOK_ARTIFACTS(p) &&
-    /\.(md|py|mjs|js|yml|yaml|sql|toml|example|txt|json)$/.test(p)
-)
+//
+// **대상은 커밋될 수 있는 파일 전부다** (D56, 2026-09-27) — git 의 추적 파일과 무시되지 않은 미추적 파일.
+// 확장자 허용 목록을 두었더니 `Dockerfile` 의 `ENV`, 확장자 없는 `id_rsa`, `.sh`·`.cfg`, `.env.production` 이
+// 그물 밖이었다 (감사 F109). 무시된 파일은 커밋되지 않으므로 보지 않는다 — walk 로 전부 보면 키가 든 로컬 `.env`
+// 하나가 매번 게이트를 붉힌다(실측). git 이 없는 나무(하네스 사본)는 walk 로 물러선다.
+function commitCandidates() {
+  try {
+    const git = (...args) =>
+      execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    // 이 나무가 **자기** git 의 최상위일 때만 믿는다 — 상위 디렉터리의 저장소를 빌려 쓰면 목록이 다른 나무의 것이다.
+    if (realpathSync.native(git('rev-parse', '--show-toplevel').trim()) !== realpathSync.native(ROOT)) return null
+    return git('ls-files', '-z', '--cached', '--others', '--exclude-standard')
+      .split('\0')
+      .filter((p) => p && existsSync(join(ROOT, p)))
+  } catch {
+    return null
+  }
+}
+const committable = commitCandidates()
+const secretSource = committable ? `git ${committable.length}개` : `walk ${all.length}개 (git 없음)`
+const scanned = (committable ?? all).filter((p) => p !== SECRET_SCAN_EXEMPT && !RUNBOOK_ARTIFACTS(p))
 for (const p of scanned) {
   const body = readFileSync(join(ROOT, p), 'utf8')
+  // NUL 이 든 파일은 이진으로 본다 — 이미지의 우연한 바이트가 키 모양으로 읽히지 않게.
+  if (body.includes('\0')) continue
   for (const [pattern, what, scope] of SECRETS) {
     if (scope === 'not-tests' && p.startsWith('tests/')) continue
     const hit = pattern.exec(body)
@@ -1006,6 +1024,7 @@ console.log(`FM 없음     ${readmes.join(', ')}`)
 console.log(`doc_type    ${JSON.stringify(seen.doc_type)}`)
 console.log(`status      ${JSON.stringify(seen.status)}`)
 console.log(`상대 링크   ${links}개`)
+console.log(`비밀 검사   ${secretSource}`)
 
 if (problems.length) {
   console.error(`\n실패 ${problems.length}건:`)
