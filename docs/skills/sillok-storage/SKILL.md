@@ -9,8 +9,8 @@ module: null
 # Sillok Skill — 저장 위치 규칙
 
 > **배포용 산출물.** 이 폴더를 대상 프로젝트로 복사해서 쓴다.
-> 원본: `Sillok:docs/skills/sillok-storage/SKILL.md` · 기준일 2026-09-02
-> 본문 해시: sha256:7842f24f91e5 (게이트가 지킨다, D63)
+> 원본: `Sillok:docs/skills/sillok-storage/SKILL.md` · 기준일 2026-09-26
+> 본문 해시: sha256:331abbda6b86 (게이트가 지킨다, D63)
 > 사본을 고치지 말고 원본을 고친 뒤 다시 복사한다.
 > 상위 계약: `Sillok:docs/plan.md` §4
 
@@ -53,21 +53,24 @@ AI가 프로젝트 운영 중 생성·정리한 글을 어디에 둘지 이 파�
 
 필수:
 
-- `project` (문자열)
+- `project` (문자열, 64자 이하. 공백·슬래시·역슬래시 불가)
 - `kind` : `success` | `failure` | `incident` | `decision`
-- `title` (짧은 한 줄, **200자 초과 금지**)
-- `summary` (200~400자 권장, 2000자 초과 금지)
-- `occurred_at` (ISO-8601)
+- `title` (짧은 한 줄, **200자 초과 금지**. 공백뿐이면 없는 것)
+- `summary` (200~400자 권장, 2000자 초과 금지. 공백뿐이면 없는 것)
+- `occurred_at` (ISO-8601, **UTC 오프셋 필수** — `Z` 또는 `±HH:MM`. 날짜만은 불가)
 - `result` : `success` | `failure` | `partial` | `unknown`
 
 권장:
 
-- `module`
-- `root_cause`
-- `resolution`
+- `module` (200자 이하)
+- `root_cause` (2000자 이하)
+- `resolution` (2000자 이하)
 - `severity` : `low` | `medium` | `high` | `critical`
-- `related_doc_path`
+- `resolved_at` (`occurred_at` 과 같은 형식, 그보다 앞서면 안 됨)
+- `related_doc_path` (200자 이하)
 - `source` : `manual` | `github_issue` | `markdown` | `agent`
+- `payload` (객체, 압축 직렬화 2000자 이하. NaN·Infinity 불가)
+- `created_by` (200자 이하)
 
 ## 결정 트리
 
@@ -109,13 +112,17 @@ AI가 프로젝트 운영 중 생성·정리한 글을 어디에 둘지 이 파�
 
 Service가 거절해야 하는 입력:
 
-- 이벤트인데 필수 6개 (`project`, `kind`, `title`, `summary`, `occurred_at`, `result`) 중 하나라도 없음
-- `kind`가 허용 값이 아님
-- `summary`가 비었거나 2000자를 넘음
+- 이벤트인데 필수 6개 (`project`, `kind`, `title`, `summary`, `occurred_at`, `result`) 중 하나라도 없음 —
+  `title`·`summary`는 공백뿐이어도 없는 것이다
+- `kind`·`result`·`severity`·`source`가 허용 값이 아님 (배열·객체도 허용 값이 아니다)
+- 오프셋 없는 시각, 날짜만 있는 시각, `occurred_at`보다 앞선 `resolved_at`
+- 위 필드 목록의 길이 천장을 넘음
+- `project`가 비었거나 공백·슬래시·역슬래시를 포함함
+- NUL이나 짝 없는 서로게이트가 든 문자열, `payload` 안의 NaN·Infinity
 
 ## 판단은 하되 거절하지 않는 것
 
 **Git 후보인데 본문에 날짜별 시도가 여러 건 쌓여 있으면** 그것은 현재 진실이 아니라 사건 이력이다 —
 `save_doc`이 아니라 `save_event`로 간다. 다만 **Service는 이것으로 거절하지 않는다** (D38).
 기계적으로 판정할 수 없는 것을 계약에 두면 구현이 임의로 채우고, 그 임의가 계약이 된다.
-위의 거절 목록은 값이 있는지 없는지만 본다. 글이 어떤 종류인지는 여기서 사람과 모델이 판단한다.
+위의 거절 목록은 기계적으로 판정할 수 있는 것만 본다. 글이 어떤 종류인지는 여기서 사람과 모델이 판단한다.

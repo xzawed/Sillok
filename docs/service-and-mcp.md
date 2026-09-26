@@ -68,10 +68,16 @@ D25가 `resolved_at`에서 이미 이름 붙인 부류이고(`클라이언트 �
   `<field> must not contain unpaired surrogates`. 이모지처럼 **짝이 맞는** 값은 걸리지 않는다
 - **UTC로 옮기면 표현 범위를 벗어나는 시각**도 `VALIDATION`이다 (`0001-01-01T00:00:00+23:59` 같은 값).
   ISO-8601로도 `datetime`으로도 멀쩡하고 옮기는 순간 깨지므로 오프셋 검사와는 다른 자리다
+- **타입이 틀린 enum**(배열·객체인 `kind`·`result`)과 **`payload` 안의 NaN·Infinity**도 `VALIDATION`이다 (D68).
+  문구는 `kind must be one of [...]` · `payload must not contain NaN or Infinity`
+- **천장을 넘는 값**은 `VALIDATION`이다 — 필드 천장은 [저장](#저장), 질의는 [검색](#검색), 본문은 아래 (D68)
 
 FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검증 실패와 없는 경로 둘 다 핸들러로 덮는다.
 표에 없는 상태(405 등)는 표 안의 코드로 접고 **그 코드의 상태**로 나간다 — 405는 `VALIDATION`/422가 된다.
 `/openapi.json`과 슬래시 리다이렉트도 꺼야 한다 — 전자는 봉투 밖 200을, 후자는 핸들러보다 먼저 **빈 본문 307**을 낸다.
+
+**요청 본문은 4194304바이트(4 MiB)까지다** (D68). 넘으면 모든 경로(`/mcp` 포함)가 `VALIDATION` 봉투로 답한다 —
+문구는 `body larger than 4194304 bytes`. `Content-Length`를 믿지 않고 바이트를 센다(청크 전송도 걸린다).
 
 **봉투가 닿지 않는 한 곳:** HTTP 자체가 깨져 ASGI 앱에 도달하지 못한 요청은
 서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인.
@@ -95,6 +101,9 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 ```
 
 응답 `data.results[]`: `path`, `heading_path`, `excerpt`, `commit_sha`, `status`, `score`
+
+**`query`는 벗긴 길이 2000자까지다** (D68) — 넘으면 임베딩·SQL 전에 `VALIDATION` `query longer than 2000`이다.
+빈 질의 판정이 먼저이고, 앞뒤 공백은 길이에 세지 않는다. `search_events`도 같다.
 
 **`query`는 필수다.** 없거나 공백뿐이면 `VALIDATION`이다 (D33) — 문서 검색에는 질의 말고 신호가 없어
 필터만으로는 "관련 문서 전부"가 되고 그것은 설계 위반이다. `search_events`는 반대다.
@@ -209,9 +218,12 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 - `occurred_at`·`resolved_at`은 **오프셋이 있어야 한다**(`Z` 또는 `±HH:MM`). 오프셋 없는 값과 날짜만 있는 값은 `VALIDATION`
 - `resolved_at < occurred_at`이면 `VALIDATION`
-- `title` 200자 초과, `summary` 2000자 초과는 `VALIDATION`
+- `title` 200자 초과, `summary` 2000자 초과는 `VALIDATION`. **둘은 공백뿐이어도 누락이다**
+  (`missing required field: …`). 판정만 벗기고 저장은 받은 그대로다 (D68)
+- `root_cause`·`resolution`은 2000자, `module`·`created_by`·`related_doc_path`는 200자까지다.
+  넘으면 `VALIDATION` `<field> longer than N` (D68 — `get_event`가 행을 통째로 돌려주므로 D58과 같은 이유다)
 - `project`는 앞뒤 공백을 제거한 뒤 비어 있거나 64자 초과이거나 공백·슬래시·**역슬래시**·NUL을
-  포함하면 `VALIDATION`. 대소문자는 구분한다
+  포함하면 `VALIDATION`. 공백은 `str.isspace()` 전부다(전각 공백 포함, D68). 대소문자는 구분한다
 - `source`를 생략하면 `agent`다
 - **멱등이 아니다 (D24).** 같은 요청을 두 번 보내면 행이 둘 생긴다. 재시도는 통계를 부풀린다
 
@@ -367,6 +379,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 D7 게이트는 앱 미들웨어라 `/mcp`도 덮는다. stdio는 부모 프로세스의 파이프라 토큰이 없다.
 토큰이 없으면 D67 의 `Host` 게이트가 같은 자리에서 `/mcp` 를 먼저 거절한다(봉투, 422).
 SDK 의 리바인딩 보호는 두 모드 모두 끈다 — 경계는 로컬 모드의 이 게이트와 노출 모드의 토큰이다 (D67).
+본문 상한도 앱이 먼저 본다 — SDK 와 같은 4 MiB·같은 비교라 SDK 의 평문 413 에는 닿지 않는다 (D68).
 
 ### 인자 (D42)
 
@@ -406,6 +419,8 @@ HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를
   **구분자를 빼면 기본값이 공백을 넣어 같은 객체가 재는 사람에 따라 갈린다.**
   `summary`와 같은 숫자다 — `get_event`가 행을 통째로 돌려주므로 같은 이유가 걸린다.
   저장된 `jsonb`는 Postgres가 정규화하므로 이 수는 **입력을 재는 것**이다.
+- `root_cause`·`resolution`(2000자), `module`·`created_by`·`related_doc_path`(200자)도 같은 이유로 천장이 있다 (D68).
+  **저장할 때 거는 천장이라 그 전에 저장된 행에는 걸리지 않는다** (D59 — 수정 경로가 없다).
 - `ingest`의 `skipped[]`에는 천장이 없다 (D58). MCP 도구가 아니고 운영자는 목록 전체를 원한다.
 - 목록은 8개가 기본.
 - 빈 결과는 `{ "results": [] }`. 모델이 채울 문장을 넣지 않음.

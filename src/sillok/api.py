@@ -211,6 +211,60 @@ class BearerGate(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# D68. 요청 본문 상한 — MCP SDK 가 `/mcp` 에 두는 수와 같고 비교도 같다(`>`).
+# 이 층이 바깥에서 같은 문턱으로 먼저 거절하므로 SDK 의 평문 413 에는 닿지 않는다.
+BODY_MAX = 4 * 1024 * 1024
+
+
+class BodyLimit:
+    """D68. **순수 ASGI 층이고 가장 바깥이다** — 모든 경로(`/mcp` 포함)를 같은 문턱으로 본다.
+
+    `BaseHTTPMiddleware` 로 두지 않는다. 그쪽은 본문을 먼저 통째로 버퍼링하므로
+    100 MiB 가 상한 검사 전에 메모리로 들어온다(2026-09-26 감사 실측: +111 MiB).
+    예외를 올리지도 않는다 — 미들웨어에서 나온 예외는 `ValidationFailed` 핸들러 밖이라 500 이 된다.
+    봉투를 직접 보내고 안쪽 앱을 부르지 않는다.
+
+    `Content-Length` 가 문턱을 넘으면 읽지 않고 거절한다. 그래도 **바이트를 센다** —
+    청크 전송에는 그 헤더가 없고, 작은 값이 더 큰 본문을 숨길 수 있다. 통과한 본문은 그대로 다시 흘린다.
+    """
+
+    def __init__(self, app, limit: int = BODY_MAX) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = [v for k, v in scope["headers"] if k == b"content-length"]
+        if declared and declared[0].isdigit() and int(declared[0]) > self.limit:
+            await self._refuse(scope, receive, send)
+            return
+        body = bytearray()
+        rest: list[dict] = []
+        more = True
+        while more:
+            message = await receive()
+            if message["type"] != "http.request":
+                rest.append(message)  # http.disconnect — 안쪽 앱이 그대로 보게 한다
+                break
+            body += message.get("body", b"")
+            if len(body) > self.limit:
+                await self._refuse(scope, receive, send)
+                return
+            more = message.get("more_body", False)
+        replay = [{"type": "http.request", "body": bytes(body), "more_body": False}, *rest]
+
+        async def replayed():
+            return replay.pop(0) if replay else await receive()
+
+        await self.app(scope, replayed, send)
+
+    async def _refuse(self, scope, receive, send) -> None:
+        response = error(ErrorCode.VALIDATION, f"body larger than {self.limit} bytes")
+        await response(scope, receive, send)
+
+
 # D67. 로컬 모드가 받는 이름은 이 셋뿐이다. 포트는 어느 것이든 된다 (D66 복제 스택).
 _LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "[::1]"})
 _HOST = re.compile(r"(?P<name>\[[^\]]*\]|[^:\[\]]+)(?::\d+)?")
@@ -288,6 +342,9 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.add_middleware(BearerGate, token=cfg.bearer_token)
     else:
         app.add_middleware(HostGate)
+    # **마지막에 더한다 — 가장 바깥이 된다** (D68). 게이트들은 BaseHTTPMiddleware 라 본문을
+    # 버퍼링할 수 있으므로, 그보다 먼저 문턱을 봐야 큰 본문이 메모리에 들어오지 않는다.
+    app.add_middleware(BodyLimit)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

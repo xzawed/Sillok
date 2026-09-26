@@ -47,7 +47,23 @@ SOURCES = frozenset({"manual", "github_issue", "markdown", "agent"})
 PROJECT_MAX = 64
 TITLE_MAX = 200
 SUMMARY_MAX = 2000
-_PROJECT_FORBIDDEN = (" ", "\t", "\n", "\r", "/", "\\", "\x00")
+# 공백은 `str.isspace()` 전부다 (D68) — 앞뒤를 벗기는 `strip()` 과 같은 정의라야 겉보기에 같은
+# 라벨이 다른 project 가 되지 않는다. 여기는 공백 밖의 셋이다.
+_PROJECT_FORBIDDEN = ("/", "\\", "\x00")
+# D68. 공백만 있으면 누락으로 본다. 판정만 벗기고 저장은 받은 그대로다 (D25 의 정규화는 project 만).
+_BLANK_IS_MISSING = frozenset({"title", "summary"})
+
+# D68 — D58 의 확장. `get_event` 가 행을 통째로 돌려주므로(D39) 나머지 자유 텍스트에도 천장을 둔다.
+# 새 숫자를 만들지 않는다: 서술은 summary 의 수, 짧은 라벨은 title 의 수다.
+_OPTIONAL_TEXT_MAX = {
+    "root_cause": SUMMARY_MAX,
+    "resolution": SUMMARY_MAX,
+    "module": TITLE_MAX,
+    "created_by": TITLE_MAX,
+    "related_doc_path": TITLE_MAX,
+}
+# D68. 검색 질의 상한 — summary 와 같은 수. **벗긴** 질의를 잰다 (빈 질의 규칙이 먼저다).
+QUERY_MAX = SUMMARY_MAX
 
 # 짝 없는 서로게이트. `require_text` 가 쓴다 — 왜 거르는지는 그 함수의 docstring 이다.
 _SURROGATE = re.compile("[\ud800-\udfff]")
@@ -118,9 +134,8 @@ def normalize_project(raw: object) -> str:
         raise ValidationFailed("project required")
     if len(project) > PROJECT_MAX:
         raise ValidationFailed(f"project longer than {PROJECT_MAX}")
-    for bad in _PROJECT_FORBIDDEN:
-        if bad in project:
-            raise ValidationFailed("project must not contain whitespace, slash or NUL")
+    if any(ch.isspace() for ch in project) or any(bad in project for bad in _PROJECT_FORBIDDEN):
+        raise ValidationFailed("project must not contain whitespace, slash or NUL")
     # NUL 은 위에서 D25 의 문구로 이미 걸렸다. 여기는 서로게이트를 받으러 온다 —
     # `_PROJECT_FORBIDDEN` 만 있던 동안 `project` 는 그 길로 500 을 냈다.
     require_text(project, "project")
@@ -192,7 +207,11 @@ def _optional_text(body: dict[str, Any], field: str) -> str | None:
         raise ValidationFailed(f"{field} must be a string")
     # `module`·`root_cause`·`resolution`·`related_doc_path`·`created_by` 와 `_enum` 의 둘이
     # 이 한 줄로 함께 막힌다. 자리마다 두지 않는 이유는 `require_text` 에 적었다.
-    return require_text(value, field)
+    require_text(value, field)
+    cap = _OPTIONAL_TEXT_MAX.get(field)
+    if cap is not None and len(value) > cap:
+        raise ValidationFailed(f"{field} longer than {cap}")
+    return value
 
 
 def require_payload_text(payload: dict[str, Any]) -> None:
@@ -238,7 +257,12 @@ def _payload_text(payload: dict[str, Any]) -> str:
     구분자를 적지 않으면 기본값이 공백을 넣어 **같은 객체가 재는 사람에 따라 갈린다.**
     저장된 `jsonb` 는 Postgres 가 정규화하므로 이 수는 *입력*을 재는 것이다.
     """
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    # NaN·Infinity 는 JSON 이 아니다. 파이썬 `json` 은 받아들이고(`1e999` 는 inf 가 된다) 기본값으로
+    # 도로 내보내는데, `jsonb` 가 그것을 거절해 INTERNAL 500 이 됐다 (D68, 2026-09-26 감사 실측).
+    try:
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except ValueError:
+        raise ValidationFailed("payload must not contain NaN or Infinity") from None
 
 
 def _enum(body: dict[str, Any], field: str, allowed: frozenset[str]) -> str | None:
@@ -248,12 +272,19 @@ def _enum(body: dict[str, Any], field: str, allowed: frozenset[str]) -> str | No
     return value
 
 
+def _is_missing(field: str, value: object) -> bool:
+    """필수 필드가 없는가 (D10). `title`·`summary` 는 공백뿐이어도 없는 것이다 (D68)."""
+    if value is None or value == "":
+        return True
+    return field in _BLANK_IS_MISSING and isinstance(value, str) and not value.strip()
+
+
 def build_event(body: dict[str, Any]) -> Event:
     """요청 본문을 검증된 Event 로 만든다. 관대하게 채우지 않는다 (D10)."""
     if not isinstance(body, dict):
         raise ValidationFailed("body must be an object")
 
-    missing = [f for f in REQUIRED_FIELDS if body.get(f) in (None, "")]
+    missing = [f for f in REQUIRED_FIELDS if _is_missing(f, body.get(f))]
     if missing:
         raise ValidationFailed("missing required field: " + ", ".join(missing))
 
@@ -272,9 +303,11 @@ def build_event(body: dict[str, Any]) -> Event:
 
     kind = body["kind"]
     result = body["result"]
-    if kind not in KINDS:
+    # 타입부터 본다 (D68). 리스트·딕트는 해시되지 않아 `not in` 이 TypeError 를 냈다 → 500.
+    # 문구는 값이 틀렸을 때와 같다 — `_enum` 의 `must be a string` 으로 갈라 두지 않는다.
+    if not isinstance(kind, str) or kind not in KINDS:
         raise ValidationFailed(f"kind must be one of {sorted(KINDS)}")
-    if result not in RESULTS:
+    if not isinstance(result, str) or result not in RESULTS:
         raise ValidationFailed(f"result must be one of {sorted(RESULTS)}")
 
     occurred_at = parse_timestamp(body["occurred_at"], "occurred_at")
@@ -982,6 +1015,18 @@ def _log_query(
         log.warning("질의 로그를 남기지 못했다 (tool=%s): %s", tool, _clip(exc))
 
 
+def _bounded_query(query: str) -> str:
+    """벗긴 질의의 길이를 본다 (D68). 임베딩·SQL·원장 기록보다 앞선다.
+
+    `websearch_to_tsquery` 는 약 2만 낱말에서 `StatementTooComplex` 로 500 이었고(2026-09-26 감사),
+    통과한 긴 질의는 `kb_query_logs` 에 영구히 남았다. 넘어진 지점을 상수로 베끼지 않는다 —
+    summary 와 같은 수다. `VALIDATION` 이므로 D50 에 따라 원장에 남지 않는다.
+    """
+    if len(query) > QUERY_MAX:
+        raise ValidationFailed(f"query longer than {QUERY_MAX}")
+    return query
+
+
 def search_docs(
     dsn: str, body: dict[str, Any], api_key: str = "", *, client: str = "http"
 ) -> dict[str, Any]:
@@ -1000,7 +1045,7 @@ def search_docs(
     raw_query = body.get("query")
     if not isinstance(raw_query, str) or not raw_query.strip():
         raise ValidationFailed("query required")
-    query = require_text(raw_query, "query").strip()
+    query = _bounded_query(require_text(raw_query, "query").strip())
     top_k = _top_k(body.get("top_k"))
     where, params = _doc_filters(body, project)
 
@@ -1135,6 +1180,8 @@ def search_events(dsn: str, body: dict[str, Any], *, client: str = "http") -> di
     if raw_query is not None and not isinstance(raw_query, str):
         raise ValidationFailed("query must be a string")
     query = require_text(raw_query or "", "query").strip() or None
+    if query is not None:
+        _bounded_query(query)
     where, params = _event_search_filters(body, project)
 
     fields = "id, title, summary, kind, result, module, occurred_at"
