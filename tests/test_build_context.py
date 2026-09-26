@@ -51,9 +51,18 @@ def test_every_copy_source_is_let_back_in():
 
 @pytest.mark.parametrize(
     "pattern",
-    ["**/__pycache__", "**/*.py[cod]", "**/.venv", "**/.env", "**/.env.*", "**/*.pem", "**/*.key",
-     "**/kb_events*.sql*"],
+    ["**/__pycache__", "**/*.py[cod]", "**/.venv", "**/venv", "**/.env", "**/.env.*", "**/.envrc", "**/*.pem",
+     "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/kb_events*.sql*", "**/*.log", "**/.git", "**/.pytest_cache"],
 )
 def test_local_leftovers_stay_out_even_inside_what_is_let_back_in(pattern):
     """`!src` 가 되살린 나무 안에도 로컬 바이트코드·env·키·덤프가 있을 수 있다. `**/` 가 없으면 뿌리에서만 막는다."""
     assert pattern in _patterns()
+
+
+def test_every_exclusion_comes_after_the_last_let_back_in():
+    """`.dockerignore` 는 순서가 뜻이다 — 뒤의 `!src` 가 앞의 `**/.env` 를 되살린다. 순서를 뒤집어도 패턴만 보는 검사는
+    초록이었고, 그 컨텍스트로 구운 이미지에 `src/.env` 가 들어갔다 (2026-09-27 리뷰 실측)."""
+    patterns = _patterns()
+    last_include = max(i for i, p in enumerate(patterns) if p.startswith("!"))
+    early = [p for p in patterns[1:last_include] if not p.startswith("!")]
+    assert early == [], f"되살리기 앞에 제외가 있다 — 뒤의 `!` 가 그것을 되살린다: {early}"

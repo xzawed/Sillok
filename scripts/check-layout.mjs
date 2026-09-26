@@ -5,7 +5,7 @@
 // ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
-import { readFileSync as readOpened, readdirSync, realpathSync, statSync, existsSync } from 'node:fs'
+import { readFileSync as readOpened, readdirSync, realpathSync, statSync, lstatSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join, dirname, relative, resolve, sep } from 'node:path'
@@ -803,7 +803,8 @@ const SECRETS = [
   // 여기서 잡으면 "비밀을 가리는지 보는 검사"가 "비밀이 있다"로 붉어진다.
   // 기본 DSN 의 비밀번호는 `sillok` 이고 그것은 D16 이 정한 **계약 값**이다 — 비밀이 아니다.
   // 문서·설정이 그 값을 그대로 보여 주는 것이 계약이므로 그 하나만 비켜 간다.
-  [/postgres(?:ql)?:\/\/[^\s:/@]+:(?!sillok@)[^\s:/@]{3,}@/, '비밀이 든 DSN', 'not-tests'],
+  // 암호에 `/`·`:` 가 들어도 본다 (2026-09-27 리뷰: `pa/SeCrEt` 가 그물 밖이었다). userinfo 에 `${VAR}` 치환이 들면 값이 아니다 (compose).
+  [/postgres(?:ql)?:\/\/(?![^\s@]*\$\{)[^\s:/@]+:(?!sillok@)[^\s@]{3,}@/, '비밀이 든 DSN', 'not-tests'],
 ]
 // **주입 하네스만 비켜 간다.** 그 파일은 이 검사를 밀기 위해 needle 을 들고 있어야 한다 —
 // 검사 11(폐기 문구)이 `scripts/` 를 통째로 비켜 가는 것과 같은 이유이고, 여기서는
@@ -816,26 +817,46 @@ const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
 // 확장자 허용 목록을 두었더니 `Dockerfile` 의 `ENV`, 확장자 없는 `id_rsa`, `.sh`·`.cfg`, `.env.production` 이
 // 그물 밖이었다 (감사 F109). 무시된 파일은 커밋되지 않으므로 보지 않는다 — walk 로 전부 보면 키가 든 로컬 `.env`
 // 하나가 매번 게이트를 붉힌다(실측). git 이 없는 나무(하네스 사본)는 walk 로 물러선다.
+// walk 로 물러서는 것은 **git 이 없거나 이 나무가 자기 git 의 최상위가 아닐 때뿐**이다. 그 밖의 git 실패는 조용히
+// walk 로 가지 않고 운다 — 미추적 경로가 1 MiB 를 넘자 기본 버퍼가 넘쳐 walk 로 갔고, walk 는 node_modules 를
+// 건너뛰어 커밋될 수 있는 키를 못 봤다 (2026-09-27 리뷰 실측).
 function commitCandidates() {
+  const git = (...args) =>
+    execFileSync('git', ['-C', ROOT, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28,
+    })
+  let top
   try {
-    const git = (...args) =>
-      execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    // 이 나무가 **자기** git 의 최상위일 때만 믿는다 — 상위 디렉터리의 저장소를 빌려 쓰면 목록이 다른 나무의 것이다.
-    if (realpathSync.native(git('rev-parse', '--show-toplevel').trim()) !== realpathSync.native(ROOT)) return null
-    return git('ls-files', '-z', '--cached', '--others', '--exclude-standard')
+    top = git('rev-parse', '--show-toplevel').trim()
+  } catch (e) {
+    return { files: null, why: e.code === 'ENOENT' ? 'git 없음' : 'git 저장소가 아님' }
+  }
+  // 이 나무가 **자기** git 의 최상위일 때만 믿는다 — 상위 디렉터리의 저장소를 빌려 쓰면 목록이 다른 나무의 것이다.
+  if (realpathSync.native(top) !== realpathSync.native(ROOT)) return { files: null, why: 'git 최상위가 아님' }
+  try {
+    // 정규 파일만 본다 — 중첩 저장소·서브모듈은 디렉터리 항목으로, 링크는 링크로 나온다. walk 도 링크를 따라가지 않는다.
+    const files = git('ls-files', '-z', '--cached', '--others', '--exclude-standard')
       .split('\0')
-      .filter((p) => p && existsSync(join(ROOT, p)))
-  } catch {
-    return null
+      .filter((p) => p && existsSync(join(ROOT, p)) && lstatSync(join(ROOT, p)).isFile())
+    return { files, why: null }
+  } catch (e) {
+    fail(`검사 17 : git 이 커밋될 파일 목록을 주지 못했다 — ${e.code ?? e.message} (D56)`)
+    return { files: [], why: null }
   }
 }
-const committable = commitCandidates()
-const secretSource = committable ? `git ${committable.length}개` : `walk ${all.length}개 (git 없음)`
-const scanned = (committable ?? all).filter((p) => p !== SECRET_SCAN_EXEMPT && !RUNBOOK_ARTIFACTS(p))
+const { files: committable, why: walkWhy } = commitCandidates()
+const secretSource = committable ? `git ${committable.length}개` : `walk ${all.length}개 (${walkWhy})`
+// 런북 산출물 면제는 walk 에서만 뜻이 있다 — git 원천에서는 무시된 것이 이미 빠지고, `git add -f` 로 강제
+// 추적한 덤프·오버라이드는 커밋될 것이므로 **본다** (리뷰 실측).
+const scanned = committable
+  ? committable.filter((p) => p !== SECRET_SCAN_EXEMPT)
+  : all.filter((p) => p !== SECRET_SCAN_EXEMPT && !RUNBOOK_ARTIFACTS(p))
+// 이진·UTF-16 파일도 읽는다 — NUL 을 지운 뒤 본다. NUL 하나로 파일을 통째로 건너뛰면 키가 든 문서가 숨었고
+// (Grok 리뷰), Windows PowerShell 5.1 의 `>` 가 쓰는 UTF-16 은 글자 사이의 NUL 때문에 모양이 보이지 않았다(리뷰 실측).
+// 모양들은 ASCII 라 UTF-16 을 풀 것 없이 NUL 을 지우면 드러난다. 긴 ASCII 줄이라 이진 바이트가 우연히 맞기는 어렵다.
+const secretText = (path) => readFileSync(path, 'utf8').replaceAll('\0', '')
 for (const p of scanned) {
-  const body = readFileSync(join(ROOT, p), 'utf8')
-  // NUL 이 든 파일은 이진으로 본다 — 이미지의 우연한 바이트가 키 모양으로 읽히지 않게.
-  if (body.includes('\0')) continue
+  const body = secretText(join(ROOT, p))
   for (const [pattern, what, scope] of SECRETS) {
     if (scope === 'not-tests' && p.startsWith('tests/')) continue
     const hit = pattern.exec(body)

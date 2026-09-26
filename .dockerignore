@@ -22,3 +22,10 @@
 **/id_ed25519*
 **/kb_events*.sql*
 **/*.md
+# 도구·로그·중첩 저장소 — .gitignore 의 자리들 (리뷰: 되살린 나무 안의 *.log·.git·.pytest_cache 가 들어왔다).
+**/*.log
+**/.git
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.egg-info

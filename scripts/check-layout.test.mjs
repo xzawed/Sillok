@@ -13,7 +13,8 @@
 // 사용: node scripts/check-layout.test.mjs
 
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync, rmSync,
+  cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync,
+  writeFileSync, rmSync,
 } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -43,13 +44,20 @@ const RUNBOOK_ARTIFACT = (name) => /^kb_events.*\.sql/.test(name) || name === 'c
 // 예전에는 케이스마다 실제 `.env` 를 OS 임시 폴더로 복사했고, 프로세스가 죽으면 그 사본이 남았다 (감사 F120).
 // 게이트의 검사 17 이 보는 집합과 같다 — 무시된 키 파일이 사본에 들어오면 사본에는 .git 이 없어 walk 로 보므로
 // **대조군부터 붉어진다**(실측). git 이 없는 나무에서는 walk 로 복사하되 로컬 비밀 모양은 뺀다.
-const LOCAL_SECRET = (name) =>
-  name === '.env' || (name.startsWith('.env.') && name !== '.env.example') || name === '.envrc' ||
-  /\.(pem|key)$/.test(name) || /^id_(rsa|ed25519)/.test(name)
+// 대소문자를 가리지 않는다 — Windows 에서는 `.ENV` 도 같은 파일이고 git 도 core.ignorecase 로 그렇게 본다 (리뷰).
+const LOCAL_SECRET = (name) => {
+  const n = name.toLowerCase()
+  return n === '.env' || (n.startsWith('.env.') && n !== '.env.example') || n === '.envrc' ||
+    /\.(pem|key)$/.test(n) || /^id_(rsa|ed25519)/.test(n)
+}
+// git 이 없을 때 walk 복사가 빼는 나머지 — .gitignore 의 도구·로그 자리와 같다 (리뷰).
+const LOCAL_CLUTTER = (name) => ['.idea', '.vscode', '.uv'].includes(name) || /\.(log|egg-info)$/.test(name)
 function gitCandidates() {
   try {
     const git = (...args) =>
-      execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      execFileSync('git', ['-C', ROOT, ...args], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28,
+      })
     if (realpathSync.native(git('rev-parse', '--show-toplevel').trim()) !== realpathSync.native(ROOT)) return null
     return git('ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean)
   } catch {
@@ -70,12 +78,25 @@ function copyRepo() {
   }
   cpSync(ROOT, dest, {
     recursive: true,
-    filter: (src) => !SKIP.has(basename(src)) && !RUNBOOK_ARTIFACT(basename(src)) && !LOCAL_SECRET(basename(src)),
+    filter: (src) =>
+      !SKIP.has(basename(src)) && !RUNBOOK_ARTIFACT(basename(src)) && !LOCAL_SECRET(basename(src)) &&
+      !LOCAL_CLUTTER(basename(src)),
   })
   return dest
 }
 // 사본에서 git 을 새로 연다 — 검사 17 의 git 원천을 사본에서 재기 위해서다 (케이스 81·82).
 const gitInit = (dir) => execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
+// 사본 안의 로컬 비밀 모양 — 어느 머신에서든 비어 있어야 한다. ROOT 에 `.env` 가 있을 때만 보던 것을 넓혔다 (리뷰).
+function secretsIn(dir, rel = '') {
+  const found = []
+  for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+    if (e.name === '.git') continue
+    const child = rel ? `${rel}/${e.name}` : e.name
+    if (e.isDirectory()) found.push(...secretsIn(dir, child))
+    else if (LOCAL_SECRET(e.name)) found.push(child)
+  }
+  return found
+}
 
 function run(dir) {
   try {
@@ -898,24 +919,35 @@ const CASES = [
   {
     id: '79 확장자 없는 사설 키 파일도 운다',
     expect: 'fail',
-    mentions: ['deploy/id_rsa : 사설 키'],
+    mentions: ['deploy/deploy_key : 사설 키'],
     mutate: (dir) => {
       mkdirSync(join(dir, 'deploy'), { recursive: true })
-      writeFileSync(join(dir, 'deploy', 'id_rsa'), '-----BEGIN OPENSSH PRIVATE KEY-----' + NL, 'utf8')
+      writeFileSync(join(dir, 'deploy', 'deploy_key'), '-----BEGIN OPENSSH PRIVATE KEY-----' + NL, 'utf8')
     },
   },
   {
     id: '80 셸 스크립트의 비밀 DSN 도 운다',
     expect: 'fail',
     mentions: ['scripts/x.sh : 비밀이 든 DSN'],
-    mutate: write('scripts/x.sh', 'psql postgresql://sillok:hunter2@db:5432/sillok' + NL),
+    mutate: write('scripts/x.sh', 'psql postgresql://sillok:pa/hunter22@db:5432/sillok' + NL),
   },
   {
-    // 확장자 목록을 버렸으니 이진 파일도 대상이다. NUL 이 든 파일은 이진으로 보고 건너뛴다 —
-    // 이미지의 우연한 바이트가 키 모양으로 읽혀 게이트를 붉히지 않게 (D56, 2026-09-27).
-    id: '83 NUL 이 든 이진 파일의 우연한 키 모양은 보지 않는다',
-    expect: 'pass',
-    mutate: write('docs/skills/sillok-storage/logo.bin', String.fromCharCode(0) + 'sk-abcdefghijklmnop0123456789'),
+    // NUL 하나로 파일을 통째로 건너뛰면 키가 든 문서가 숨는다 (Grok 리뷰 BLOCKER). NUL 을 지우고 본다.
+    id: '83 NUL 이 든 파일의 키도 운다',
+    expect: 'fail',
+    mentions: ['docs/note.md : OpenAI 키 모양'],
+    mutate: write('docs/note.md', String.fromCharCode(0) + 'sk-abcdefghijklmnop0123456789' + NL),
+  },
+  {
+    // Windows PowerShell 5.1 의 `>` 는 UTF-16LE 로 쓴다 — 글자 사이의 NUL 때문에 모양이 보이지 않았다 (리뷰 실측).
+    id: '84 UTF-16 으로 쓴 파일의 키도 운다',
+    expect: 'fail',
+    mentions: ['envdump.txt : OpenAI 키 모양'],
+    mutate: (dir) =>
+      writeFileSync(
+        join(dir, 'envdump.txt'),
+        Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('OPENAI_API_KEY=sk-abcdefghijklmnop0123456789', 'utf16le')])
+      ),
   },
   {
     // git 원천. 무시된 파일은 커밋되지 않으므로 보지 않는다 — walk 로 보면 키가 든 로컬 `.env` 하나가
@@ -939,6 +971,31 @@ const CASES = [
     mutate: (dir) => {
       gitInit(dir)
       edit(dir, 'Dockerfile', (t) => t + NL + 'ENV OPENAI_API_KEY=sk-abcdefghijklmnop0123456789' + NL)
+    },
+  },
+  {
+    // git 원천에서 런북 면제는 없다 — `git add -f` 로 강제 추적한 오버라이드는 커밋될 것이다 (리뷰 실측).
+    id: '85 강제 추적한 런북 파일의 키도 git 원천에서는 운다',
+    expect: 'fail',
+    optional: true,   // git 이 없는 머신에서는 git init 을 할 수 없다
+    mentions: ['compose.override.yml : OpenAI 키 모양'],
+    expectOut: ['비밀 검사   git'],
+    mutate: (dir) => {
+      gitInit(dir)
+      writeFileSync(join(dir, 'compose.override.yml'), '# sk-abcdefghijklmnop0123456789' + NL, 'utf8')
+      execFileSync('git', ['add', '-f', 'compose.override.yml'], { cwd: dir, stdio: 'ignore' })
+    },
+  },
+  {
+    // git 원천은 정규 파일만 본다 — 링크 디렉터리·중첩 저장소를 디렉터리 항목으로 받아 "정규 파일이 아니다" 로
+    // 거짓 실패했다 (리뷰 실측). walk 처럼 링크는 색인 제외로만 보인다.
+    id: '86 git 원천에서 링크 디렉터리는 거짓 실패하지 않는다',
+    expect: 'pass',
+    optional: true,   // git 과 링크 권한(윈도우는 정션)이 있어야 만든다
+    expectOut: ['비밀 검사   git'],
+    mutate: (dir) => {
+      gitInit(dir)
+      symlinkSync(join(dir, 'adr'), join(dir, 'docs', 'linked'), 'junction')
     },
   },
   {
@@ -1335,9 +1392,10 @@ let controlBroken = false
 for (const c of CASES) {
   const dir = copyRepo()
   // 사본에 로컬 비밀이 들어오면 그 자체가 F120 의 회귀다 — 게이트 결과와 따로 센다.
-  if (existsSync(join(ROOT, '.env')) && existsSync(join(dir, '.env'))) {
+  const leaked = secretsIn(dir)
+  if (leaked.length) {
     failures++
-    console.log(`BAD  ${c.id}  사본에 .env 가 들어왔다 (D56)`)
+    console.log(`BAD  ${c.id}  사본에 로컬 비밀이 들어왔다 (D56): ${leaked.join(', ')}`)
   }
   try {
     try {

@@ -21,8 +21,10 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote
 
 import psycopg
+import psycopg.conninfo
 
 log = logging.getLogger(__name__)
 
@@ -38,16 +40,22 @@ CONNECT_TIMEOUT_SECONDS = 10
 _NAME = re.compile(r"^(\d+)_[A-Za-z0-9_.-]+\.sql$")
 
 # libpq 는 URI 말고도 "host=... password=..." 키워드 문자열과 ?password= 질의를 받는다.
-# D16 의 정식 DSN 만 가리면 나머지 형태에서 암호가 오류 메시지로 샌다.
-# `sslpassword` 도 비밀이다. 질의 뒤의 `password=` 는 _QUERY_PASSWORD 가 맡는다(lookbehind).
-# 큰따옴표는 libpq 의 인용이 아니지만 사람이 그렇게 쓰면 뒷조각이 샜다 — 같이 가린다 (2026-09-27 감사 F061).
+# D16 의 정식 DSN 만 가리면 나머지 형태에서 암호가 오류 메시지로 샌다. `sslpassword` 도 비밀이다.
+# 인용은 libpq 의 작은따옴표 규칙이다 — 닫히지 않았으면 끝까지 가린다. 큰따옴표는 libpq 의 인용이 아니다 —
+# 닫히고 뒤가 공백·끝일 때만 한 덩어리로 보고, 아니면(`"ab"SeCrEt`) 인용 없는 값으로 통째로 가린다.
+# 인용 없는 값의 `\ ` 는 libpq 가 공백으로 읽는다 (2026-09-27 감사 F061 · 리뷰 실측).
 _KEYWORD_PASSWORD = re.compile(
-    r"""(?i)((?<![?&])\b(?:ssl)?password\s*=\s*)(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\S+)"""
+    r"""(?i)((?<![?&])\b(?:ssl)?password\s*=\s*)"""
+    r"""(?:'(?:[^'\\]|\\.)*(?:'|$)|"(?:[^"\\]|\\.)*"(?=\s|$)|(?:\\.|\S)+)"""
 )
-_QUERY_PASSWORD = re.compile(r"(?i)([?&](?:ssl)?password=)[^&#]*")
-# URI 는 libpq 의 접두사로만 찾는다. 아무 `scheme://` 나 시작으로 보면 암호에 든 `sec://` 가 새 URI 가 되어
-# 그 뒤가 사용자 이름으로 나갔다(실측).
-_URI_START = re.compile(r"(?i)postgres(?:ql)?://")
+# 질의의 키는 퍼센트 인코딩될 수 있다(`%70assword`). 값은 `&`·공백까지다 — libpq 는 `#` 를 조각으로 보지 않는다.
+_QUERY_PARAM = re.compile(r"([?&])([^=&\s]*)=([^&\s]*)")
+_SECRET_KEYS = frozenset({"password", "sslpassword"})
+# URI 의 시작은 아무 scheme 이나 본다 — `postgresql+psycopg://` 도 DSN 모양이다.
+# 암호 안의 `sec://`·`postgres://` 는 경계가 되지 않는다: 한 URI 는 공백까지 한 덩어리이고 이미 삼킨 자리는 건너뛴다.
+_URI_START = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://")
+# 드라이버 문구에서 지울 조각의 최소 길이. 더 짧은 조각을 문구 전체에서 지우면 낱말이 망가진다.
+_PIECE_MIN = 3
 
 
 class ConnectionFailed(RuntimeError):
@@ -60,27 +68,89 @@ class ConnectionFailed(RuntimeError):
 def redact_dsn(dsn: str) -> str:
     """오류 메시지에 암호를 흘리지 않는다. DSN 이 아니라 산문을 받아도 된다 — `service._clip` 이 그렇게 쓴다.
 
+    URI 를 먼저 가리고 질의·키워드를 가린다 — 반대로 하면 질의 규칙이 암호 뒤의 `@` 를 삼켜 URI 규칙이
+    userinfo 를 찾지 못했다(암호 안에 `?password=` 가 든 URI, 리뷰 실측).
     가리는 쪽으로 틀리는 것은 받아들인다 — `?user=a@b` 처럼 뒤에 `@` 가 더 있으면 host 까지 가려진다.
     """
-    # 키워드·질의 비밀을 먼저 가린다 — 값에 든 '://' 나 '@' 가 아래 URI 규칙을 속이지 않게.
-    text = _KEYWORD_PASSWORD.sub(r"\1***", _QUERY_PASSWORD.sub(r"\1***", dsn))
-    # URI 는 **나올 때마다** 가린다. 한 URI 의 userinfo 끝은 다음 URI 전까지의 **마지막 '@'** 다 —
-    # 첫 '/' 로 끊으면 암호에 날것으로 든 '/' 뒤가 그대로 나갔다 (2026-09-27 감사 F061).
-    starts = [m.end() for m in _URI_START.finditer(text)]
-    if not starts:
-        return text
-    out = [text[: starts[0]]]
-    for begin in starts:
-        following = _URI_START.search(text, begin)
-        segment = text[begin : following.start() if following else len(text)]
-        credentials, at, host = segment.rpartition("@")
+    text = _mask_userinfo(dsn)
+    text = _QUERY_PARAM.sub(_mask_query, text)
+    return _KEYWORD_PASSWORD.sub(r"\1***", text)
+
+
+def _mask_query(m: re.Match[str]) -> str:
+    if unquote(m.group(2)).lower() in _SECRET_KEYS:
+        return f"{m.group(1)}{m.group(2)}=***"
+    return m.group(0)
+
+
+def _userinfo_spans(text: str):
+    """`(시작, 끝, userinfo)` — URI 마다 공백 전까지의 **마지막 `@`** 앞이 userinfo 다.
+
+    libpq 는 첫 `@` 에서 끊지만 가리기는 넓게 한다 — 첫 '/' 나 첫 '@' 로 끊으면 암호에 날것으로 든
+    '/'·'@' 뒤가 그대로 나갔다 (2026-09-27 감사 F061).
+    """
+    consumed = 0
+    for m in _URI_START.finditer(text):
+        if m.start() < consumed:
+            continue
+        end = m.end()
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        consumed = end
+        userinfo, at, _ = text[m.end() : end].rpartition("@")
         if at:
-            user, has_password, _ = credentials.partition(":")
-            segment = f"{user}{':***' if has_password else ''}@{host}"
-        out.append(segment)
-        if following:
-            out.append(following.group(0))
+            yield m.end(), m.end() + len(userinfo), userinfo
+
+
+def _mask_userinfo(text: str) -> str:
+    out, pos = [], 0
+    for start, stop, userinfo in _userinfo_spans(text):
+        user, has_password, _ = userinfo.partition(":")
+        out.append(text[pos:start])
+        out.append(f"{user}{':***' if has_password else ''}")
+        pos = stop
+    out.append(text[pos:])
     return "".join(out)
+
+
+def _password_pieces(dsn: str) -> list[str]:
+    """DSN 에서 암호로 읽힐 수 있는 조각들 — 긴 것부터.
+
+    libpq 는 userinfo 를 **첫 `@`** 에서 끊고 나머지를 host 로 읽는다. 그래서 `P@SeCrEt` 의 `SeCrEt` 이
+    `failed to resolve host 'SeCrEt@db'` 로 드라이버 문구에 나온다 (2026-09-27 리뷰 실측). 문구는 DSN 모양이 아니라
+    redact_dsn 이 못 찾으므로 조각을 직접 지운다. 사용자 이름과 같은 조각은 지우지 않는다 — D16 의 기본값처럼
+    공개된 값이 모든 낱말을 지우게 된다.
+    """
+    pieces: set[str] = set()
+    users: set[str] = set()
+    for _, _, userinfo in _userinfo_spans(dsn):
+        user, has_password, password = userinfo.partition(":")
+        users.add(user)
+        if has_password:
+            pieces.add(password)
+            for sep in "@/:":
+                pieces.update(password.split(sep))
+    for m in _KEYWORD_PASSWORD.finditer(dsn):
+        pieces.add(m.group(0)[len(m.group(1)) :].strip("'\""))
+    for m in _QUERY_PARAM.finditer(dsn):
+        if unquote(m.group(2)).lower() in _SECRET_KEYS:
+            pieces.add(unquote(m.group(3)))
+    try:
+        params = psycopg.conninfo.conninfo_to_dict(dsn)
+    except Exception:  # noqa: BLE001 - 읽지 못하는 DSN 이면 위의 조각으로 충분하다
+        params = {}
+    users.add(str(params.get("user") or ""))
+    for key in _SECRET_KEYS:
+        if params.get(key):
+            pieces.add(str(params[key]))
+    return sorted((p for p in pieces if len(p) >= _PIECE_MIN and p not in users), key=len, reverse=True)
+
+
+def scrub_driver_text(text: str, dsn: str) -> str:
+    """드라이버 문구에서 이 DSN 의 암호 조각과 DSN 모양의 비밀을 지운다. 문구는 서버 로그·stderr 로 간다 (D21)."""
+    for piece in _password_pieces(dsn):
+        text = text.replace(piece, "***")
+    return redact_dsn(text)
 
 
 @dataclass(frozen=True)
@@ -137,13 +207,13 @@ def apply(dsn: str, directory: Path | None = None) -> list[Migration]:
     except psycopg.ProgrammingError:
         # 형식이 틀린 DSN 의 구문 오류 문구는 DSN 조각(때로 URI 전체)을 따옴표로 되읊는다 — 싣지 않는다.
         # `from None` 으로 사슬도 끊는다 — 트레이스백을 찍는 로거가 원인을 다시 내보낸다 (2026-09-27 감사 F061).
-        raise ConnectionFailed(
-            f"DB 에 붙을 수 없다 ({redact_dsn(dsn)}): DATABASE_URL 형식을 읽을 수 없다"
-        ) from None
+        # DSN 도 싣지 않는다 — 형식이 틀린 입력이 바로 가리기가 libpq 와 갈라지는 자리다(닫히지 않은 따옴표,
+        # `postgresql+psycopg://`, 리뷰 실측). 고정 문구가 전부다.
+        raise ConnectionFailed("DB 에 붙을 수 없다: DATABASE_URL 형식을 읽을 수 없다") from None
     except psycopg.OperationalError as exc:
         raise ConnectionFailed(
-            f"DB 에 붙을 수 없다 ({redact_dsn(dsn)}): {redact_dsn(str(exc).strip())}"
-        ) from exc
+            f"DB 에 붙을 수 없다 ({redact_dsn(dsn)}): {scrub_driver_text(str(exc).strip(), dsn)}"
+        ) from None  # 원래 문구는 암호 조각을 되읊을 수 있다 — 사슬로도 남기지 않는다
 
     with connection as conn:
         for migration in migrations:
