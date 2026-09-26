@@ -179,4 +179,5 @@ DECIDED: error code -> HTTP: VALIDATION 422, UNAUTHORIZED 401, NOT_FOUND 404,
 DECIDED: body is always the {ok, data|error} envelope; INTERNAL message is a fixed string
 DECIDED: no token -> loopback Host/Origin gate on every path, VALIDATION (D67); token -> bearer only
 DECIDED: client values never become INTERNAL; ceilings on fields, search query, 4 MiB body (D68)
+DECIDED: unknown keys -> VALIDATION on both faces; filters stripped, enums checked, [since, until) (D69)
 ```

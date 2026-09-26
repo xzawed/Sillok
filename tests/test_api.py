@@ -755,15 +755,12 @@ def test_stage7_failures_stay_inside_the_error_table(method, path, func, payload
     assert isinstance(body["error"]["message"], str)
 
 
-# --- 반복된 질의 인자 (프레임워크의 우연한 기본값) --------------------------
+# --- 반복된 질의 인자 (D69) --------------------------------------------------
 #
-# 계약에 문장이 없다. AGENTS `테스트를 쓰는 방식` 이 이런 것을 **찾은 자리에서 잠그라**고 한다 —
-# `Headers.get` 이 첫 값만 보던 것과 같은 부류다. 그때는 D7 게이트를 우회하는 길이었고,
-# 여기는 우회할 게이트가 없어 동작을 못 박기만 한다.
-#
-# **주입 대신 관측이다.** 고칠 대상이 우리 코드가 아니라 Starlette 의 파서라,
-# 두 값이 **실제로 다른** 요청을 보내고 어느 쪽이 함수까지 갔는지 본다.
-# 기본값이 뒤집히면(첫 값이 이기면) 이 검사가 붉어진다.
+# 예전에는 계약에 문장이 없어 프레임워크 기본값(마지막 값이 이긴다)을 찾은 자리에서 잠가 두었다.
+# D69 가 그것을 결정으로 뒤집었다 — 마지막 값이 `module=authx&module=` 의 필터를 조용히 지웠다.
+# 되풀이된 키는 `duplicate field: <이름>` 이고 **Service 에 닿기 전에** 끝난다. 두 값이 실제로 다른
+# 요청을 보내 가짜 Service 가 불리지 않는지 본다 — 검사가 빠지면 어느 값이든 함수까지 간다.
 
 
 def _capture(seen):
@@ -783,22 +780,26 @@ def _capture(seen):
         ("/v1/stats/events?project=first&project=last", "event_stats"),
     ],
 )
-def test_a_repeated_query_parameter_takes_the_last_value(monkeypatch, path, func):
+def test_a_repeated_query_parameter_is_refused(monkeypatch, path, func):
+    """D69 가 뒤집었다. 예전에는 마지막 값이 이겼다 — 결정이 아니라 프레임워크 기본값을 잠가 둔 것이었고
+    (open-questions G절 주석), `module=authx&module=` 이 필터를 조용히 지웠다(2026-09-26 리뷰 실측).
+    Service 에 닿기 전에 끝난다."""
     seen: dict[str, tuple] = {}
     monkeypatch.setattr(service, func, _capture(seen))
     r = _client().get(path)
-    assert r.status_code == 200
-    assert "last" in seen["args"], f"{func} 가 받은 값: {seen['args']}"
-    assert "first" not in seen["args"]
+    assert r.status_code == 422
+    assert r.json()["error"] == {"code": "VALIDATION", "message": "duplicate field: project"}
+    assert seen == {}
 
 
-def test_a_repeated_offset_takes_the_last_value(monkeypatch):
-    """숫자 인자도 같다. 창을 페이징하는 클라이언트가 두 번 붙여 보내도 뒤엣것이 쓰인다."""
+def test_a_repeated_offset_is_refused(monkeypatch):
+    """숫자 인자도 같다. 두 번 붙여 보낸 창 번호 중 무엇을 뜻했는지 서버가 고르지 않는다 (D69)."""
     seen: dict[str, tuple] = {}
     monkeypatch.setattr(service, "get_file", _capture(seen))
     r = _client().get("/v1/files?project=p&path=docs/a.md&offset=1&offset=2")
-    assert r.status_code == 200
-    assert 2 in seen["args"] and 1 not in seen["args"], seen["args"]
+    assert r.status_code == 422
+    assert r.json()["error"]["message"] == "duplicate field: offset"
+    assert seen == {}
 
 
 # --- 질의 임베딩 실패 (D33 §4 가 약속한 검사) --------------------------------

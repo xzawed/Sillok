@@ -71,6 +71,10 @@ D25가 `resolved_at`에서 이미 이름 붙인 부류이고(`클라이언트 �
 - **타입이 틀린 enum**(배열·객체인 `kind`·`result`)과 **`payload` 안의 NaN·Infinity**도 `VALIDATION`이다 (D68).
   문구는 `kind must be one of [...]` · `payload must not contain NaN or Infinity`
 - **천장을 넘는 값**은 `VALIDATION`이다 — 필드 천장은 [저장](#저장), 질의는 [검색](#검색), 본문은 아래 (D68)
+- **모르는 키**도 `VALIDATION`이다 — 업무 라우트 아홉의 본문·질의 인자와 도구 여덟의 인자 모두 (D69).
+  POST 는 질의 인자를 받지 않는다(있으면 모르는 키다). 되풀이된 질의 인자는 `duplicate field: <이름>`이다.
+  문구는 코드점 순 첫 키 하나 `unknown field: <이름>`, 이름으로 실을 수 없는 키(비었거나 200자 초과·NUL·짝 없는 서로게이트)는
+  고정 `unknown field`. 값은 싣지 않는다. 필수 누락보다 먼저 본다 — 오타는 누락이 아니다
 
 FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검증 실패와 없는 경로 둘 다 핸들러로 덮는다.
 표에 없는 상태(405 등)는 표 안의 코드로 접고 **그 코드의 상태**로 나간다 — 405는 `VALIDATION`/422가 된다.
@@ -81,7 +85,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 **이 문턱이 D7·D67 게이트보다 먼저다** — 토큰 모드에서 인증 없는 큰 본문도 `UNAUTHORIZED`가 아니라 `VALIDATION`이다.
 
 **봉투가 닿지 않는 한 곳:** HTTP 자체가 깨져 ASGI 앱에 도달하지 못한 요청은
-서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인.
+서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인, 서버 한도를 넘는 긴 URL.
 앱 밖이라 감쌀 수 없다. 클라이언트는 이 한 가지를 예외로 알고 있어야 한다.
 (큰 헤더 자체는 여기 해당하지 않는다 — 64KB 헤더도 봉투로 응답하는 것을 실측했다.)
 빈 검색 결과는 오류가 아니다 — 200에 `{ "results": [] }`.
@@ -150,6 +154,10 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 **`query`는 선택이다.** 없거나 공백뿐이면 필터 집합이 그대로 결과이고 `score`는 `null`이다 (D33).
 순서는 `occurred_at DESC, id DESC`다. `query`가 있으면 `ts_rank` 순이고 같은 두 키가 타이브레이크다.
 `query`에 값이 있는데 렉심이 하나도 나오지 않으면 결과는 0건이다 — 필터 집합을 돌려주지 않는다.
+**부정만 있는 질의**(`-낱말`, `낱말 OR -낱말` 처럼 빈 문서에도 참인 질의)도 0건이다 (D69). 원장에는 0건으로 남는다.
+**기간은 `[since, until)`이다** — `since`는 포함, `until`은 배제. `since >= until`이면 `VALIDATION` `since is not before until` (D69).
+**필터 값은 벗긴 뒤 본다** (D69) — 비면 거르지 않고, `kind`가 허용 값이 아니면 `kind must be one of [...]` 다.
+`search_docs`의 `doc_type`·`status`도 같다(taxonomy 밖이면 거절, 임베딩 전). `module`은 열린 값이라 벗기기만 한다.
 
 ### 단건
 
@@ -275,7 +283,9 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 
 - `repeat_causes`는 `module`까지 묶는다 — Skill의 결정 트리가 `project+module+root_cause`로 세기 때문이다.
   `root_cause`만 묶으면 `?module=` 없이 부른 결과가 그 트리와 어긋난다. `project`는 질의 파라미터이므로 항목에 넣지 않는다
-- `root_cause`가 없는 행은 제외. **2회 이상만**, `count` 내림차순 → `root_cause` 오름차순 → `module` 오름차순(NULL 은 마지막), **최대 12개**
+- `root_cause`가 없는 행은 제외. **2회 이상만**, `count` 내림차순 → `root_cause` 오름차순 → `module` 오름차순(NULL 은 마지막), **최대 12개**.
+  두 정렬 키는 `COLLATE "C"`다 — 로케일이 자르는 대상을 바꾸지 않게 (D69)
+- `module` 필터는 검색과 같은 뜻이다 — 앞뒤 공백을 벗기고, 비면 거르지 않는다 (D69). `since`는 포함이다
 - `module`이 없는 반복도 `"module": null`로 나간다. `by_module`이 NULL 키를 못 만드는 것과 다르다 — 여기는 필드다
 - `by_module`은 `module`이 없는 행의 키를 넣지 않는다. 그 행들은 `total`에 남아 있으므로 `sum(by_module) <= total`이다. 0인 키도 넣지 않는다
 - **`by_module`은 12개까지다** — `count` 내림 → 키 오름 (D58). 잘라 낸 키 수는 `by_module_omitted`로 나간다.
@@ -398,6 +408,9 @@ SDK 의 리바인딩 보호는 두 모드 모두 끈다 — 경계는 로컬 모
 | `event_stats` | `project` · `module` · `since` |
 | `kb_status` | `project` |
 
+**표에 없는 인자는 HTTP 와 같은 봉투로 거절한다** (D69) — `unknown field: <이름>`, 정상 결과다(D44).
+SDK 는 선언 밖 인자를 조용히 버리므로 서버가 도구를 부르기 전에 선언된 이름과 대조한다.
+
 **타입을 어긴 호출은 예외다.** 값의 타입이 스키마와 다르면 SDK가 도구를 부르기 전에 거절하고
 그 본문은 봉투가 아니다. 전송 계층의 일이며, HTTP 얼굴에서 FastAPI가 `offset=x`를 먼저 거절하는 것과
 같은 자리다 — 다른 점은 그쪽은 D21이 봉투로 덮고 이쪽은 덮지 못한다는 것뿐이다.
@@ -411,6 +424,9 @@ HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를
 `UNAUTHORIZED`는 HTTP 얼굴에만 있다.
 
 **같은 인자면 두 얼굴의 봉투가 같아야 한다** (D46). 그 대조는 검사가 한다.
+GET 의 필수 인자(`project`·`path`)도 Service 가 판정하므로 빠뜨린 호출의 문구가 두 얼굴에서 같다 (D69).
+예외는 형이 틀린 값이다 — HTTP 는 FastAPI 가, MCP 는 SDK 가 먼저 거절하고 문구가 다르다 (D42).
+JSON 으로 파싱되지 않는 본문(짝 없는 서로게이트가 든 키 등)은 MCP 에서 JSON-RPC 파싱 오류다.
 
 ## 반환 크기
 
