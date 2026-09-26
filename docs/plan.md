@@ -68,7 +68,7 @@ AI는 MCP로 행 몇 개만 읽고 쓴다. 문서를 대화에 통째로 넣지 
 | 원문 | workspace 경로에서 `get_file` |
 | 프로젝트 | `project` 문자열 필수 |
 | MCP | stdio + Streamable HTTP, 같은 앱 |
-| 인증 | 로컬 없음(루프백 `Host` 게이트, D67). 외부 HTTP면 Bearer |
+| 인증 | 로컬 없음(루프백 `Host`·`Origin` 게이트, D67). 외부 HTTP면 Bearer |
 | 색인 | CLI `sillok ingest` |
 | 색인 경로 | `docs/**`, 루트 `README*`, `adr/**` |
 | 이벤트 | 필수 필드 없으면 거절 |

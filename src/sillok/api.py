@@ -260,7 +260,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     from . import mcp_server as mcp_tools
 
     mcp = mcp_tools.build(cfg)
-    mcp_transport = mcp_tools.transport(mcp, exposed=cfg.auth_required)
+    mcp_transport = mcp_tools.transport(mcp)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

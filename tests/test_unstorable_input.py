@@ -28,7 +28,7 @@ NUL = "\x00"
 # 짝 없는 서로게이트. JSON 의 `\ud800` 이 파이썬 str 로 오면 이 모양이다.
 LONE = "\ud800"
 
-# D43 의 이유로 MCP 는 Host 를 고쳐 보낸다.
+# D67: 로컬 모드는 루프백 Host 만 받는다. 픽스처의 base_url 과 같은 값을 명시해 둔다.
 MCP_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",

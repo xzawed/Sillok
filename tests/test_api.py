@@ -155,8 +155,8 @@ def test_unhandled_exception_leaks_nothing():
 # --- D7 게이트 -------------------------------------------------------------
 
 
-def test_no_gate_when_token_is_empty():
-    """D7: 로컬은 무인증. 빈 토큰이면 게이트가 아예 없다."""
+def test_no_bearer_gate_when_token_is_empty():
+    """D7: 로컬은 무인증. 빈 토큰이면 Bearer 게이트가 없다 — 대신 D67 의 Host 게이트가 선다."""
     r = _client().post("/t/validate", json={"result": "success"})
     assert r.status_code == 200
 
@@ -510,16 +510,19 @@ MCP_ACCEPT = "application/json, text/event-stream"
 
 
 def _local_hit(path: str, headers, **overrides):
-    """토큰 없는 앱에 요청 하나. `/mcp` 는 POST 로, 나머지는 GET 으로."""
-    client = TestClient(
+    """토큰 없는 앱에 요청 하나. `/mcp` 는 POST 로, 나머지는 GET 으로.
+
+    `with` 로 연다 — lifespan 이 돌아야 `/mcp` 가 게이트 뒤에서 실제로 답한다.
+    """
+    with TestClient(
         api.create_app(_config(**overrides)),
         base_url="http://127.0.0.1:8080",
         raise_server_exceptions=False,
-    )
-    if path == "/mcp":
-        extra = [("accept", MCP_ACCEPT)]
-        return client.post(path, json=MCP_BODY, headers=list(headers) + extra)
-    return client.get(path, headers=list(headers))
+    ) as client:
+        if path == "/mcp":
+            extra = [("accept", MCP_ACCEPT)]
+            return client.post(path, json=MCP_BODY, headers=list(headers) + extra)
+        return client.get(path, headers=list(headers))
 
 
 @pytest.mark.parametrize(
@@ -533,6 +536,11 @@ def _local_hit(path: str, headers, **overrides):
         "user@127.0.0.1",
         "testserver",  # TestClient 기본값 — 검사를 위해 코드에 예외를 두지 않는다
         "api:8080",  # compose 네트워크 안의 이름. 쓰려면 토큰을 켠다
+        "127.0.0.1:8080.evil.example",  # 이름 뒤 찌꺼기 — fullmatch 가 아니면 통과한다
+        "localhost:80@evil.example",
+        "user:pass@127.0.0.1",
+        "127.0.0.2",  # 다른 루프백도 D67 이 이름으로 든 셋이 아니다
+        "host.docker.internal",
     ],
 )
 @pytest.mark.parametrize("path", ["/v1/status?project=t_api", "/v1/nope", "/mcp"])
@@ -543,20 +551,47 @@ def test_local_mode_rejects_a_foreign_host_on_every_path(path, host):
     assert host not in r.text  # 받은 값을 되싣지 않는다
 
 
+def test_local_mode_refuses_a_rebound_write_before_the_service(monkeypatch):
+    """감사가 잰 그 요청이다 — 낯선 Host 의 `POST /v1/events` 가 원장에 행을 남겼다.
+
+    Service 에 닿기 전에 끝나야 한다. 게이트를 GET 에만 걸면 여기서 붉어진다.
+    """
+    called = []
+    monkeypatch.setattr(service, "save_event", lambda *a, **k: called.append(a) or {"id": 1})
+    client = TestClient(
+        api.create_app(_config()), base_url="http://127.0.0.1:8080", raise_server_exceptions=False
+    )
+    r = client.post(
+        "/v1/events",
+        json=_EVENT,
+        headers={"Host": "rebind.evil:8080", "Origin": "http://rebind.evil:8080"},
+    )
+    assert r.json() == HOST_REJECTED
+    assert called == []
+
+
 def test_local_mode_rejects_two_host_headers():
     """하나가 루프백이어도 거절한다. 첫 값만 보는 우회를 막는다 (BearerGate 와 같은 이유)."""
     r = _local_hit("/v1/nope", [("host", "127.0.0.1:8080"), ("host", "evil.example")])
     assert r.json() == HOST_REJECTED
 
 
+def _passed_the_gate(path: str, r) -> bool:
+    """게이트를 지났는가. `/v1/nope` 는 라우트가 없어 404 봉투, `/mcp` 는 JSON-RPC 200 이다."""
+    if path == "/mcp":
+        return r.status_code == 200 and "result" in r.json()
+    return r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
+
+
+# `/mcp` 를 함께 때린다. SDK 의 루프백 목록은 게이트보다 좁아서(포트 필수·http 만),
+# 켜 두면 게이트가 통과시킨 요청을 `/mcp` 만 평문 421·403 으로 거절했다 (2026-09-26 리뷰 실측).
 @pytest.mark.parametrize(
     "host", ["127.0.0.1", "127.0.0.1:8080", "localhost", "LocalHost:1234", "[::1]", "[::1]:8090"]
 )
-def test_local_mode_lets_loopback_hosts_through(host):
-    """포트는 어느 것이든 된다 — D66 복제 스택은 다른 포트로 뜬다."""
-    r = _local_hit("/v1/nope", [("host", host)])
-    assert r.status_code == 404  # 게이트는 통과, 라우트가 없어 404
-    assert r.json()["error"]["code"] == "NOT_FOUND"
+@pytest.mark.parametrize("path", ["/v1/nope", "/mcp"])
+def test_local_mode_lets_loopback_hosts_through(path, host):
+    """포트는 어느 것이든 된다 — D66 복제 스택은 다른 포트로 뜬다. 두 얼굴이 같게 답한다."""
+    assert _passed_the_gate(path, _local_hit(path, [("host", host)]))
 
 
 @pytest.mark.parametrize(
@@ -564,6 +599,7 @@ def test_local_mode_lets_loopback_hosts_through(host):
     [
         "http://evil.example",
         "http://127.0.0.1.evil.example:8080",
+        "http://evil.example@localhost",  # userinfo 뒤의 이름을 취하는 파서로 바뀌면 통과한다
         "null",  # 샌드박스 iframe·file: 이 보내는 값
         "http://localhost:8080/path",
         "ftp://localhost",
@@ -576,13 +612,22 @@ def test_local_mode_rejects_a_foreign_origin(path, origin):
     assert r.json() == ORIGIN_REJECTED
 
 
+def test_local_mode_rejects_two_origin_headers():
+    """첫 값만 보는 파서로 바뀌어도 막히게 — 루프백을 앞에 둔다."""
+    r = _local_hit(
+        "/v1/nope",
+        [("host", "127.0.0.1:8080"), ("origin", "http://localhost"), ("origin", "http://evil.example")],
+    )
+    assert r.json() == ORIGIN_REJECTED
+
+
 @pytest.mark.parametrize(
     "origin", ["http://localhost:5173", "https://127.0.0.1", "http://[::1]:3000", "HTTP://LOCALHOST"]
 )
-def test_local_mode_lets_a_loopback_origin_through(origin):
+@pytest.mark.parametrize("path", ["/v1/nope", "/mcp"])
+def test_local_mode_lets_a_loopback_origin_through(path, origin):
     """Origin 이 없으면 보지 않는다 — 브라우저가 아닌 클라이언트는 보내지 않는다."""
-    r = _local_hit("/v1/nope", [("host", "127.0.0.1:8080"), ("origin", origin)])
-    assert r.status_code == 404
+    assert _passed_the_gate(path, _local_hit(path, [("host", "127.0.0.1:8080"), ("origin", origin)]))
 
 
 def test_exposure_mode_leaves_host_to_the_bearer_token():
