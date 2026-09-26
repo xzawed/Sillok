@@ -543,3 +543,28 @@ def test_a_run_error_is_never_empty(exc):
     # 상수를 넣어도 통과하지 않게 값을 본다 — 클래스 이름이다 (리뷰 지적)
     assert text == type(exc).__name__
     assert "본문" not in text  # 세정은 그대로다 (D31)
+
+
+def test_the_embedding_client_has_explicit_bounds(monkeypatch):
+    """SDK 기본값(읽기 600초·재시도 2)이면 search_docs 요청 하나가 작업 스레드를 30분 넘게 잡았다 (감사 F013).
+    값은 구현이다 (D31) — 여기서는 **기본값에 맡기지 않는다**는 것을 잠근다. 네트워크는 쓰지 않는다."""
+    import types
+
+    import openai
+
+    seen: dict = {}
+
+    class Recorder:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+            self.embeddings = types.SimpleNamespace(
+                create=lambda model, input: types.SimpleNamespace(
+                    data=[types.SimpleNamespace(embedding=[0.0] * 3) for _ in input]
+                )
+            )
+
+    monkeypatch.setattr(openai, "OpenAI", Recorder)
+    assert service._embed(["가"], "not-a-real-key") == [[0.0, 0.0, 0.0]]
+    assert seen["max_retries"] == service.EMBED_MAX_RETRIES == 1
+    assert seen["timeout"].read == service.EMBED_TIMEOUT_SECONDS == 10.0
+    assert seen["timeout"].connect == service.EMBED_CONNECT_SECONDS == 3.0

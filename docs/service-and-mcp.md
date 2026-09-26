@@ -84,6 +84,10 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 문구는 `body larger than 4194304 bytes`. `Content-Length`를 믿지 않고 바이트를 센다(청크 전송도 걸린다).
 **이 문턱이 D7·D67 게이트보다 먼저다** — 토큰 모드에서 인증 없는 큰 본문도 `UNAUTHORIZED`가 아니라 `VALIDATION`이다.
 
+**`/v1` 의 POST 본문은 `Content-Type: application/json` 이어야 한다** (D67, 2026-09-27). 미디어 타입이 다르거나 없으면
+게이트 다음에 `VALIDATION` `content type must be application/json` 이다. `charset` 같은 매개변수는 된다.
+`/mcp` 는 SDK 가 따로 본다.
+
 **봉투가 닿지 않는 한 곳:** HTTP 자체가 깨져 ASGI 앱에 도달하지 못한 요청은
 서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인, 서버 한도를 넘는 긴 URL.
 앱 밖이라 감쌀 수 없다. 클라이언트는 이 한 가지를 예외로 알고 있어야 한다.

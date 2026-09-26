@@ -852,3 +852,78 @@ def test_query_embedding_failure_is_internal_not_a_keyword_fallback(monkeypatch)
     raw = r.text
     for secret in ("sk-live-hunter2", "postgresql://", "hunter2", "Traceback", "RuntimeError"):
         assert secret not in raw, raw
+
+
+# --- Content-Type (D67, 2026-09-27 감사 F105) ------------------------------------------
+
+CT_REJECTED = {"ok": False, "error": {"code": "VALIDATION", "message": "content type must be application/json"}}
+# 업무 POST 다섯. 목록을 여기 둔 것은 **검사의 대상**이지 구현의 사본이 아니다 — 구현은 라우터에서 읽는다.
+JSON_POSTS = ["/v1/events", "/v1/search/docs", "/v1/search/events", "/v1/docs/proposals", "/v1/ingest"]
+RAW_BODY = b'{"project": "t_api"}'
+
+
+def _post(path: str, headers: dict, content: bytes = RAW_BODY, **overrides):
+    """`content=` 로 보낸다 — `json=` 이면 httpx 가 Content-Type 을 붙여 검사할 것이 사라진다."""
+    with TestClient(
+        api.create_app(_config(**overrides)), base_url="http://127.0.0.1:8080", raise_server_exceptions=False
+    ) as client:
+        return client.post(path, content=content, headers=headers)
+
+
+@pytest.mark.parametrize("path", JSON_POSTS)
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        None,  # 브라우저의 타입 없는 Blob — FastAPI 0.132 기본값에만 기대던 자리다
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data; boundary=x",
+        "application/jsonx",
+        "application/vnd.api+json",
+    ],
+)
+def test_v1_posts_refuse_a_body_that_is_not_declared_json(path, content_type, monkeypatch):
+    """단순 요청 CSRF 의 경계를 프레임워크 기본값이 아니라 앱이 쥔다. Service 에 닿기 전에 끝난다."""
+    touched = []
+    monkeypatch.setattr(service, "connect", lambda *a, **k: touched.append(a))
+    headers = {} if content_type is None else {"content-type": content_type}
+    r = _post(path, headers)
+    assert r.status_code == 422
+    assert r.json() == CT_REJECTED
+    assert touched == []
+
+
+@pytest.mark.parametrize("content_type", ["application/json", "application/json; charset=utf-8", "Application/JSON"])
+def test_a_json_body_reaches_the_route(content_type):
+    """매개변수와 대소문자는 된다 — 미디어 타입만 본다. 라우트까지 가서 Service 의 필드 검증에 걸린다."""
+    r = _post("/v1/events", {"content-type": content_type})
+    assert r.status_code == 422
+    assert r.json()["error"]["message"] != CT_REJECTED["error"]["message"]
+    assert "missing required field" in r.json()["error"]["message"]
+
+
+def test_the_host_gate_answers_before_the_content_type():
+    r = _post("/v1/events", {"host": "evil.example"})
+    assert r.json() == HOST_REJECTED
+
+
+def test_the_bearer_gate_answers_before_the_content_type():
+    r = _post("/v1/events", {}, bearer_token="t0ken-for-tests")
+    assert r.status_code == 401
+    ok = _post("/v1/events", {"authorization": "Bearer t0ken-for-tests"}, bearer_token="t0ken-for-tests")
+    assert ok.json() == CT_REJECTED
+
+
+def test_an_unknown_path_is_still_404_without_a_content_type():
+    """대상은 등록된 `/v1` POST 라우트다 — 경로 접두만 보면 없는 경로가 422 가 된다."""
+    r = _post("/v1/nope", {})
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_mcp_is_not_checked_by_the_v1_rule():
+    """`/mcp` 의 본문은 SDK 의 전송 계층이 본다 (D43)."""
+    import json
+
+    r = _post("/mcp", {"accept": MCP_ACCEPT}, content=json.dumps(MCP_BODY).encode())
+    assert CT_REJECTED["error"]["message"] not in r.text

@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -265,6 +266,55 @@ class BodyLimit:
         await response(scope, receive, send)
 
 
+CONTENT_TYPE_MESSAGE = "content type must be application/json"
+
+
+def _declares_json(headers: list[tuple[bytes, bytes]]) -> bool:
+    """Content-Type 이 꼭 하나이고 미디어 타입이 `application/json` 인가. `charset` 같은 매개변수는 된다."""
+    values = [v for k, v in headers if k == b"content-type"]
+    if len(values) != 1:
+        return False
+    return values[0].decode("latin-1").split(";", 1)[0].strip().lower() == "application/json"
+
+
+class JsonBody:
+    """D67 (2026-09-27). `/v1` 의 POST 본문은 `application/json` 이어야 한다.
+
+    단순 요청 CSRF 의 경계다. Content-Type 이 없는 본문은 FastAPI 0.132 의 기본값(`strict_content_type`)에만
+    기대고 있었고, 선언한 하한 0.115 는 그 기본값이 없는 판을 허용했다 (감사 F105). 프레임워크 기본값을 잠가 두지
+    않고 앱이 직접 본다 — D69 가 되풀이 인자에서 한 것과 같은 판단이다.
+
+    **게이트 안쪽이다** — 낯선 Host·토큰 없는 요청은 게이트가 먼저 답한다. 대상은 **등록된** `/v1` POST 라우트이고
+    라우터에서 읽는다 — 경로 접두만 보면 없는 경로가 404 가 아니라 422 가 된다. `/mcp` 는 SDK 가 본다.
+    BodyLimit 과 같은 이유로 순수 ASGI 이고 봉투를 직접 보낸다.
+    """
+
+    def __init__(self, app, routes) -> None:
+        self.app = app
+        self._routes = routes
+        self._paths: frozenset[str] | None = None
+
+    def _json_posts(self) -> frozenset[str]:
+        if self._paths is None:
+            self._paths = frozenset(
+                r.path
+                for r in self._routes()
+                if isinstance(r, APIRoute) and "POST" in r.methods and r.path.startswith("/v1/")
+            )
+        return self._paths
+
+    async def __call__(self, scope, receive, send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope["method"] == "POST"
+            and scope["path"] in self._json_posts()
+            and not _declares_json(scope["headers"])
+        ):
+            await error(ErrorCode.VALIDATION, CONTENT_TYPE_MESSAGE)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 # D67. 로컬 모드가 받는 이름은 이 셋뿐이다. 포트는 어느 것이든 된다 (D66 복제 스택).
 _LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "[::1]"})
 _HOST = re.compile(r"(?P<name>\[[^\]]*\]|[^:\[\]]+)(?::\d+)?")
@@ -337,6 +387,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         redirect_slashes=False,
     )
 
+    # **가장 먼저 더한다 — 게이트 안쪽이 된다** (D67, 2026-09-27). 게이트가 먼저 답하고 그다음에 본문 타입을 본다.
+    app.add_middleware(JsonBody, routes=lambda: app.routes)
     # 둘 중 하나만 선다 (D7·D67). 토큰이 있으면 그것이 경계이고, 없으면 루프백 Host 가 경계다.
     if cfg.auth_required:
         app.add_middleware(BearerGate, token=cfg.bearer_token)

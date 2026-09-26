@@ -613,15 +613,29 @@ class IngestFailed(Exception):
     """run 을 끝까지 가지 못하게 하는 것. 이 예외가 status='failed' 를 만든다."""
 
 
+# 임베딩 요청 하나의 한계 (D31 이 구현으로 둔 값). SDK 기본값이면 search_docs 요청 하나가 HTTP·MCP 가 나눠 쓰는
+# 작업 스레드를 30분 넘게 잡았고 ingest 는 그동안 프로젝트 락을 쥐었다 (감사 F013). healthcheck 는 3초를 기다린다.
+# 백필도 같은 값이다 — 첫 실패에서 멈추고 다음 run 이 잇는다 (D31).
+EMBED_TIMEOUT_SECONDS = 10.0
+EMBED_CONNECT_SECONDS = 3.0
+EMBED_MAX_RETRIES = 1
+
+
 def _embed(texts: list[str], api_key: str) -> list[list[float]]:
     """임베딩 클라이언트는 여기서만 부른다. import 도 여기서 한다.
 
     키가 없으면 이 함수가 아예 불리지 않으므로(D2·D31) 커밋된 구성에서
     의존성이 없어도 검사가 돈다. 키가 있는 상태의 검사 경로는 D31 이 남긴 자리다.
     """
+    import httpx
     from openai import OpenAI
 
-    client = OpenAI(api_key=api_key)
+    # 한계를 명시한다 — SDK 기본값(읽기 600초·재시도 2)에 맡기지 않는다 (D31, 2026-09-27 감사 F013).
+    client = OpenAI(
+        api_key=api_key,
+        timeout=httpx.Timeout(EMBED_TIMEOUT_SECONDS, connect=EMBED_CONNECT_SECONDS),
+        max_retries=EMBED_MAX_RETRIES,
+    )
     result = client.embeddings.create(model=EMBED_MODEL, input=texts)
     return [item.embedding for item in result.data]
 
