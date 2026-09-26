@@ -962,6 +962,37 @@ const CASES = [
     },
   },
   {
+    // 비밀이 든 DSN 은 `redact_dsn` 과 같은 규칙으로 자른다 — userinfo 는 마지막 `@` 앞이다. 한 줄 정규식은 첫 `@`
+    // 앞이 두 글자인 `p@ssw0rd` 를 놓쳤다 (Grok 재검토).
+    id: '87 첫 @ 앞이 짧은 암호의 DSN 도 운다',
+    expect: 'fail',
+    mentions: ['scripts/y.sh : 비밀이 든 DSN'],
+    mutate: write('scripts/y.sh', 'psql postgresql://sillok:p@ssw0rd@db/sillok' + NL),
+  },
+  {
+    // 사용자 자리에 `${…}` 가 있다고 암호까지 치환은 아니다 — 통째로 `${…}` 인 암호만 비켜 간다.
+    id: '88 치환 옆의 진짜 암호도 운다',
+    expect: 'fail',
+    mentions: ['scripts/y.sh : 비밀이 든 DSN'],
+    mutate: write('scripts/y.sh', 'psql postgresql://${USER}:SuperSecret@db/sillok' + NL),
+  },
+  {
+    // `redact_dsn` 이 DSN 으로 보는 모양은 게이트도 본다 (SQLAlchemy 형식).
+    id: '89 postgresql+드라이버 모양의 DSN 도 운다',
+    expect: 'fail',
+    mentions: ['scripts/z.py : 비밀이 든 DSN'],
+    mutate: write('scripts/z.py', 'URL = "postgresql+psycopg://u:hunter22@h:5432/db"' + NL),
+  },
+  {
+    // 대조군. 비켜 가는 것은 셋뿐이다 — 계약 값 `sillok`, 통째로 `${…}` 인 치환(compose), 이미 가린 `***`.
+    id: '90 계약 값·치환·가린 암호는 울지 않는다',
+    expect: 'pass',
+    mutate: append(
+      'docs/spec.md',
+      NL + 'postgresql://sillok:***@127.0.0.1:5432/sillok · postgresql://${U:-a}:${P:-b}@db/x' + NL
+    ),
+  },
+  {
     // 81 의 대조군. git 원천에서도 커밋될 수 있는 파일의 키는 운다.
     id: '82 git 원천에서도 추적될 수 있는 파일의 키는 운다',
     optional: true,   // git 이 없는 머신에서는 git init 을 할 수 없다
@@ -989,6 +1020,7 @@ const CASES = [
   {
     // git 원천은 정규 파일만 본다 — 링크 디렉터리·중첩 저장소를 디렉터리 항목으로 받아 "정규 파일이 아니다" 로
     // 거짓 실패했다 (리뷰 실측). walk 처럼 링크는 색인 제외로만 보인다.
+    // **Windows 에서는 공허하다** — git 이 정션을 목록에 올리지 않는다(주입 실측). Linux 의 git 이 링크를 올린다.
     id: '86 git 원천에서 링크 디렉터리는 거짓 실패하지 않는다',
     expect: 'pass',
     optional: true,   // git 과 링크 권한(윈도우는 정션)이 있어야 만든다

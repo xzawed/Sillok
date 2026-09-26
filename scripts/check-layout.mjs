@@ -795,6 +795,37 @@ if (READMES.every((p) => existsSync(join(ROOT, p)))) {
 //     공개 저장소인데 지금까지 **1회성 실측**뿐이었다. 매번 보는 자리를 만든다.
 //     모양만 본다 — 새로 발명되는 형식은 못 잡는다. `.env` 는 .gitignore 가 막고
 //     예외로 새는 것은 D21 이 막는다. 셋이 겹쳐야 하는 것이지 하나가 다 하지 않는다.
+// 비밀이 든 DSN 은 정규식 하나로 보지 않는다 — `redact_dsn` 과 같은 규칙으로 userinfo 를 자른다 (D21·D56, 2026-09-27).
+// 한 줄 정규식은 `p@ssw0rd`(첫 `@` 앞이 두 글자), `app:sillok@RealSecret`, `${USER}:SuperSecret`,
+// `postgresql+psycopg://` 를 놓쳤다 (Grok 재검토). userinfo 는 공백 전까지의 **마지막 `@`** 앞이고 암호는 첫 `:` 뒤다.
+// 비켜 가는 것은 셋뿐이다 — D16 의 계약 값 `sillok`, 통째로 `${…}` 인 치환(compose), 이미 가린 `***`.
+const DSN_START = /postgres(?:ql)?(?:\+[A-Za-z0-9]+)?:\/\//gi
+// 사용자와 암호를 가르는 `:` 는 `${…}` 치환 **밖**의 첫 `:` 다 — `${POSTGRES_USER:-sillok}` 안의 `:` 가 아니다(compose).
+function colonOutsideSubstitution(userinfo) {
+  let depth = 0
+  for (let i = 0; i < userinfo.length; i++) {
+    if (userinfo.startsWith('${', i)) {
+      depth++
+      i++
+    } else if (userinfo[i] === '}' && depth > 0) depth--
+    else if (userinfo[i] === ':' && depth === 0) return i
+  }
+  return -1
+}
+function dsnSecret(body) {
+  for (const m of body.matchAll(DSN_START)) {
+    const rest = body.slice(m.index + m[0].length).split(/\s/, 1)[0]
+    const at = rest.lastIndexOf('@')
+    if (at < 0) continue
+    const userinfo = rest.slice(0, at)
+    const colon = colonOutsideSubstitution(userinfo)
+    if (colon < 0) continue
+    const password = userinfo.slice(colon + 1)
+    if (!password || password === 'sillok' || password === '***' || /^\$\{[^}]*\}$/.test(password)) continue
+    return m[0] + rest.slice(0, at + 1)
+  }
+  return null
+}
 const SECRETS = [
   [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}/, 'OpenAI 키 모양', 'all'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '사설 키', 'all'],
@@ -803,8 +834,7 @@ const SECRETS = [
   // 여기서 잡으면 "비밀을 가리는지 보는 검사"가 "비밀이 있다"로 붉어진다.
   // 기본 DSN 의 비밀번호는 `sillok` 이고 그것은 D16 이 정한 **계약 값**이다 — 비밀이 아니다.
   // 문서·설정이 그 값을 그대로 보여 주는 것이 계약이므로 그 하나만 비켜 간다.
-  // 암호에 `/`·`:` 가 들어도 본다 (2026-09-27 리뷰: `pa/SeCrEt` 가 그물 밖이었다). userinfo 에 `${VAR}` 치환이 들면 값이 아니다 (compose).
-  [/postgres(?:ql)?:\/\/(?![^\s@]*\$\{)[^\s:/@]+:(?!sillok@)[^\s@]{3,}@/, '비밀이 든 DSN', 'not-tests'],
+  [dsnSecret, '비밀이 든 DSN', 'not-tests'],
 ]
 // **주입 하네스만 비켜 간다.** 그 파일은 이 검사를 밀기 위해 needle 을 들고 있어야 한다 —
 // 검사 11(폐기 문구)이 `scripts/` 를 통째로 비켜 가는 것과 같은 이유이고, 여기서는
@@ -823,13 +853,17 @@ const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
 function commitCandidates() {
   const git = (...args) =>
     execFileSync('git', ['-C', ROOT, ...args], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 28,
     })
   let top
   try {
     top = git('rev-parse', '--show-toplevel').trim()
   } catch (e) {
-    return { files: null, why: e.code === 'ENOENT' ? 'git 없음' : 'git 저장소가 아님' }
+    if (e.code === 'ENOENT') return { files: null, why: 'git 없음' }
+    if (/not a git repository/i.test(String(e.stderr))) return { files: null, why: 'git 저장소가 아님' }
+    // 소유권 의심(safe.directory)·읽을 수 없는 .git 은 walk 로 가면 런북 면제가 되살아난다 — 운다.
+    fail(`검사 17 : git 이 이 나무를 읽지 못했다 — ${String(e.stderr).trim().split('\n')[0] || e.code} (D56)`)
+    return { files: [], why: null }
   }
   // 이 나무가 **자기** git 의 최상위일 때만 믿는다 — 상위 디렉터리의 저장소를 빌려 쓰면 목록이 다른 나무의 것이다.
   if (realpathSync.native(top) !== realpathSync.native(ROOT)) return { files: null, why: 'git 최상위가 아님' }
@@ -859,8 +893,8 @@ for (const p of scanned) {
   const body = secretText(join(ROOT, p))
   for (const [pattern, what, scope] of SECRETS) {
     if (scope === 'not-tests' && p.startsWith('tests/')) continue
-    const hit = pattern.exec(body)
-    if (hit) fail(`${p} : ${what} 이 보인다 — 공개 저장소다 (D56). 조각: ${hit[0].slice(0, 12)}…`)
+    const hit = typeof pattern === 'function' ? pattern(body) : pattern.exec(body)?.[0]
+    if (hit) fail(`${p} : ${what} 이 보인다 — 공개 저장소다 (D56). 조각: ${hit.slice(0, 12)}…`)
   }
 }
 
