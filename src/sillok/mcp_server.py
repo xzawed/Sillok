@@ -235,5 +235,8 @@ def transport(server: MCPServer) -> Transport:
         json_response=True,
         stateless_http=True,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        # D68. 앱의 본문 상한과 같은 수를 **명시한다** — SDK 기본값에 기대면 SDK 가 수를 바꾸는 날
+        # `/mcp` 만 평문 413 으로 갈린다. 같은 수·같은 비교(`>`)라 앱 층이 먼저 거절한다.
+        max_request_body_size=api.BODY_MAX,
     )
     return Transport(server)

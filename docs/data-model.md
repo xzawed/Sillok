@@ -81,13 +81,13 @@ CREATE TABLE kb_chunks (
 CREATE TABLE kb_events (
   id                bigserial PRIMARY KEY,
   project           text NOT NULL,
-  module            text,
+  module            text,          -- 200자 이하 (D68 — 인덱스 행 한도 앞에서 서비스가 막는다)
   kind              text NOT NULL,
   -- success | failure | incident | decision
   title             text NOT NULL,
   summary           text NOT NULL,
-  root_cause        text,
-  resolution        text,
+  root_cause        text,          -- 2000자 이하 (D68 — 천장은 서비스가 건다, CHECK 없음 D25)
+  resolution        text,          -- 2000자 이하 (D68)
   result            text NOT NULL,
   -- success | failure | partial | unknown
   severity          text,
@@ -95,11 +95,11 @@ CREATE TABLE kb_events (
   occurred_at       timestamptz NOT NULL,
   resolved_at       timestamptz,
   source            text NOT NULL DEFAULT 'agent',
-  related_doc_path  text,
+  related_doc_path  text,          -- 200자 이하 (D68)
   payload           jsonb NOT NULL DEFAULT '{}'::jsonb,
   embedding         vector(1536),  -- text-embedding-3-small, summary만. v1 은 채우지 않는다 (D34)
   created_at        timestamptz NOT NULL DEFAULT now(),
-  created_by        text,
+  created_by        text,          -- 200자 이하 (D68)
   tsv               tsvector GENERATED ALWAYS AS
                       (to_tsvector('simple',
                         coalesce(title,'')      || ' ' || coalesce(summary,'')    || ' ' ||
@@ -138,7 +138,7 @@ CREATE TABLE kb_query_logs (
   client      text,       -- http | mcp  (D49. 얼굴이다. 전송은 구분하지 않는다)
   tool        text NOT NULL,
   -- search_docs | search_events  (D48. 검색 둘만 남긴다)
-  query       text,       -- D49. search_events 가 질의 없이 불리면 NULL
+  query       text,       -- D49. search_events 가 질의 없이 불리면 NULL. D68 이후 행은 벗긴 2000자 이하
   filters     jsonb,      -- D49. 실제로 SQL 에 걸린 필터만. project·query·top_k 는 넣지 않는다
   hit_paths   text[],     -- D49. 문서는 결과 순서대로 중복을 접지 않고, 이벤트는 NULL
   hit_count   int,        -- D49. 돌려준 행 수. 고유 문서 수가 아니다

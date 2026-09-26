@@ -104,7 +104,7 @@ Knowledge Service FastAPI. DB의 유일한 문 — 단위는 함수지 HTTP가 �
 이벤트 필수: `project`, `kind`, `title`, `summary`, `occurred_at`, `result`
 `kind`: success | failure | incident | decision
 `result`: success | failure | partial | unknown
-`summary` 2000자 초과 거절
+`summary` 2000자 초과 거절 — 나머지 필드·검색 질의·요청 본문의 천장은 ADR D68
 
 ## 5. 구현해야 하는 표면
 
