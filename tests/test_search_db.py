@@ -570,6 +570,7 @@ def _client():
                 openai_api_key="",
             )
         ),
+        base_url="http://127.0.0.1:8080",  # D67: 토큰 없는 앱은 루프백 Host 만 받는다
         raise_server_exceptions=False,
     )
 

@@ -375,7 +375,7 @@ while the first stack carries on untouched.
 | `docker-compose.yml` · `Dockerfile` | `db` + `api`. A `test` service sits behind a Compose profile |
 | `migrations/` | Versioned raw SQL, applied before the server binds |
 | `src/sillok/service.py` | The only door to the database. Validation lives here, not in DDL constraints |
-| `src/sillok/api.py` | The HTTP adapter — the common envelope and the bearer gate. Holds no SQL |
+| `src/sillok/api.py` | The HTTP adapter — the common envelope, the loopback host gate and the bearer gate. Holds no SQL |
 | `src/sillok/cli.py` | `sillok migrate` · `sillok serve` · `sillok ingest` · `sillok mcp` |
 | `scripts/` | Documentation gate, its fault-injection harness, evidence collector, stage-10 smoke |
 | `tests/` | pytest |

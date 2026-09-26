@@ -177,4 +177,5 @@ DECIDED: POST /v1/ingest = same function over HTTP; operator entry point is the 
 DECIDED: error code -> HTTP: VALIDATION 422, UNAUTHORIZED 401, NOT_FOUND 404,
          CONFLICT 409 (D32: concurrent ingest on the same project), INTERNAL 500
 DECIDED: body is always the {ok, data|error} envelope; INTERNAL message is a fixed string
+DECIDED: no token -> loopback Host/Origin gate on every path, VALIDATION (D67); token -> bearer only
 ```
