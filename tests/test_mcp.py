@@ -4,7 +4,7 @@
 `tests/test_mcp_db.py` 가 한다 (D46).
 
 **클라이언트 SDK 를 쓰지 않고 JSON-RPC 를 그대로 때린다.** 전선 위의 모양이 계약이라서다.
-`Host` 를 바꿔 보내는 이유는 D43 에 적혀 있다 — SDK 의 DNS 리바인딩 보호를 끄지 않는다.
+`Host` 를 바꿔 보내는 이유는 D43·D67 에 적혀 있다 — 로컬 모드의 리바인딩 보호를 끄지 않는다.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from sillok.config import Config
 
 DEAD_DSN = "postgresql://sillok:x@127.0.0.1:1/sillok"
 
-# D43: SDK 의 기본 허용 목록이 받는 주소다 (D16 의 주소이기도 하다).
+# D67: 로컬 모드의 게이트가 받는 루프백 주소다 (D16 의 주소이기도 하다).
 # TestClient 의 기본 Host 는 `testserver` 라 막힌다 — 보호를 끄지 말고 헤더를 고친다.
 HEADERS = {
     "Content-Type": "application/json",
@@ -220,15 +220,38 @@ def test_the_bearer_gate_covers_mcp(client):
     assert response.json()["error"] == {"code": "UNAUTHORIZED", "message": "bearer required"}
 
 
-def test_dns_rebinding_protection_stays_on():
-    """보호를 끄지 않는다 (D43). 검사가 막히면 헤더를 고치는 것이 답이다."""
+def test_local_mode_refuses_a_foreign_host_on_mcp_with_the_envelope():
+    """로컬 모드의 리바인딩 보호는 앱 게이트가 먼저 낸다 (D67) — SDK 의 평문 421 이 아니다.
+
+    검사가 막히면 보호를 끄지 말고 헤더를 고친다 (D43 그대로).
+    """
     with TestClient(api.create_app(_config())) as c:
         response = c.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
             headers={k: v for k, v in HEADERS.items() if k != "Host"},
         )
-    assert response.status_code == 421
+    assert response.status_code == 422
+    assert response.json() == {
+        "ok": False,
+        "error": {"code": "VALIDATION", "message": "host not allowed"},
+    }
+
+
+def test_exposure_mode_serves_mcp_behind_a_real_hostname():
+    """토큰이 있으면 Bearer 가 경계다 (D67). SDK 의 루프백 목록을 남기면 맞는 토큰에도 421 이었다."""
+    cfg = _config(bearer_token="secret-token")
+    with TestClient(api.create_app(cfg), base_url="http://sillok.example.com") as c:
+        headers = {k: v for k, v in HEADERS.items() if k != "Host"}
+        headers["Origin"] = "https://agent.example.com"
+        refused = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                         headers=headers)
+        headers["Authorization"] = "Bearer secret-token"
+        served = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                        headers=headers)
+    assert refused.status_code == 401
+    assert served.status_code == 200, served.text
+    assert {t["name"] for t in served.json()["result"]["tools"]} == set(TOOL_NAMES)
 
 
 # --- 두 얼굴이 같은 것을 탄다 (D46) -------------------------------------------

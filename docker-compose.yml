@@ -45,6 +45,8 @@ services:
     environment:
       # D16. 컨테이너 안에서는 호스트가 db 이고 bind 는 0.0.0.0 이어야
       # 호스트의 127.0.0.1:8080 에 닿는다.
+      # 토큰이 비어 있으면 앱이 루프백 Host 만 받는다 (D67). 그것은 브라우저 리바인딩의 경계이지
+      # 네트워크 경계가 아니다 — 아래 게시를 127.0.0.1 밖으로 넓히려면 SILLOK_BEARER_TOKEN 을 먼저 둔다 (D7).
       DATABASE_URL: postgresql://${POSTGRES_USER:-sillok}:${POSTGRES_PASSWORD:-sillok}@db:5432/${POSTGRES_DB:-sillok}
       SILLOK_HOST: 0.0.0.0
       SILLOK_PORT: 8080

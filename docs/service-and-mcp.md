@@ -26,7 +26,9 @@ MCP와 사람용 UI는 이 HTTP API만 호출한다.
 > `serve`와 `ingest`가 각자 DB 세션을 여는 문제는 **D32가 세션 advisory 락으로 닫았다** — 같은 project 는 직렬화된다.
 
 로컬 Compose 기본: Service `http://127.0.0.1:8080`.  
-인증: 로컬 무인증. HTTP를 외부에 열 때만 `Authorization: Bearer <token>`.
+인증: 로컬 무인증. HTTP를 외부에 열 때만 `Authorization: Bearer <token>`.  
+토큰이 없으면 모든 경로가 루프백 `Host`(`localhost`·`127.0.0.1`·`[::1]`, 포트 무관)만 받고,
+`Origin` 이 있으면 같은 세 이름만 받는다 — 브라우저의 DNS 리바인딩을 막는 경계다 (D67).
 
 `get_file`은 설정된 workspace 경로의 파일을 읽는다.  
 `save_doc`은 Git에 쓰지 않고 제안 본문/diff만 반환한다.  
@@ -48,7 +50,7 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 
 | 코드 | HTTP | v1에서 언제 |
 |---|---|---|
-| `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락 |
+| `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락. 토큰 없는 로컬 모드에서 루프백이 아닌 `Host`·`Origin` — 문구는 고정 `host not allowed` · `origin not allowed` (D67) |
 | `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
 | `NOT_FOUND` | 404 | **하나를 지목한 조회**에 답이 없을 때. 집합 질의는 404가 아니라 빈 결과다 (D35) |
 | `CONFLICT` | 409 | 발신자가 **둘**이다. ① 같은 project 의 ingest 가 이미 돌고 있다 (D32) — `message`는 고정 문구 `ingest already running for this project`. ② `save_doc` 의 `base_hash` 가 현재 내용과 다르다 (D38). **①의 고정 문구를 ②에 쓰지 않는다** |
@@ -363,6 +365,8 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 `/mcp` 아래의 본문은 JSON-RPC이고 **`{ok, data|error}` 봉투 계약 밖이다.** 봉투는 `/v1`의 본문 계약이다.
 `/mcp/아무거나`는 MCP가 아니라 **이 앱의 404 봉투**로 돌아온다 — 마운트가 아니라 두 경로만 이었기 때문이다.
 D7 게이트는 앱 미들웨어라 `/mcp`도 덮는다. stdio는 부모 프로세스의 파이프라 토큰이 없다.
+토큰이 없으면 D67 의 `Host` 게이트가 같은 자리에서 `/mcp` 를 먼저 거절한다(봉투, 422).
+토큰이 있으면 SDK 의 리바인딩 보호도 끈다 — 진짜 호스트 이름 뒤에서 돌아야 한다 (D67).
 
 ### 인자 (D42)
 

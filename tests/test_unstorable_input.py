@@ -51,7 +51,10 @@ def _config(**overrides) -> Config:
 
 @pytest.fixture
 def client() -> TestClient:
-    with TestClient(api.create_app(_config()), raise_server_exceptions=False) as c:
+    # D67: 토큰 없는 앱은 루프백 Host 만 받는다.
+    with TestClient(
+        api.create_app(_config()), base_url="http://127.0.0.1:8080", raise_server_exceptions=False
+    ) as c:
         yield c
 
 

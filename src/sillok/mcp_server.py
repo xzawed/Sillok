@@ -19,6 +19,7 @@ import logging
 from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import __version__, api, service
 from .config import Config
@@ -218,13 +219,24 @@ class Transport:
         await self._server.session_manager.handle_request(scope, receive, send)
 
 
-def transport(server: MCPServer) -> Transport:
+def transport(server: MCPServer, *, exposed: bool) -> Transport:
     """전송을 만든다. **세션을 두지 않고 응답은 JSON 이다** (D43).
 
     `session_manager` 는 `streamable_http_app()` 을 한 번 부른 뒤에야 생긴다(실측).
     그래서 여기서 부르고 만들어진 앱은 쓰지 않는다 — 우리가 쓰는 것은 세션 관리자뿐이다.
+
+    `exposed` 는 토큰이 설정됐다는 뜻이다 (D7·D67). 그때는 Bearer 가 경계라 SDK 의 루프백
+    목록을 끈다 — 남겨 두면 진짜 호스트 이름 뒤에서 맞는 토큰에도 421 이다.
+    로컬 모드에서는 SDK 기본값을 그대로 둔다. 앱의 HostGate 가 먼저 봉투로 거절하므로
+    관측되지 않는 뒷문이다.
     """
+    security = (
+        TransportSecuritySettings(enable_dns_rebinding_protection=False) if exposed else None
+    )
     server.streamable_http_app(
-        streamable_http_path="/", json_response=True, stateless_http=True
+        streamable_http_path="/",
+        json_response=True,
+        stateless_http=True,
+        transport_security=security,
     )
     return Transport(server)

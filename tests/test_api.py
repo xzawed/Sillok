@@ -92,7 +92,8 @@ def _client(**overrides) -> TestClient:
     async def _boom():
         raise RuntimeError("암호는 hunter2 이고 DSN 은 postgresql://u:pw@h/db 다")
 
-    return TestClient(app, raise_server_exceptions=False)
+    # D67: 토큰 없는 앱은 루프백 Host 만 받는다. TestClient 기본값 `testserver` 는 막힌다.
+    return TestClient(app, base_url="http://127.0.0.1:8080", raise_server_exceptions=False)
 
 
 # --- 봉투 -----------------------------------------------------------------
@@ -241,7 +242,9 @@ def test_http_exception_5xx_does_not_leak_detail():
 
         raise HTTPException(status_code=502, detail="postgresql://u:hunter2@h/db")
 
-    r = TestClient(app, raise_server_exceptions=False).get("/t/raise5xx")
+    r = TestClient(
+        app, base_url="http://127.0.0.1:8080", raise_server_exceptions=False
+    ).get("/t/raise5xx")
     assert r.status_code == 500
     assert "hunter2" not in r.text
     assert r.json()["error"] == {"code": "INTERNAL", "message": "internal error"}
@@ -492,6 +495,113 @@ def test_non_ascii_token_still_accepts_the_right_value():
     # 클라이언트가 실제로 보내는 것은 UTF-8 바이트다.
     r = client.get("/v1/nope", headers={"Authorization": "Bearer 비밀토큰".encode()})
     assert r.status_code == 404  # 게이트는 통과, 라우트가 없어 404
+
+
+# --- 로컬 모드의 Host·Origin 게이트 (D67) -------------------------------------
+#
+# 토큰이 없으면 브라우저의 DNS 리바인딩이 경계를 넘는 길은 낯선 `Host` 다. D43 은 그것을 `/mcp` 에만
+# 막았고 같은 Service 를 내는 `/v1` 이 열려 있었다(2026-09-26 감사 실측: 낯선 Host 의 POST 가 원장에 행을 남겼다).
+# 검사는 **없는 경로와 `/mcp` 까지** 본다 — 라우트 의존성이면 없는 경로가 빠진다.
+
+HOST_REJECTED = {"ok": False, "error": {"code": "VALIDATION", "message": "host not allowed"}}
+ORIGIN_REJECTED = {"ok": False, "error": {"code": "VALIDATION", "message": "origin not allowed"}}
+MCP_BODY = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+MCP_ACCEPT = "application/json, text/event-stream"
+
+
+def _local_hit(path: str, headers, **overrides):
+    """토큰 없는 앱에 요청 하나. `/mcp` 는 POST 로, 나머지는 GET 으로."""
+    client = TestClient(
+        api.create_app(_config(**overrides)),
+        base_url="http://127.0.0.1:8080",
+        raise_server_exceptions=False,
+    )
+    if path == "/mcp":
+        extra = [("accept", MCP_ACCEPT)]
+        return client.post(path, json=MCP_BODY, headers=list(headers) + extra)
+    return client.get(path, headers=list(headers))
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "evil.example",
+        "evil.example:8080",
+        "127.0.0.1.evil.example",
+        "localhost.",  # 끝의 점도 다른 이름이다
+        "0.0.0.0:8080",
+        "user@127.0.0.1",
+        "testserver",  # TestClient 기본값 — 검사를 위해 코드에 예외를 두지 않는다
+        "api:8080",  # compose 네트워크 안의 이름. 쓰려면 토큰을 켠다
+    ],
+)
+@pytest.mark.parametrize("path", ["/v1/status?project=t_api", "/v1/nope", "/mcp"])
+def test_local_mode_rejects_a_foreign_host_on_every_path(path, host):
+    r = _local_hit(path, [("host", host)])
+    assert r.status_code == 422
+    assert r.json() == HOST_REJECTED
+    assert host not in r.text  # 받은 값을 되싣지 않는다
+
+
+def test_local_mode_rejects_two_host_headers():
+    """하나가 루프백이어도 거절한다. 첫 값만 보는 우회를 막는다 (BearerGate 와 같은 이유)."""
+    r = _local_hit("/v1/nope", [("host", "127.0.0.1:8080"), ("host", "evil.example")])
+    assert r.json() == HOST_REJECTED
+
+
+@pytest.mark.parametrize(
+    "host", ["127.0.0.1", "127.0.0.1:8080", "localhost", "LocalHost:1234", "[::1]", "[::1]:8090"]
+)
+def test_local_mode_lets_loopback_hosts_through(host):
+    """포트는 어느 것이든 된다 — D66 복제 스택은 다른 포트로 뜬다."""
+    r = _local_hit("/v1/nope", [("host", host)])
+    assert r.status_code == 404  # 게이트는 통과, 라우트가 없어 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://evil.example",
+        "http://127.0.0.1.evil.example:8080",
+        "null",  # 샌드박스 iframe·file: 이 보내는 값
+        "http://localhost:8080/path",
+        "ftp://localhost",
+    ],
+)
+@pytest.mark.parametrize("path", ["/v1/nope", "/mcp"])
+def test_local_mode_rejects_a_foreign_origin(path, origin):
+    r = _local_hit(path, [("host", "127.0.0.1:8080"), ("origin", origin)])
+    assert r.status_code == 422
+    assert r.json() == ORIGIN_REJECTED
+
+
+@pytest.mark.parametrize(
+    "origin", ["http://localhost:5173", "https://127.0.0.1", "http://[::1]:3000", "HTTP://LOCALHOST"]
+)
+def test_local_mode_lets_a_loopback_origin_through(origin):
+    """Origin 이 없으면 보지 않는다 — 브라우저가 아닌 클라이언트는 보내지 않는다."""
+    r = _local_hit("/v1/nope", [("host", "127.0.0.1:8080"), ("origin", origin)])
+    assert r.status_code == 404
+
+
+def test_exposure_mode_leaves_host_to_the_bearer_token():
+    """토큰이 있으면(D7 노출) 게이트를 설치하지 않는다 — 진짜 호스트 이름 뒤에서도 돌아야 한다.
+
+    브라우저는 Authorization 을 스스로 붙이지 않으므로 리바인딩된 페이지는 토큰을 넘지 못한다.
+    """
+    client = TestClient(
+        api.create_app(_config(bearer_token="secret-token")),
+        base_url="http://sillok.example.com",
+        raise_server_exceptions=False,
+    )
+    passed = client.get(
+        "/v1/nope",
+        headers={"Authorization": "Bearer secret-token", "Origin": "https://agent.example.com"},
+    )
+    assert passed.status_code == 404
+    refused = client.get("/v1/nope")
+    assert refused.status_code == 401
 
 
 # --- 7단계 라우트의 HTTP 층 (D21 · D35 · D38) --------------------------------

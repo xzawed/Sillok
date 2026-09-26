@@ -16,6 +16,7 @@ MCP 비노출·UI 비범위이고 지목 읽기는 `get_file` 이 한다.
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -210,6 +211,45 @@ class BearerGate(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# D67. 로컬 모드가 받는 이름은 이 셋뿐이다. 포트는 어느 것이든 된다 (D66 복제 스택).
+_LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "[::1]"})
+_HOST = re.compile(r"(?P<name>\[[^\]]*\]|[^:\[\]]+)(?::\d+)?")
+_ORIGIN = re.compile(r"(?:http|https)://(?P<host>[^/]+)", re.IGNORECASE)
+
+
+def _loopback_host(value: str) -> bool:
+    m = _HOST.fullmatch(value)
+    return m is not None and m.group("name").lower() in _LOOPBACK_NAMES
+
+
+def _loopback_origin(value: str) -> bool:
+    m = _ORIGIN.fullmatch(value)
+    return m is not None and _loopback_host(m.group("host"))
+
+
+class HostGate(BaseHTTPMiddleware):
+    """D67 게이트. **토큰이 없을 때만** 켜진다 — BearerGate 와 서로를 배제한다.
+
+    브라우저의 DNS 리바인딩은 `Host` 를 공격자 이름으로 바꿔 루프백 서비스에 같은 출처로 닿는다.
+    D43 은 그것을 `/mcp` 에만 막았고 같은 Service 를 내는 `/v1` 이 열려 있었다.
+    BearerGate 와 같은 이유로 미들웨어다 — 없는 경로와 `/mcp` 까지 덮는다.
+
+    **브라우저 경계이지 네트워크 경계가 아니다.** 모든 인터페이스에 연 포트로 `Host: 127.0.0.1` 을
+    붙이는 비브라우저 클라이언트는 통과한다. 외부에 열 때의 경계는 토큰이다 (D7).
+    거절 문구는 고정이다 — 받은 값을 되싣지 않는다.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        hosts = request.headers.getlist("host")
+        if len(hosts) != 1 or not _loopback_host(hosts[0]):
+            return error(ErrorCode.VALIDATION, "host not allowed")
+        # Origin 은 브라우저만 보낸다. 없으면 보지 않는다.
+        origins = request.headers.getlist("origin")
+        if origins and (len(origins) != 1 or not _loopback_origin(origins[0])):
+            return error(ErrorCode.VALIDATION, "origin not allowed")
+        return await call_next(request)
+
+
 def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or Config(
         database_url="", host="", port=0, workspace="", bearer_token="", openai_api_key=""
@@ -220,7 +260,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     from . import mcp_server as mcp_tools
 
     mcp = mcp_tools.build(cfg)
-    mcp_transport = mcp_tools.transport(mcp)
+    mcp_transport = mcp_tools.transport(mcp, exposed=cfg.auth_required)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -243,8 +283,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         redirect_slashes=False,
     )
 
+    # 둘 중 하나만 선다 (D7·D67). 토큰이 있으면 그것이 경계이고, 없으면 루프백 Host 가 경계다.
     if cfg.auth_required:
         app.add_middleware(BearerGate, token=cfg.bearer_token)
+    else:
+        app.add_middleware(HostGate)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
