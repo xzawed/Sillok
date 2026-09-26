@@ -12,15 +12,23 @@ import psycopg
 import pytest
 
 from sillok import workspace
+from sillok.migrations import redact_dsn
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://sillok:sillok@127.0.0.1:5432/sillok")
 
-SKIP_REASON = (
-    f"Postgres 에 붙을 수 없다: {DSN}. 호스트에서 돌리려면 5432 게시가 필요한데"
-    " D16 이 그것을 막는다 — DB 검사까지 돌리려면"
-    " `docker compose --profile test run --rm test` (D22)."
-    " 호스트에서 그대로 돌리려면 compose.override.example.yml 을 복사한다."
-)
+
+def skip_reason(dsn: str) -> str:
+    """`pytest -rs` 가 검사마다 찍는 사유다. DSN 은 가려서 싣는다 — 예전에는 암호째 실었다 (2026-09-27 감사 F023).
+    접두 `Postgres 에 붙을 수 없다` 는 scripts/evidence.mjs 가 찾는 판정 문자열이다 — 글자를 바꾸지 않는다."""
+    return (
+        f"Postgres 에 붙을 수 없다: {redact_dsn(dsn)}. 호스트에서 돌리려면 5432 게시가 필요한데"
+        " D16 이 그것을 막는다 — DB 검사까지 돌리려면"
+        " `docker compose --profile test run --rm test` (D22)."
+        " 호스트에서 그대로 돌리려면 compose.override.example.yml 을 복사한다."
+    )
+
+
+SKIP_REASON = skip_reason(DSN)
 
 
 def db_available() -> bool:

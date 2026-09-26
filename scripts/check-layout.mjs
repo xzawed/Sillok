@@ -5,7 +5,8 @@
 // ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
-import { readFileSync as readOpened, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync as readOpened, readdirSync, realpathSync, statSync, lstatSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -794,6 +795,60 @@ if (READMES.every((p) => existsSync(join(ROOT, p)))) {
 //     공개 저장소인데 지금까지 **1회성 실측**뿐이었다. 매번 보는 자리를 만든다.
 //     모양만 본다 — 새로 발명되는 형식은 못 잡는다. `.env` 는 .gitignore 가 막고
 //     예외로 새는 것은 D21 이 막는다. 셋이 겹쳐야 하는 것이지 하나가 다 하지 않는다.
+// 비밀이 든 DSN 은 정규식 하나로 보지 않는다 — `redact_dsn` 과 같은 규칙으로 userinfo 를 자른다 (D21·D56, 2026-09-27).
+// 한 줄 정규식은 `p@ssw0rd`(첫 `@` 앞이 두 글자), `app:sillok@RealSecret`, `${USER}:SuperSecret`,
+// `postgresql+psycopg://` 를 놓쳤다 (Grok 재검토). userinfo 는 공백 전까지의 **마지막 `@`** 앞이고 암호는 첫 `:` 뒤다.
+// 비켜 가는 것은 셋뿐이다 — D16 의 계약 값 `sillok`, 통째로 `${…}` 인 치환(compose), 이미 가린 `***`.
+const DSN_START = /postgres(?:ql)?(?:\+[A-Za-z0-9]+)?:\/\//gi
+// 사용자와 암호를 가르는 `:` 는 **닫힌** `${…}` 치환 밖의 첫 `:` 다 — `${POSTGRES_USER:-sillok}` 안의 `:` 가 아니다(compose).
+// 닫히지 않은 `${` 는 치환이 아니라 글자다 — 그것을 치환으로 보면 뒤의 `:` 를 못 찾아 암호를 놓쳤다 (Grok 재검토).
+function colonOutsideSubstitution(userinfo) {
+  for (let i = 0; i < userinfo.length; i++) {
+    if (userinfo.startsWith('${', i)) {
+      const close = userinfo.indexOf('}', i + 2)
+      if (close > 0) {
+        i = close
+        continue
+      }
+    }
+    if (userinfo[i] === ':') return i
+  }
+  return -1
+}
+// 비켜 가는 암호 — D16 의 계약 값, 이미 가린 표시, 그리고 **기본값이 그 둘이거나 빈** `${…}` 치환(compose).
+// 기본값에 진짜 암호를 적은 `${P:-진짜암호}` 는 비켜 가지 않는다 (Grok 재검토).
+function harmlessPassword(password) {
+  if (password === '' || password === 'sillok' || password === '***') return true
+  const sub = /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::?-(.*))?\}$/.exec(password)
+  return sub !== null && (sub[1] === undefined || ['', 'sillok', '***'].includes(sub[1]))
+}
+function dsnSecret(body) {
+  for (const m of body.matchAll(DSN_START)) {
+    const rest = body.slice(m.index + m[0].length).split(/\s/, 1)[0]
+    const hit = m[0] + rest
+    const at = rest.lastIndexOf('@')
+    if (at >= 0) {
+      const userinfo = rest.slice(0, at)
+      const colon = colonOutsideSubstitution(userinfo)
+      if (colon >= 0 && !harmlessPassword(userinfo.slice(colon + 1))) return hit
+    }
+    // 질의의 암호도 본다 — 면제된 userinfo 뒤의 `?password=진짜암호` 가 숨었다. 키는 퍼센트 인코딩될 수 있다.
+    const query = rest.indexOf('?')
+    if (query < 0) continue
+    for (const pair of rest.slice(query + 1).split('&')) {
+      const eq = pair.indexOf('=')
+      if (eq < 0) continue
+      let key = pair.slice(0, eq)
+      try {
+        key = decodeURIComponent(key)
+      } catch {
+        // 풀 수 없는 키는 글자 그대로 본다
+      }
+      if (['password', 'sslpassword'].includes(key.toLowerCase()) && !harmlessPassword(pair.slice(eq + 1))) return hit
+    }
+  }
+  return null
+}
 const SECRETS = [
   [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}/, 'OpenAI 키 모양', 'all'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '사설 키', 'all'],
@@ -802,7 +857,7 @@ const SECRETS = [
   // 여기서 잡으면 "비밀을 가리는지 보는 검사"가 "비밀이 있다"로 붉어진다.
   // 기본 DSN 의 비밀번호는 `sillok` 이고 그것은 D16 이 정한 **계약 값**이다 — 비밀이 아니다.
   // 문서·설정이 그 값을 그대로 보여 주는 것이 계약이므로 그 하나만 비켜 간다.
-  [/postgres(?:ql)?:\/\/[^\s:/@]+:(?!sillok@)[^\s:/@]{3,}@/, '비밀이 든 DSN', 'not-tests'],
+  [dsnSecret, '비밀이 든 DSN', 'not-tests'],
 ]
 // **주입 하네스만 비켜 간다.** 그 파일은 이 검사를 밀기 위해 needle 을 들고 있어야 한다 —
 // 검사 11(폐기 문구)이 `scripts/` 를 통째로 비켜 가는 것과 같은 이유이고, 여기서는
@@ -810,18 +865,60 @@ const SECRETS = [
 const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
 // 검사 11 과 같은 이유로 런북 산출물을 뺀다. D56 이 막는 것은 **저장소에 들어온** 모양이고,
 // 그 둘은 `.gitignore` 가 이미 막는다 — 겹치는 세 층 중 첫 층이 그 파일들을 담당한다.
-const scanned = all.filter(
-  (p) =>
-    p !== SECRET_SCAN_EXEMPT &&
-    !RUNBOOK_ARTIFACTS(p) &&
-    /\.(md|py|mjs|js|yml|yaml|sql|toml|example|txt|json)$/.test(p)
-)
+//
+// **대상은 커밋될 수 있는 파일 전부다** (D56, 2026-09-27) — git 의 추적 파일과 무시되지 않은 미추적 파일.
+// 확장자 허용 목록을 두었더니 `Dockerfile` 의 `ENV`, 확장자 없는 `id_rsa`, `.sh`·`.cfg`, `.env.production` 이
+// 그물 밖이었다 (감사 F109). 무시된 파일은 커밋되지 않으므로 보지 않는다 — walk 로 전부 보면 키가 든 로컬 `.env`
+// 하나가 매번 게이트를 붉힌다(실측). git 이 없는 나무(하네스 사본)는 walk 로 물러선다.
+// walk 로 물러서는 것은 **git 이 없거나 이 나무가 자기 git 의 최상위가 아닐 때뿐**이다. 그 밖의 git 실패는 조용히
+// walk 로 가지 않고 운다 — 미추적 경로가 1 MiB 를 넘자 기본 버퍼가 넘쳐 walk 로 갔고, walk 는 node_modules 를
+// 건너뛰어 커밋될 수 있는 키를 못 봤다 (2026-09-27 리뷰 실측).
+function commitCandidates() {
+  // LC_ALL=C — 아래가 git 의 영어 문구(`not a git repository`)로 가르므로 현지화된 메시지가 판정을 빗나가게 두지 않는다.
+  const git = (...args) =>
+    execFileSync('git', ['-C', ROOT, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 28, env: { ...process.env, LC_ALL: 'C' },
+    })
+  let top
+  try {
+    top = git('rev-parse', '--show-toplevel').trim()
+  } catch (e) {
+    if (e.code === 'ENOENT') return { files: null, why: 'git 없음' }
+    if (/not a git repository/i.test(String(e.stderr))) return { files: null, why: 'git 저장소가 아님' }
+    // 소유권 의심(safe.directory)·읽을 수 없는 .git 은 walk 로 가면 런북 면제가 되살아난다 — 운다.
+    fail(`검사 17 : git 이 이 나무를 읽지 못했다 — ${String(e.stderr).trim().split('\n')[0] || e.code} (D56)`)
+    return { files: [], why: null }
+  }
+  // 이 나무가 **자기** git 의 최상위일 때만 믿는다 — 상위 디렉터리의 저장소를 빌려 쓰면 목록이 다른 나무의 것이다.
+  if (realpathSync.native(top) !== realpathSync.native(ROOT)) return { files: null, why: 'git 최상위가 아님' }
+  try {
+    // 정규 파일만 본다 — 중첩 저장소·서브모듈은 디렉터리 항목으로, 링크는 링크로 나온다. walk 도 링크를 따라가지 않는다.
+    const files = git('ls-files', '-z', '--cached', '--others', '--exclude-standard')
+      .split('\0')
+      .filter((p) => p && existsSync(join(ROOT, p)) && lstatSync(join(ROOT, p)).isFile())
+    return { files, why: null }
+  } catch (e) {
+    fail(`검사 17 : git 이 커밋될 파일 목록을 주지 못했다 — ${e.code ?? e.message} (D56)`)
+    return { files: [], why: null }
+  }
+}
+const { files: committable, why: walkWhy } = commitCandidates()
+const secretSource = committable ? `git ${committable.length}개` : `walk ${all.length}개 (${walkWhy})`
+// 런북 산출물 면제는 walk 에서만 뜻이 있다 — git 원천에서는 무시된 것이 이미 빠지고, `git add -f` 로 강제
+// 추적한 덤프·오버라이드는 커밋될 것이므로 **본다** (리뷰 실측).
+const scanned = committable
+  ? committable.filter((p) => p !== SECRET_SCAN_EXEMPT)
+  : all.filter((p) => p !== SECRET_SCAN_EXEMPT && !RUNBOOK_ARTIFACTS(p))
+// 이진·UTF-16 파일도 읽는다 — NUL 을 지운 뒤 본다. NUL 하나로 파일을 통째로 건너뛰면 키가 든 문서가 숨었고
+// (Grok 리뷰), Windows PowerShell 5.1 의 `>` 가 쓰는 UTF-16 은 글자 사이의 NUL 때문에 모양이 보이지 않았다(리뷰 실측).
+// 모양들은 ASCII 라 UTF-16 을 풀 것 없이 NUL 을 지우면 드러난다. 긴 ASCII 줄이라 이진 바이트가 우연히 맞기는 어렵다.
+const secretText = (path) => readFileSync(path, 'utf8').replaceAll('\0', '')
 for (const p of scanned) {
-  const body = readFileSync(join(ROOT, p), 'utf8')
+  const body = secretText(join(ROOT, p))
   for (const [pattern, what, scope] of SECRETS) {
     if (scope === 'not-tests' && p.startsWith('tests/')) continue
-    const hit = pattern.exec(body)
-    if (hit) fail(`${p} : ${what} 이 보인다 — 공개 저장소다 (D56). 조각: ${hit[0].slice(0, 12)}…`)
+    const hit = typeof pattern === 'function' ? pattern(body) : pattern.exec(body)?.[0]
+    if (hit) fail(`${p} : ${what} 이 보인다 — 공개 저장소다 (D56). 조각: ${hit.slice(0, 12)}…`)
   }
 }
 
@@ -1006,6 +1103,7 @@ console.log(`FM 없음     ${readmes.join(', ')}`)
 console.log(`doc_type    ${JSON.stringify(seen.doc_type)}`)
 console.log(`status      ${JSON.stringify(seen.status)}`)
 console.log(`상대 링크   ${links}개`)
+console.log(`비밀 검사   ${secretSource}`)
 
 if (problems.length) {
   console.error(`\n실패 ${problems.length}건:`)

@@ -93,11 +93,144 @@ def test_duplicate_version_is_an_error(tmp_path):
         ("postgresql://h/db?Password=MixedCase", "MixedCase"),
         ("host=127.0.0.1 port=5432 user=sillok password=secret dbname=sillok", "secret"),
         ("host=127.0.0.1 user=sillok password='se cret' dbname=sillok", "se cret"),
+        # 2026-09-27 감사 F061 이 잰 모양들. 첫 '/' 로 authority 를 끊으면 암호의 날것 '/' 뒤가 나갔다.
+        ("postgresql://sillok:pa/SeCrEt@127.0.0.1:5432/sillok", "SeCrEt"),
+        # 값 안의 '://' 가 URI 규칙을 속였다 — 키워드 규칙이 아예 돌지 않았다.
+        ("postgresql://u:sec://SeCrEt@h/db", "SeCrEt"),
+        ("host=h user=u password=sec://SeCrEt dbname=db", "SeCrEt"),
+        ("host=h password=http://SeCrEt@evil dbname=db", "SeCrEt"),
+        # sslpassword 도 비밀이다.
+        ("postgresql://u@h/db?sslpassword=SeCrEt", "SeCrEt"),
+        ("host=h sslpassword=SeCrEt", "SeCrEt"),
+        # 큰따옴표는 libpq 의 인용이 아니지만 사람이 그렇게 쓰면 뒷조각이 샜다.
+        ('host=h password="Se CrEt" dbname=db', "CrEt"),
+        # _clip 이 산문을 넘긴다 — 두 번째 URL·두 번째 DSN 도 가린다.
+        ("failed https://api.openai.com/v1 then postgresql://u:SeCrEt@h/db", "SeCrEt"),
+        ("a postgresql://u:SeCrEt@h/db b postgresql://v:OtHeR@h2/db", "OtHeR"),
+        # 리뷰가 잰 모양들 (2026-09-27). 암호 안의 `postgres://` 가 새 URI 로 읽혀 암호가 사용자 이름이 됐다.
+        ("postgresql://u:postgres://SeCrEt@h/db", "SeCrEt"),
+        ("postgresql://u:xpostgresql://SeCrEt@h/db", "SeCrEt"),
+        # 질의 규칙이 먼저 돌면 암호 뒤의 `@` 를 삼켜 URI 규칙이 userinfo 를 못 찾았다.
+        ("postgresql://u:SeCrEt?password=x@h/db", "SeCrEt"),
+        ("postgresql://u:SeCrEt&password=1@h/db", "SeCrEt"),
+        # 닫히지 않은 작은따옴표는 끝까지다. 큰따옴표는 libpq 의 인용이 아니다 — `"ab"SeCrEt` 는 한 값이다.
+        ("host=h password='Se CrEt dbname=db", "CrEt"),
+        ('host=h password="ab"SeCrEt dbname=x', "SeCrEt"),
+        ('host=h password=""SeCrEt', "SeCrEt"),
+        # 인용 없는 값의 `\ ` 는 공백이다. 질의 값의 `#` 은 조각이 아니다. 질의 키는 퍼센트 인코딩될 수 있다.
+        ("host=h password=ab\\ SeCrEt", "SeCrEt"),
+        ("postgresql://u@h/db?password=ab#SeCrEt", "SeCrEt"),
+        ("postgresql://u@h/db?%70assword=SeCrEt", "SeCrEt"),
+        # libpq 가 모르는 scheme 도 DSN 모양이다 (SQLAlchemy 형식).
+        ("postgresql+psycopg://u:SeCrEt@127.0.0.1:1/db", "SeCrEt"),
     ],
 )
 def test_redact_never_leaks_the_password(dsn, password):
     assert password in dsn, "테스트 입력이 그 암호를 실제로 담고 있어야 한다"
     assert password not in migrations.redact_dsn(dsn)
+
+
+def test_redaction_does_not_swallow_the_prose_after_a_dsn():
+    """userinfo 는 공백에서 끝난다 — 예전에는 뒤의 산문 속 `@` 까지 지워 진단 문장이 사라졌다 (리뷰)."""
+    text = "connection to postgresql://u:SeCrEt@h/db failed: mail admin@example.com"
+    assert migrations.redact_dsn(text) == "connection to postgresql://u:***@h/db failed: mail admin@example.com"
+    assert migrations.redact_dsn("postgresql://h:5432/db error: contact foo@bar") == (
+        "postgresql://h:5432/db error: contact foo@bar"
+    )
+
+
+# 파싱에서 실패하는 DSN — 네트워크 없이 곧바로 드라이버가 구문 오류를 낸다.
+# 그 문구는 DSN 조각(때로 URI 전체)을 따옴표로 되읊는다 (2026-09-27 감사 F061). (DSN, 새면 안 되는 조각)
+MALFORMED = [
+    ("postgresql://u:SeCrEt@[::1", "SeCrEt"),
+    ("postgresql://u:SeCrEt@127.0.0.1:1/db?bogus=1", "SeCrEt"),
+    ("postgresql://u:Se%ZZCrEt@127.0.0.1:1/db", "Se%ZZCrEt"),
+    ("host=127.0.0.1 port=1 password=SeCrEt bogus", "SeCrEt"),
+    # 닫히지 않은 따옴표 — 가리기가 libpq 와 갈라지는 자리라 DSN 자체를 싣지 않는다 (리뷰 실측).
+    ("host=127.0.0.1 user=u password='correct horse SeCrEt dbname=db", "SeCrEt"),
+    ("postgresql+psycopg://u:SeCrEt@127.0.0.1:1/db", "SeCrEt"),
+]
+
+
+@pytest.mark.parametrize(("dsn", "needle"), MALFORMED)
+def test_a_malformed_dsn_fails_as_connection_failed_without_the_password(dsn, needle):
+    """예전에는 `OperationalError` 만 잡아 구문 오류가 트레이스백째 올라가 암호를 실었다. 이제 DSN 도 싣지 않는다."""
+    import traceback
+
+    with pytest.raises(migrations.ConnectionFailed) as caught:
+        migrations.apply(dsn)
+    assert str(caught.value) == "DB 에 붙을 수 없다: DATABASE_URL 형식을 읽을 수 없다"
+    assert needle not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.parametrize(("dsn", "needle"), MALFORMED)
+def test_the_service_connection_does_not_echo_a_malformed_dsn(dsn, needle):
+    """`sillok ingest` 는 러너를 거치지 않고 Service 로 붙는다. 형은 그대로 두고(D21 이 INTERNAL 로 접는다) 문구만 버린다."""
+    import traceback
+
+    import psycopg
+
+    from sillok import service
+
+    with pytest.raises(psycopg.ProgrammingError) as caught:
+        service.connect(dsn)
+    assert str(caught.value) == "DATABASE_URL 형식을 읽을 수 없다"
+    assert needle not in "".join(traceback.format_exception(caught.value))
+
+
+# libpq 는 userinfo 를 **첫 `@`** 에서 끊는다. 암호 `pa@SeCrEt` 의 나머지가 host 로 읽혀 드라이버 문구가
+# `failed to resolve host 'SeCrEt@db'` 로 되읊었다 (리뷰 실측, 이미지 안에서). 문구는 DSN 모양이 아니다.
+AT_DSN = "postgresql://sillok:pa@SeCrEt@db:5432/sillok"
+AT_TEXT = "failed to resolve host 'SeCrEt@db': [Errno -2] Name or service not known"
+
+
+def test_the_runner_scrubs_password_pieces_from_the_driver_text(monkeypatch):
+    import traceback
+
+    import psycopg
+
+    def refuse(*a, **k):
+        raise psycopg.OperationalError(AT_TEXT)
+
+    monkeypatch.setattr(psycopg, "connect", refuse)
+    with pytest.raises(migrations.ConnectionFailed) as caught:
+        migrations.apply(AT_DSN)
+    assert "SeCrEt" not in "".join(traceback.format_exception(caught.value))
+    assert "failed to resolve host '***@db'" in str(caught.value)
+
+
+def test_the_service_connection_scrubs_password_pieces_from_the_driver_text(monkeypatch):
+    import traceback
+
+    import psycopg
+
+    from sillok import service
+
+    def refuse(*a, **k):
+        raise psycopg.OperationalError(AT_TEXT)
+
+    monkeypatch.setattr(psycopg, "connect", refuse)
+    with pytest.raises(psycopg.OperationalError) as caught:
+        service.connect(AT_DSN)
+    assert "SeCrEt" not in "".join(traceback.format_exception(caught.value))
+
+
+def test_scrubbing_keeps_the_public_default_password():
+    """D16 의 기본값 `sillok` 은 비밀이 아니다 — 사용자 이름과 같은 조각을 지우면 모든 낱말이 사라진다."""
+    text = 'password authentication failed for user "sillok"'
+    assert migrations.scrub_driver_text(text, "postgresql://sillok:sillok@db:5432/sillok") == text
+
+
+def test_the_db_skip_reason_carries_no_password():
+    """skip 사유는 `pytest -rs` 가 검사마다 찍는다. 예전에는 DSN 을 암호째 실었다 (감사 F023).
+    접두 `Postgres 에 붙을 수 없다` 는 evidence.mjs 가 찾는 판정 문자열이라 글자 그대로 둔다."""
+    import dbcheck
+
+    reason = dbcheck.skip_reason("postgresql://u:pa/SeCrEt@127.0.0.1:5432/db")
+    assert "SeCrEt" not in reason
+    assert reason.startswith("Postgres 에 붙을 수 없다: postgresql://u:***@127.0.0.1:5432/db")
+    # 실제로 skipif 에 넘어가는 것은 상수다 — 함수만 보면 상수가 날것으로 돌아가도 초록이었다 (리뷰).
+    assert dbcheck.SKIP_REASON == dbcheck.skip_reason(dbcheck.DSN)
 
 
 def test_redact_keeps_what_is_useful():
