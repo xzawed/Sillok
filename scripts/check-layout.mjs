@@ -800,29 +800,52 @@ if (READMES.every((p) => existsSync(join(ROOT, p)))) {
 // `postgresql+psycopg://` 를 놓쳤다 (Grok 재검토). userinfo 는 공백 전까지의 **마지막 `@`** 앞이고 암호는 첫 `:` 뒤다.
 // 비켜 가는 것은 셋뿐이다 — D16 의 계약 값 `sillok`, 통째로 `${…}` 인 치환(compose), 이미 가린 `***`.
 const DSN_START = /postgres(?:ql)?(?:\+[A-Za-z0-9]+)?:\/\//gi
-// 사용자와 암호를 가르는 `:` 는 `${…}` 치환 **밖**의 첫 `:` 다 — `${POSTGRES_USER:-sillok}` 안의 `:` 가 아니다(compose).
+// 사용자와 암호를 가르는 `:` 는 **닫힌** `${…}` 치환 밖의 첫 `:` 다 — `${POSTGRES_USER:-sillok}` 안의 `:` 가 아니다(compose).
+// 닫히지 않은 `${` 는 치환이 아니라 글자다 — 그것을 치환으로 보면 뒤의 `:` 를 못 찾아 암호를 놓쳤다 (Grok 재검토).
 function colonOutsideSubstitution(userinfo) {
-  let depth = 0
   for (let i = 0; i < userinfo.length; i++) {
     if (userinfo.startsWith('${', i)) {
-      depth++
-      i++
-    } else if (userinfo[i] === '}' && depth > 0) depth--
-    else if (userinfo[i] === ':' && depth === 0) return i
+      const close = userinfo.indexOf('}', i + 2)
+      if (close > 0) {
+        i = close
+        continue
+      }
+    }
+    if (userinfo[i] === ':') return i
   }
   return -1
+}
+// 비켜 가는 암호 — D16 의 계약 값, 이미 가린 표시, 그리고 **기본값이 그 둘이거나 빈** `${…}` 치환(compose).
+// 기본값에 진짜 암호를 적은 `${P:-진짜암호}` 는 비켜 가지 않는다 (Grok 재검토).
+function harmlessPassword(password) {
+  if (password === '' || password === 'sillok' || password === '***') return true
+  const sub = /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::?-(.*))?\}$/.exec(password)
+  return sub !== null && (sub[1] === undefined || ['', 'sillok', '***'].includes(sub[1]))
 }
 function dsnSecret(body) {
   for (const m of body.matchAll(DSN_START)) {
     const rest = body.slice(m.index + m[0].length).split(/\s/, 1)[0]
+    const hit = m[0] + rest
     const at = rest.lastIndexOf('@')
-    if (at < 0) continue
-    const userinfo = rest.slice(0, at)
-    const colon = colonOutsideSubstitution(userinfo)
-    if (colon < 0) continue
-    const password = userinfo.slice(colon + 1)
-    if (!password || password === 'sillok' || password === '***' || /^\$\{[^}]*\}$/.test(password)) continue
-    return m[0] + rest.slice(0, at + 1)
+    if (at >= 0) {
+      const userinfo = rest.slice(0, at)
+      const colon = colonOutsideSubstitution(userinfo)
+      if (colon >= 0 && !harmlessPassword(userinfo.slice(colon + 1))) return hit
+    }
+    // 질의의 암호도 본다 — 면제된 userinfo 뒤의 `?password=진짜암호` 가 숨었다. 키는 퍼센트 인코딩될 수 있다.
+    const query = rest.indexOf('?')
+    if (query < 0) continue
+    for (const pair of rest.slice(query + 1).split('&')) {
+      const eq = pair.indexOf('=')
+      if (eq < 0) continue
+      let key = pair.slice(0, eq)
+      try {
+        key = decodeURIComponent(key)
+      } catch {
+        // 풀 수 없는 키는 글자 그대로 본다
+      }
+      if (['password', 'sslpassword'].includes(key.toLowerCase()) && !harmlessPassword(pair.slice(eq + 1))) return hit
+    }
   }
   return null
 }
@@ -851,9 +874,10 @@ const SECRET_SCAN_EXEMPT = 'scripts/check-layout.test.mjs'
 // walk 로 가지 않고 운다 — 미추적 경로가 1 MiB 를 넘자 기본 버퍼가 넘쳐 walk 로 갔고, walk 는 node_modules 를
 // 건너뛰어 커밋될 수 있는 키를 못 봤다 (2026-09-27 리뷰 실측).
 function commitCandidates() {
+  // LC_ALL=C — 아래가 git 의 영어 문구(`not a git repository`)로 가르므로 현지화된 메시지가 판정을 빗나가게 두지 않는다.
   const git = (...args) =>
     execFileSync('git', ['-C', ROOT, ...args], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 28,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 28, env: { ...process.env, LC_ALL: 'C' },
     })
   let top
   try {

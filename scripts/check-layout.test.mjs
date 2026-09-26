@@ -984,12 +984,33 @@ const CASES = [
     mutate: write('scripts/z.py', 'URL = "postgresql+psycopg://u:hunter22@h:5432/db"' + NL),
   },
   {
-    // 대조군. 비켜 가는 것은 셋뿐이다 — 계약 값 `sillok`, 통째로 `${…}` 인 치환(compose), 이미 가린 `***`.
+    // 닫히지 않은 `${` 는 치환이 아니라 글자다 — 치환으로 보면 뒤의 `:` 를 못 찾아 암호를 놓쳤다 (Grok 재검토).
+    id: '91 닫히지 않은 치환 뒤의 암호도 운다',
+    expect: 'fail',
+    mentions: ['scripts/y.sh : 비밀이 든 DSN'],
+    mutate: write('scripts/y.sh', 'psql postgresql://app${:SuperSecret@db/sillok' + NL),
+  },
+  {
+    // 질의의 암호도 본다 — 면제된 userinfo(계약 값) 뒤의 `?password=` 가 숨었다. 키는 퍼센트 인코딩될 수 있다.
+    id: '92 질의의 암호도 운다',
+    expect: 'fail',
+    mentions: ['scripts/y.sh : 비밀이 든 DSN'],
+    mutate: write('scripts/y.sh', 'psql postgresql://sillok:sillok@db:5432/sillok?%70assword=SuperSecret' + NL),
+  },
+  {
+    // `${P:-기본값}` 의 기본값에 진짜 암호를 적으면 그것은 값이다 (Grok 재검토).
+    id: '93 치환 기본값에 적은 암호도 운다',
+    expect: 'fail',
+    mentions: ['scripts/y.sh : 비밀이 든 DSN'],
+    mutate: write('scripts/y.sh', 'psql postgresql://sillok:${POSTGRES_PASSWORD:-SuperSecret}@db/sillok' + NL),
+  },
+  {
+    // 대조군. 비켜 가는 것은 셋뿐이다 — 계약 값 `sillok`, 이미 가린 `***`, 통째로 `${…}` 이고 기본값이 없거나 그 둘인 치환.
     id: '90 계약 값·치환·가린 암호는 울지 않는다',
     expect: 'pass',
     mutate: append(
       'docs/spec.md',
-      NL + 'postgresql://sillok:***@127.0.0.1:5432/sillok · postgresql://${U:-a}:${P:-b}@db/x' + NL
+      NL + 'postgresql://sillok:***@127.0.0.1:5432/sillok · postgresql://${U:-a}:${P:-sillok}@db/x · postgresql://u:${P}@db/x' + NL
     ),
   },
   {
