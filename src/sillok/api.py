@@ -394,35 +394,44 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
     # 스레드풀에서 돌려 서로를 막지 않는다. 풀·비동기 드라이버·워커는 더하지 않는다 —
     # `connect()` 는 호출마다 새 연결이고 D32 가 v1 에 풀이 없음을 전제한다.
     @app.post("/v1/events")
-    def save_event(body: dict[str, Any]) -> JSONResponse:
+    def save_event(request: Request, body: dict[str, Any]) -> JSONResponse:
+        _query(request)  # POST 는 질의 인자를 받지 않는다 — `?root_cause=` 가 원인 없이 저장됐다 (D69)
         return ok(service.save_event(cfg.database_url, body))
 
     @app.get("/v1/stats/events")
     def event_stats(
-        request: Request, project: str, module: str | None = None, since: str | None = None
+        request: Request,
+        project: str | None = None,
+        module: str | None = None,
+        since: str | None = None,
     ) -> JSONResponse:
         # 선언 밖 질의 인자는 FastAPI 가 함수에 넣지 않는다 — `?modul=` 이 필터 없는 집계였다 (D69).
-        service.reject_unknown(request.query_params.keys(), service.EVENT_STATS_KEYS)
+        # `project` 를 서명에서 필수로 두지 않는다. 그러면 FastAPI 의 누락 판정이 이 검사보다 먼저 돌아
+        # `?projct=` 가 `query.project: Field required` 가 되고 MCP 와 봉투가 갈린다. 필수는 Service 가 본다 (D42).
+        _query(request, service.EVENT_STATS_KEYS)
         return ok(service.event_stats(cfg.database_url, project, module, since_filter(since)))
 
     @app.get("/v1/status")
-    def kb_status(request: Request, project: str) -> JSONResponse:
-        service.reject_unknown(request.query_params.keys(), service.KB_STATUS_KEYS)  # D69
+    def kb_status(request: Request, project: str | None = None) -> JSONResponse:
+        _query(request, service.KB_STATUS_KEYS)  # D69 — 필수는 Service 가 본다
         return ok(service.kb_status(cfg.database_url, project))
 
     @app.post("/v1/search/docs")
-    def search_docs(body: dict[str, Any]) -> JSONResponse:
+    def search_docs(request: Request, body: dict[str, Any]) -> JSONResponse:
+        _query(request)  # D69
         # 빈 결과는 오류가 아니다 — 200 에 {"results": []} 다 (D21).
         # 모델이 채울 문장을 여기서 넣지 않는다.
         return ok(service.search_docs(cfg.database_url, body, cfg.openai_api_key))
 
     @app.post("/v1/search/events")
-    def search_events(body: dict[str, Any]) -> JSONResponse:
+    def search_events(request: Request, body: dict[str, Any]) -> JSONResponse:
+        _query(request)  # D69
         # v1 은 이벤트를 임베딩하지 않는다 (D34) — 키가 필요 없다.
         return ok(service.search_events(cfg.database_url, body))
 
     @app.post("/v1/ingest")
-    def run_ingest(body: dict[str, Any]) -> JSONResponse:
+    def run_ingest(request: Request, body: dict[str, Any]) -> JSONResponse:
+        _query(request)  # D69
         # 운영자 진입점은 CLI 다 (D20). 여기는 같은 Service 함수의 HTTP 얼굴이고
         # 인자까지 같다 — 변경 파일 목록을 받지 않는다 (D30).
         # run 행이 생긴 모든 경우에 ok: true 다. ok: false 는 락 거절과 D37 거절뿐이다.
@@ -439,23 +448,34 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
         )
 
     @app.get("/v1/events/{event_id}")
-    def get_event(request: Request, event_id: int, project: str) -> JSONResponse:
-        service.reject_unknown(request.query_params.keys(), service.GET_EVENT_KEYS)  # D69
+    def get_event(request: Request, event_id: int, project: str | None = None) -> JSONResponse:
+        _query(request, service.GET_EVENT_KEYS)  # D69 — 필수는 Service 가 본다
         # project 는 필수다 (D35). 없으면 FastAPI 요청 검증이 VALIDATION 으로 접는다.
         # 정수가 아닌 {id} 도 같은 자리에서 걸린다.
         return ok(service.get_event(cfg.database_url, event_id, project))
 
     @app.get("/v1/files")
-    def get_file(request: Request, project: str, path: str, offset: int | None = None) -> JSONResponse:
-        service.reject_unknown(request.query_params.keys(), service.GET_FILE_KEYS)  # D69
+    def get_file(
+        request: Request,
+        project: str | None = None,
+        path: str | None = None,
+        offset: int | None = None,
+    ) -> JSONResponse:
+        _query(request, service.GET_FILE_KEYS)  # D69 — 필수는 Service 가 본다
         # 뿌리는 하나다 (D37). project 는 원장의 라벨이지 경로 성분이 아니다.
         # offset 의 기본값(0)은 **Service 한 곳에만** 둔다 — 두 얼굴이 같은 값을 쓰게 (D36·D46).
         return ok(service.get_file(cfg.database_url, project, path, offset, cfg.workspace))
 
     @app.post("/v1/docs/proposals")
-    def save_doc(body: dict[str, Any]) -> JSONResponse:
+    def save_doc(request: Request, body: dict[str, Any]) -> JSONResponse:
+        _query(request)  # D69 — `?base_hash=` 가 CONFLICT 검사를 건너뛰었다
         # v1 은 제안 본문과 diff 만 돌려준다. Git 에 쓰지 않는다 (D3·D38).
         return ok(service.save_doc(cfg.database_url, body, cfg.workspace))
+
+
+def _query(request: Request, allowed: frozenset[str] = frozenset()) -> None:
+    """질의 인자의 키를 본다 (D69) — 모르는 키, 그다음 되풀이된 키. 값은 FastAPI 가 이미 묶었다."""
+    service.reject_query([k for k, _ in request.query_params.multi_items()], allowed)
 
 
 def _mount_mcp(app: FastAPI, transport: object) -> None:

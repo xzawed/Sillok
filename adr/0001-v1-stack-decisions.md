@@ -3015,7 +3015,7 @@ D35 의 표는 *만들었다면* 의 규칙으로 남는다 — 그 표도 단�
 | [docs/plan.md](../docs/plan.md) §2 | 확정 스택 표 전체 |
 | [CLAUDE.md](../CLAUDE.md) | 확정 스택 표 (도구 컨텍스트용 미러), Q32 요약 |
 | [docs/data-model.md](../docs/data-model.md) | `vector(1536)`, 모델 ID, 확장 목록, 질의 로그 컬럼 의미 (D48–D52), 자유 텍스트·`query` 천장 주석 (D68) |
-| [docs/service-and-mcp.md](../docs/service-and-mcp.md) | 서비스 주소, 인증, `top_k`, 색인 경로, `kb_status` 가 로그를 쓰지 않는다는 것(D48), 입력 천장(D68). **`heading_path` 형식은 그쪽이 정본** |
+| [docs/service-and-mcp.md](../docs/service-and-mcp.md) | 서비스 주소, 인증, `top_k`, 색인 경로, `kb_status` 가 로그를 쓰지 않는다는 것(D48), 입력 천장(D68), 모르는 키·되풀이 키 문구와 기간 `[since, until)`·필터 벗김(D69). **`heading_path` 형식은 그쪽이 정본** |
 | [docs/skills/sillok-storage/SKILL.md](../docs/skills/sillok-storage/SKILL.md) | 이벤트 필드 천장의 수 (D25·D58·D68). 수의 정본은 이 파일이고, 거절 규칙의 서술은 SKILL 이 소유한다 |
 | [scripts/check-layout.mjs](../scripts/check-layout.mjs) | ingest 확장자 필터 `.md` (D30 이 정본) |
 | [migrations/002_schema.sql](../migrations/002_schema.sql) | `kb_ingest_runs.status` 값 주석 (D32) |
@@ -3322,7 +3322,7 @@ MCP 에서는 배열 `kind` 를 SDK 가 먼저 거절한다 (D42 1항).
 
 | ID | 선택 | 결정 내용 | 닫은 질문 |
 |---|---|---|---|
-| D69 | A | ① **모르는 키는 `VALIDATION`** 이다 — 업무 라우트 아홉(POST 본문·GET 질의 인자)과 도구 여덟 모두. 문구는 코드점 순 첫 키 하나 `unknown field: <이름>` 이고, 이름으로 실을 수 없는 키(비었거나 200자 초과·NUL·짝 없는 서로게이트)는 고정 `unknown field` 다. 값은 싣지 않는다. ② 닫힌 집합인 필터(`search_events` 의 `kind`, `search_docs` 의 `doc_type`·`status`)는 **벗긴 뒤** 집합 밖이면 `<field> must be one of [...]`. ③ 문자열 필터는 벗기고 비면 거르지 않는다 — 검색과 `event_stats` 의 `module` 모두. 저장은 받은 그대로다. ④ 기간은 `[since, until)` 이고 `since >= until` 은 `since is not before until`. ⑤ `search_events` 는 `websearch_to_tsquery` 를 유지하고, 빈 tsvector 에도 참인 질의는 0건이다(원장에는 남는다). ⑥ `repeat_causes` 의 동순은 `COLLATE "C"` | Q37 |
+| D69 | A | ① **모르는 키는 `VALIDATION`** 이다 — 업무 라우트 아홉(POST 본문, 모든 질의 인자)과 도구 여덟 모두. POST 는 질의 인자를 받지 않으므로 키가 하나라도 있으면 모르는 키다. 되풀이된 질의 인자는 `duplicate field: <이름>` 이다. 문구는 코드점 순 첫 키 하나 `unknown field: <이름>` 이고, 이름으로 실을 수 없는 키(비었거나 200자 초과·NUL·짝 없는 서로게이트)는 고정 `unknown field` 다. 값은 싣지 않는다. ② 닫힌 집합인 필터(`search_events` 의 `kind`, `search_docs` 의 `doc_type`·`status`)는 **벗긴 뒤** 집합 밖이면 `<field> must be one of [...]`. ③ 문자열 필터는 벗기고 비면 거르지 않는다 — 검색과 `event_stats` 의 `module` 모두. 저장은 받은 그대로다. ④ 기간은 `[since, until)` 이고 `since >= until` 은 `since is not before until`. ⑤ `search_events` 는 `websearch_to_tsquery` 를 유지하고, 빈 tsvector 에도 참인 질의는 0건이다(원장에는 남는다). ⑥ `repeat_causes` 의 동순은 `COLLATE "C"` | Q37 |
 
 ### 왜 — 감사가 잰 것
 
@@ -3340,7 +3340,12 @@ MCP 에서는 배열 `kind` 를 SDK 가 먼저 거절한다 (D42 1항).
 
 ### 두 얼굴이 같은 봉투다
 
-HTTP POST 는 Service 가, GET 은 라우트가 질의 인자의 키를 본다. MCP 는 서버가 `call_tool` 에서 선언된 인자 이름
+HTTP POST 의 본문은 Service 가(`ingest` 는 라우트가 — 그 Service 인자는 dict 가 아니다), 질의 인자는 라우트가 본다 —
+키와 **되풀이**를 함께 본다. FastAPI 는 스칼라 인자에 마지막 값만 넘기므로 `module=authx&module=` 이 필터 없는 집계였다.
+마지막 값이 이기는 것은 결정이 아니었다 — 프레임워크 기본값을 검사로 잠가 둔 것이었고(open-questions G절 주석) D69 가 뒤집는다.
+**GET 의 `project`·`path` 를 서명에서 필수로 두지 않는다** — 두면 FastAPI 의 누락 판정이 이 검사보다 먼저 돌아
+`?projct=` 가 `query.project: Field required` 가 되고 MCP 와 봉투가 갈린다(구현 리뷰 실측). 필수는 Service 가 본다 — D42 가
+MCP 에 둔 이유와 같고, 그 결과 인자를 빠뜨린 호출의 문구도 두 얼굴이 같아졌다. MCP 는 서버가 `call_tool` 에서 선언된 인자 이름
 (공개 `list_tools` 의 입력 스키마)과 대조한다. 셋 다 **같은 `reject_unknown`** 으로 거절한다.
 SDK 의 `extra='forbid'` 는 쓰지 않는다 — 그 실패는 봉투가 아니라서 D44·D46 이 갈린다.
 누락보다 먼저 본다 — `root_casue` 는 "원인을 비웠다" 가 아니라 "철자를 틀렸다" 이다.
@@ -3367,7 +3372,12 @@ SDK 의 `extra='forbid'` 는 쓰지 않는다 — 그 실패는 봉투가 아니
 - **공백째 저장한 `module` 은 검색·통계 필터 어느 쪽으로도 찾지 못한다.** 저장은 받은 그대로이기 때문이다 (D25).
   필터 없는 `by_module` 에는 그 키가 그대로 있다
 - **`event_stats?module=` 로 빈 문자열 버킷만 집을 수 없다.** 빈 값은 필터가 아니다
-- **MCP 의 모르는 인자 검사는 선언된 이름과 비교한다.** 도구 서명이 바뀌면 검사도 함께 바뀐다 — 이름 목록을 따로 두지 않는다
+- **MCP 의 모르는 인자 검사는 선언된 이름과 비교한다.** 도구 서명이 바뀌면 검사도 함께 바뀐다. Service 의 키 목록과 도구 서명이
+  같다는 것은 검사가 묶는다
+- **JSON 본문·`arguments` 의 중복 키는 마지막 값이다** — 두 얼굴이 같고(파서의 일), 막으려면 두 파서 앞에 층이 필요하다
+- **MCP `params` 최상위의 필드는 보지 않는다.** MCP 프로토콜의 것이고 계속 늘어난다 — 거절하면 앞으로의 호환이 깨진다
+- **GET 의 JSON 본문은 보지 않는다.** 서버 한도를 넘는 긴 URL 은 앱 전에 uvicorn 이 평문 400 으로 거절한다
+- **GET 의 `offset`·경로의 `event_id` 는 형이 틀리면 FastAPI 가 먼저 거절한다** — 모르는 키와 겹치면 형 오류가 먼저다 (D42 의 형 예외)
 
 ## 나중에 바꿔도 되는 것 (v1 비범위)
 

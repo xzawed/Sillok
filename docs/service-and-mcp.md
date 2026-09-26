@@ -72,6 +72,7 @@ D25가 `resolved_at`에서 이미 이름 붙인 부류이고(`클라이언트 �
   문구는 `kind must be one of [...]` · `payload must not contain NaN or Infinity`
 - **천장을 넘는 값**은 `VALIDATION`이다 — 필드 천장은 [저장](#저장), 질의는 [검색](#검색), 본문은 아래 (D68)
 - **모르는 키**도 `VALIDATION`이다 — 업무 라우트 아홉의 본문·질의 인자와 도구 여덟의 인자 모두 (D69).
+  POST 는 질의 인자를 받지 않는다(있으면 모르는 키다). 되풀이된 질의 인자는 `duplicate field: <이름>`이다.
   문구는 코드점 순 첫 키 하나 `unknown field: <이름>`, 이름으로 실을 수 없는 키(비었거나 200자 초과·NUL·짝 없는 서로게이트)는
   고정 `unknown field`. 값은 싣지 않는다. 필수 누락보다 먼저 본다 — 오타는 누락이 아니다
 
@@ -84,7 +85,7 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 **이 문턱이 D7·D67 게이트보다 먼저다** — 토큰 모드에서 인증 없는 큰 본문도 `UNAUTHORIZED`가 아니라 `VALIDATION`이다.
 
 **봉투가 닿지 않는 한 곳:** HTTP 자체가 깨져 ASGI 앱에 도달하지 못한 요청은
-서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인.
+서버(uvicorn)가 `text/plain`의 400으로 거절한다 — 예: `Content-Length: abc`, 잘린 요청 라인, 서버 한도를 넘는 긴 URL.
 앱 밖이라 감쌀 수 없다. 클라이언트는 이 한 가지를 예외로 알고 있어야 한다.
 (큰 헤더 자체는 여기 해당하지 않는다 — 64KB 헤더도 봉투로 응답하는 것을 실측했다.)
 빈 검색 결과는 오류가 아니다 — 200에 `{ "results": [] }`.
@@ -423,6 +424,9 @@ HTTP 얼굴이 돌려주는 **같은 봉투 JSON**이다. `structuredContent`를
 `UNAUTHORIZED`는 HTTP 얼굴에만 있다.
 
 **같은 인자면 두 얼굴의 봉투가 같아야 한다** (D46). 그 대조는 검사가 한다.
+GET 의 필수 인자(`project`·`path`)도 Service 가 판정하므로 빠뜨린 호출의 문구가 두 얼굴에서 같다 (D69).
+예외는 형이 틀린 값이다 — HTTP 는 FastAPI 가, MCP 는 SDK 가 먼저 거절하고 문구가 다르다 (D42).
+JSON 으로 파싱되지 않는 본문(짝 없는 서로게이트가 든 키 등)은 MCP 에서 JSON-RPC 파싱 오류다.
 
 ## 반환 크기
 

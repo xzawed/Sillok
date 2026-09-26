@@ -56,9 +56,17 @@ EVENT = {
 
 
 def test_the_first_unknown_key_by_code_point_is_named():
+    """순서가 정해진 입력이다 — 집합이면 정렬을 빼도 해시 시드에 따라 통과한다 (리뷰 지적)."""
     with pytest.raises(service.ValidationFailed) as exc:
-        service.reject_unknown({"project", "zeta", "Alpha", "b"}, {"project"})
+        service.reject_unknown(["project", "zeta", "b", "Alpha"], {"project"})
     assert str(exc.value) == "unknown field: Alpha"  # 'A' < 'b' < 'z'
+
+
+def test_a_name_at_exactly_the_cap_is_named():
+    name = "k" * service.TITLE_MAX
+    with pytest.raises(service.ValidationFailed) as exc:
+        service.reject_unknown([name], {"project"})
+    assert str(exc.value) == f"unknown field: {name}"
 
 
 @pytest.mark.parametrize("name", ["", "k" * (service.TITLE_MAX + 1), "a\x00b", "a\ud800b"])
@@ -187,3 +195,99 @@ def test_a_real_period_passes():
     body = {"project": "t_semantics", "since": "2026-01-01T00:00:00Z", "until": "2026-01-01T00:00:01Z"}
     with pytest.raises(psycopg.OperationalError):
         service.search_events(DEAD_DSN, body, client="http")
+
+
+# --- 리뷰가 찾은 문 — POST 의 질의 인자, GET 의 필수 인자 오타, 되풀이된 질의 인자 (D69) ---------------
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "query"),
+    [
+        ("/v1/events", EVENT, "root_cause=pool"),
+        ("/v1/search/events", {"project": "t_semantics"}, "kind=decision"),
+        ("/v1/search/docs", {"project": "t_semantics", "query": "q"}, "doc_type=adr"),
+        ("/v1/docs/proposals", {"project": "t_semantics", "path": "docs/a.md", "body": "x"}, "base_hash=sha256:x"),
+        ("/v1/ingest", {"project": "t_semantics"}, "workspace=elsewhere"),
+    ],
+)
+def test_a_post_refuses_any_query_argument(client, path, body, query):
+    """POST 는 질의 인자를 받지 않는다. `?root_cause=` 가 원인 없이 저장되고 `?base_hash=` 가 CONFLICT 를 건너뛰었다."""
+    r = client.post(f"{path}?{query}", json=body)
+    assert r.status_code == 422
+    assert r.json() == _unknown(query.split("=")[0])
+
+
+@pytest.mark.parametrize(
+    ("path", "tool", "arguments", "typo"),
+    [
+        ("/v1/status?projct=t_semantics", "kb_status", {"projct": "t_semantics"}, "projct"),
+        ("/v1/stats/events?projct=t_semantics", "event_stats", {"projct": "t_semantics"}, "projct"),
+        ("/v1/files?project=t_semantics&pth=docs/a.md", "get_file", {"project": "t_semantics", "pth": "docs/a.md"}, "pth"),
+        ("/v1/events/1?projct=t_semantics", "get_event", {"event_id": 1, "projct": "t_semantics"}, "projct"),
+    ],
+)
+def test_a_typo_in_a_required_get_argument_is_unknown_on_both_faces(client, path, tool, arguments, typo):
+    """오타는 누락이 아니다 — 필수 인자를 서명에 두면 FastAPI 의 누락 판정이 먼저 돌아 MCP 와 갈렸다."""
+    r = client.get(path)
+    assert r.status_code == 422
+    assert r.json() == _unknown(typo) == _call(client, tool, arguments)
+
+
+@pytest.mark.parametrize(
+    ("path", "tool", "arguments"),
+    [
+        ("/v1/status", "kb_status", {}),
+        ("/v1/stats/events", "event_stats", {}),
+        ("/v1/files?project=t_semantics", "get_file", {"project": "t_semantics"}),
+        ("/v1/events/1", "get_event", {"event_id": 1}),
+    ],
+)
+def test_a_missing_required_get_argument_reads_the_same_on_both_faces(client, path, tool, arguments):
+    """필수 판정을 Service 가 한다 (D42) — 두 얼굴이 같은 문구다. 예전에는 `query.project: Field required` 였다."""
+    r = client.get(path)
+    assert r.status_code == 422
+    assert r.json() == _call(client, tool, arguments)
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("/v1/stats/events?project=t_semantics&module=authx&module=", "module"),
+        ("/v1/events/1?project=t_other&project=t_semantics", "project"),
+        ("/v1/status?project=t_semantics&project=t_semantics", "project"),
+    ],
+)
+def test_a_repeated_query_argument_is_refused(client, path, name):
+    """FastAPI 는 마지막 값만 넘긴다 — `module=authx&module=` 이 필터 없는 집계였다."""
+    r = client.get(path)
+    assert r.status_code == 422
+    assert r.json() == {"ok": False, "error": {"code": "VALIDATION", "message": f"duplicate field: {name}"}}
+
+
+def test_a_typo_is_reported_before_the_missing_field_on_both_faces(client):
+    """누락보다 먼저다 — `titel` 은 "제목을 비웠다" 가 아니라 "철자를 틀렸다" 이다."""
+    body = {k: v for k, v in EVENT.items() if k != "title"} | {"titel": "t"}
+    r = client.post("/v1/events", json=body)
+    assert r.json() == _unknown("titel") == _call(client, "save_event", body)
+
+
+def test_the_mcp_client_argument_is_unknown(client):
+    """`client` 는 호출자가 자기를 밝히는 값이지 인자가 아니다 (D49) — MCP 에서도 위장할 수 없다."""
+    assert _call(client, "search_events", {"project": "t_semantics", "client": "http"}) == _unknown("client")
+
+
+def test_service_key_sets_match_the_tool_signatures(client):
+    """키 목록이 두 벌이다(Service · 도구 서명). 이 검사가 둘을 묶는다 — `get_event` 만 경로 인자 `event_id` 가 더 있다."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+    tools = client.post("/mcp", json=body, headers=MCP_HEADERS).json()["result"]["tools"]
+    declared = {t["name"]: set(t["inputSchema"]["properties"]) for t in tools}
+    assert declared == {
+        "save_event": set(service.SAVE_EVENT_KEYS),
+        "search_docs": set(service.SEARCH_DOCS_KEYS),
+        "search_events": set(service.SEARCH_EVENTS_KEYS),
+        "save_doc": set(service.SAVE_DOC_KEYS),
+        "event_stats": set(service.EVENT_STATS_KEYS),
+        "kb_status": set(service.KB_STATUS_KEYS),
+        "get_file": set(service.GET_FILE_KEYS),
+        "get_event": set(service.GET_EVENT_KEYS) | {"event_id"},
+    }

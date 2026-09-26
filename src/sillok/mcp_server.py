@@ -66,7 +66,9 @@ class _Server(MCPServer):
     _declared: dict[str, frozenset[str]] | None = None
 
     async def call_tool(self, name, arguments, context=None):
-        if self._declared is None:
+        # 모르는 도구 이름이면 한 번 다시 읽는다 — 첫 호출 뒤에 등록된 도구가 검사를 건너뛰지 않게.
+        # 그래도 없으면 SDK 가 알 수 없는 도구로 답한다.
+        if self._declared is None or name not in self._declared:
             self._declared = {
                 tool.name: frozenset((tool.input_schema or {}).get("properties", {}))
                 for tool in await self.list_tools()

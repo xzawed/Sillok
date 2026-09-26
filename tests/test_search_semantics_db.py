@@ -110,3 +110,34 @@ def test_the_period_is_half_open(clean, db):
     assert len(_events({"since": at})) == 1  # since 는 포함
     assert _events({"until": at}) == []  # until 은 배제
     assert len(_events({"until": "2026-03-01T00:00:01Z"})) == 1
+
+
+def test_repeat_causes_module_ties_sort_bytewise_too(clean, db):
+    """원인이 같으면 `module` 로 가른다 — 그 키도 COLLATE "C" 다. 모듈이 하나뿐이면 이 쪽을 못 문다."""
+    if not db.execute("SELECT 'a' < 'B' AS lt").fetchone()["lt"]:
+        pytest.skip("DB 기본 콜레이션이 C 와 같은 순서라 두 정렬을 가를 수 없다")
+    for module in ("a", "a", "B", "B"):
+        _add(db, "t", module=module, root_cause="x")
+    got = [r["module"] for r in service.event_stats(DSN, PROJECT)["repeat_causes"]]
+    assert got == ["B", "a"]
+
+
+def test_a_stripped_kind_filter_still_filters(clean, db):
+    """벗긴 필터가 **필터로 남는지** 본다 — `"  failure  "` 를 필터 없음으로 바꾸는 버그를 잡는다."""
+    _add(db, "실패")
+    db.execute(
+        "INSERT INTO kb_events (project, kind, title, summary, result, occurred_at)"
+        " VALUES (%s, 'decision', '결정', 's', 'success', now())",
+        (PROJECT,),
+    )
+    got = _events({"kind": "  failure  "})
+    assert [r["kind"] for r in got] == ["failure"]
+
+
+def test_event_stats_since_is_inclusive(clean, db):
+    from datetime import datetime, timezone
+
+    at = "2026-04-01T00:00:00Z"
+    _add(db, "경계", occurred_at=at)
+    since = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    assert service.event_stats(DSN, PROJECT, since=since)["total"] == 1

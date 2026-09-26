@@ -783,22 +783,26 @@ def _capture(seen):
         ("/v1/stats/events?project=first&project=last", "event_stats"),
     ],
 )
-def test_a_repeated_query_parameter_takes_the_last_value(monkeypatch, path, func):
+def test_a_repeated_query_parameter_is_refused(monkeypatch, path, func):
+    """D69 가 뒤집었다. 예전에는 마지막 값이 이겼다 — 결정이 아니라 프레임워크 기본값을 잠가 둔 것이었고
+    (open-questions G절 주석), `module=authx&module=` 이 필터를 조용히 지웠다(2026-09-26 리뷰 실측).
+    Service 에 닿기 전에 끝난다."""
     seen: dict[str, tuple] = {}
     monkeypatch.setattr(service, func, _capture(seen))
     r = _client().get(path)
-    assert r.status_code == 200
-    assert "last" in seen["args"], f"{func} 가 받은 값: {seen['args']}"
-    assert "first" not in seen["args"]
+    assert r.status_code == 422
+    assert r.json()["error"] == {"code": "VALIDATION", "message": "duplicate field: project"}
+    assert seen == {}
 
 
-def test_a_repeated_offset_takes_the_last_value(monkeypatch):
-    """숫자 인자도 같다. 창을 페이징하는 클라이언트가 두 번 붙여 보내도 뒤엣것이 쓰인다."""
+def test_a_repeated_offset_is_refused(monkeypatch):
+    """숫자 인자도 같다. 두 번 붙여 보낸 창 번호 중 무엇을 뜻했는지 서버가 고르지 않는다 (D69)."""
     seen: dict[str, tuple] = {}
     monkeypatch.setattr(service, "get_file", _capture(seen))
     r = _client().get("/v1/files?project=p&path=docs/a.md&offset=1&offset=2")
-    assert r.status_code == 200
-    assert 2 in seen["args"] and 1 not in seen["args"], seen["args"]
+    assert r.status_code == 422
+    assert r.json()["error"]["message"] == "duplicate field: offset"
+    assert seen == {}
 
 
 # --- 질의 임베딩 실패 (D33 §4 가 약속한 검사) --------------------------------

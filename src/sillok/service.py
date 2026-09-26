@@ -92,12 +92,28 @@ def reject_unknown(keys: Iterable[object], allowed: frozenset[str]) -> None:
     (D68 이 긴 질의를 잘라 기록하는 안을 버린 그 이유다).
     """
     unknown = sorted(str(k) for k in keys if k not in allowed)
-    if not unknown:
-        return
-    name = unknown[0]
+    if unknown:
+        raise ValidationFailed(_naming("unknown field", unknown[0]))
+
+
+def reject_query(keys: list[str], allowed: frozenset[str]) -> None:
+    """HTTP 질의 인자 (D69). 모르는 키를 먼저, 그다음 **되풀이된 키**를 거절한다.
+
+    FastAPI 는 스칼라 인자에 마지막 값만 넘긴다 — `module=authx&module=` 이 필터 없는 집계가 되고
+    `project=A&project=B` 가 B 로 읽혔다(2026-09-26 리뷰 실측). POST 라우트는 받는 질의 인자가 없으므로
+    `allowed` 가 비어 있고, 키가 하나라도 있으면 거절된다 — `?root_cause=` 가 원인 없이 저장됐다.
+    """
+    reject_unknown(keys, allowed)
+    repeated = sorted({k for k in keys if keys.count(k) > 1})
+    if repeated:
+        raise ValidationFailed(_naming("duplicate field", repeated[0]))
+
+
+def _naming(message: str, name: str) -> str:
+    """키 이름을 문구에 실어도 되는가 (D69). 실을 수 없으면 자르지 않고 고정 문구만 낸다."""
     if 0 < len(name) <= TITLE_MAX and "\x00" not in name and not _SURROGATE.search(name):
-        raise ValidationFailed(f"unknown field: {name}")
-    raise ValidationFailed("unknown field")
+        return f"{message}: {name}"
+    return message
 
 # 짝 없는 서로게이트. `require_text` 가 쓴다 — 왜 거르는지는 그 함수의 docstring 이다.
 _SURROGATE = re.compile("[\ud800-\udfff]")
