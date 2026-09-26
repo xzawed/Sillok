@@ -803,6 +803,37 @@ def _finish(
         )
 
 
+def _index_file(
+    conn: psycopg.Connection,
+    project: str,
+    item: ingest_rules.Scanned,
+    known: dict[str, str],
+    counters: dict[str, int],
+) -> None:
+    """파일 하나를 읽고, 바뀌었으면 그 문서의 트랜잭션 하나로 쓴다 (D30 · D32)."""
+    text = ingest_rules.normalize(item.absolute.read_bytes(), item.path)
+    digest = ingest_rules.content_hash(text)
+    if known.get(item.path) == digest:
+        return
+    meta = ingest_rules.derive_meta(item.path, text)
+    _validate_meta(item.path, meta)
+    _, body = ingest_rules.split_front_matter(text)
+    pieces = ingest_rules.chunk(body)
+    _write_document(
+        conn,
+        project,
+        {
+            "path": item.path,
+            "content_hash": digest,
+            "source_mtime": datetime.fromtimestamp(item.mtime, tz=timezone.utc),
+            "chunks": pieces,
+            **meta,
+        },
+    )
+    counters["files_changed"] += 1
+    counters["chunks_upserted"] += len(pieces)
+
+
 def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> dict[str, Any]:
     with conn.cursor() as cur:
         # 락이 그 행들이 죽었다는 증거다 — 살아 있는 run 이 있었다면 락을 못 얻었다.
@@ -841,27 +872,16 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
             }
 
         for item in files:
-            text = ingest_rules.normalize(item.absolute.read_bytes(), item.path)
-            digest = ingest_rules.content_hash(text)
-            if known.get(item.path) == digest:
-                continue
-            meta = ingest_rules.derive_meta(item.path, text)
-            _validate_meta(item.path, meta)
-            _, body = ingest_rules.split_front_matter(text)
-            pieces = ingest_rules.chunk(body)
-            _write_document(
-                conn,
-                project,
-                {
-                    "path": item.path,
-                    "content_hash": digest,
-                    "source_mtime": datetime.fromtimestamp(item.mtime, tz=timezone.utc),
-                    "chunks": pieces,
-                    **meta,
-                },
-            )
-            counters["files_changed"] += 1
-            counters["chunks_upserted"] += len(pieces)
+            try:
+                _index_file(conn, project, item, known, counters)
+            except (IngestFailed, ingest_rules.DecodeFailed):
+                raise
+            except Exception as exc:
+                # 예상 밖 실패에도 **경로를 붙인다** (2026-09-26 리뷰) — 청크가 tsvector 한도를 넘거나
+                # 파일 읽기가 실패하면 사유에 어느 파일인지가 없어 운영자가 고칠 곳을 몰랐다.
+                # 트레이스백은 서버 로그에 남는다 (D21). 사유 줄은 세정한다 (D31).
+                log.error("ingest run %s failed on %s", run_id, item.path, exc_info=exc)
+                raise IngestFailed(f"{item.path}: {_run_error(exc)}") from exc
 
         # 삭제는 백필 앞이다. 뒤에 두면 백필 첫 실패에서 멈추는 run 이
         # 삭제를 영구히 건너뛴다 — 텍스트 색인의 일부인데 벡터 때문에 빠지는 것이다.
@@ -882,14 +902,16 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
     except Exception as exc:
         # **run 행이 생긴 뒤의 실패는 한 길이다** (D32) — failed 로 적고 정상 반환한다.
         # 예전에는 IngestFailed·DecodeFailed 밖의 예외(파일 읽기 OSError, 문장 수준 DataError)를
-        # 적고 다시 올려 HTTP 가 INTERNAL 500, CLI 가 트레이스백이었다 (2026-09-26 감사).
-        # 예상한 실패가 아니면 서버 로그에 트레이스백을 남긴다 — 클라이언트에는 status 만 간다 (D21).
+        # 적고 다시 올려 HTTP 가 INTERNAL 500 이었고 CLI 는 요약 줄 없이 죽었다 (2026-09-26 감사).
+        # 예상한 실패가 아니면 서버 로그에 트레이스백을 남긴다 (D21). 메시지 줄은 세정한다 (D31) —
+        # 트레이스백 본문은 D21 이 서버 로그에 두기로 한 원문이다.
         if not isinstance(exc, (IngestFailed, ingest_rules.DecodeFailed)):
-            log.exception("ingest run %s failed", run_id)
+            log.error("ingest run %s failed: %s", run_id, _run_error(exc), exc_info=exc)
         status, error = "failed", _run_error(exc)
 
-    # 이 UPDATE 자체가 실패하면(연결이 끊긴 경우) 그대로 올라간다 — 행은 running 으로 남고
-    # 다음 run 이 회수한다 (D32). 그것만이 run 행이 생긴 뒤의 INTERNAL 이다.
+    # **연결이 끊기면** 여기부터 예외가 그대로 올라간다 — 종료 UPDATE, 아래 남은 벡터 조회,
+    # `ingest()` 의 락 해제 모두 (D32). 종료 UPDATE 전이면 행은 running 으로 남고 다음 run 이 회수한다.
+    # 응답을 만들 수 없는 경우이고, run 행이 생긴 뒤의 INTERNAL 은 이것뿐이다.
     _finish(conn, run_id, status, error, counters)
     with conn.cursor() as cur:
         pending = cur.execute(

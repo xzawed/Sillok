@@ -322,11 +322,10 @@ def test_mcp_transport_rejects_a_lone_surrogate_before_the_service_sees_it(clien
 
 @pytest.mark.parametrize("status", ["failed", "partial"])
 def test_ingest_cli_prints_a_non_ok_run_without_crashing(capsys, monkeypatch, status):
-    """`service.ingest` 가 돌려주는 dict 에는 **`error` 키가 없다.**
+    """`service.ingest` 가 돌려주는 dict 에는 **`error` 키가 없다** (D32 — HTTP 에 싣지 않는다).
 
-    실패 문구는 `kb_ingest_runs.error` **컬럼**에만 쓰인다 (`_finish`). 대괄호로 읽으면
-    ok 가 아닌 모든 run 이 KeyError 로 죽는다 — `failed` 는 taxonomy 밖 문서 하나로 나므로
-    키 없이도 닿는 자리다.
+    CLI 는 사유를 `service.ingest_run_error` 로 run 행에서 읽는다. **그 읽기가 실패해도 죽지 않는다** —
+    DSN 이 죽어 있는 이 검사에서 상태 단어로 물러서야 한다. 판정(상태 줄과 종료 코드)은 이미 나갔다.
     """
     from sillok import cli
 

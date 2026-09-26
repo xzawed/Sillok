@@ -129,6 +129,7 @@ def normalize(raw: bytes, path: str = "") -> str:
 
     그 밖에는 아무것도 하지 않는다. 후행 공백을 다듬지 않고 마지막 개행을
     더하지도 빼지도 않는다. 손대는 만큼 해시가 무엇의 함수인지 흐려진다.
+    NUL 은 정규화가 아니라 **거절**이다 — 못 읽는 파일과 같은 `DecodeFailed` 다 (D30 §2).
     """
     try:
         text = raw.decode("utf-8")

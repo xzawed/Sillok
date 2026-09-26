@@ -434,7 +434,8 @@ def _mount_v1(app: FastAPI, cfg: Config) -> None:
         _query(request)  # D69
         # 운영자 진입점은 CLI 다 (D20). 여기는 같은 Service 함수의 HTTP 얼굴이고
         # 인자까지 같다 — 변경 파일 목록을 받지 않는다 (D30).
-        # run 행이 생긴 모든 경우에 ok: true 다. ok: false 는 락 거절과 D37 거절뿐이다.
+        # run 행이 생긴 모든 경우에 ok: true 다. ok: false 는 그 전의 거절(VALIDATION·CONFLICT)과
+        # DB 연결이 끊긴 경우의 INTERNAL 뿐이다 (D32).
         # **같은 거절이 이 얼굴에도 걸린다** — CLI 에만 걸면 이 문으로 우회된다 (D37).
         # `workspce` 같은 오타는 설정된 나무로 조용히 떨어졌다 (D69).
         service.reject_unknown(body, service.INGEST_KEYS)

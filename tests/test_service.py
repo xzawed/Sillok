@@ -540,5 +540,6 @@ def test_clip_keeps_the_domain_summaries_untouched():
 def test_a_run_error_is_never_empty(exc):
     """`_clip` 이 빈 문자열을 내는 모양이다 — 메시지 없음, 직렬화로 시작, 첫 줄이 빔. 그때는 예외 클래스 이름이다."""
     text = service._run_error(exc)
-    assert text
+    # 상수를 넣어도 통과하지 않게 값을 본다 — 클래스 이름이다 (리뷰 지적)
+    assert text == type(exc).__name__
     assert "본문" not in text  # 세정은 그대로다 (D31)

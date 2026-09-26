@@ -576,6 +576,50 @@ def test_an_unexpected_failure_after_the_run_row_returns_failed(db, clean, works
     assert "디스크가 사라졌다" in row["error"]
 
 
+def test_a_statement_level_db_error_also_returns_failed_with_the_path(db, clean, workspace, monkeypatch, caplog):
+    """OSError 만 보면 '문장 수준 DB 오류' 를 다시 올리는 회귀가 초록이었다 (2026-09-26 리뷰 주입).
+    사유에 어느 파일인지 붙고, 서버 로그에는 트레이스백이 남는다 (D21)."""
+    import logging
+
+    run(workspace)
+
+    def boom(*a, **k):
+        raise psycopg.errors.DataError("string is too long for tsvector")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    (workspace / "docs" / "long.md").write_text(FM + "# 긴\n\n본문\n", encoding="utf-8")
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        got = run(workspace)
+    assert got["status"] == "failed"
+    row = db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert row["error"].startswith("docs/long.md: ")
+    assert "tsvector" in row["error"]
+    assert any(r.exc_info for r in caplog.records if r.name == "sillok.service")
+
+
+def test_an_expected_failure_leaves_no_traceback(db, clean, workspace, caplog):
+    """디코드·NUL·taxonomy 는 예상한 실패다 — 사유 한 줄이면 되고 트레이스백은 소음이다."""
+    import logging
+
+    (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        assert run(workspace)["status"] == "failed"
+    assert not [r for r in caplog.records if r.name == "sillok.service" and r.levelno >= logging.ERROR]
+
+
+def test_a_backfill_failure_with_an_empty_summary_still_records_a_reason(db, clean, workspace, monkeypatch):
+    """`_clip` 이 직렬화에서 끊어 빈 문자열이 되는 모양이다 — partial 의 error 도 비지 않는다 (D32)."""
+
+    def boom(texts, api_key):
+        raise RuntimeError('{"error": {"message": "본문"}}')
+
+    monkeypatch.setattr(service, "_embed", boom)
+    got = run(workspace, key="sk-not-real")
+    assert got["status"] == "partial"
+    row = db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert row["error"] == "RuntimeError"
+
+
 def test_a_nul_document_fails_the_run_with_its_path(db, clean, workspace):
     run(workspace)
     (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
