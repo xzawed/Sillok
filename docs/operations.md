@@ -165,6 +165,13 @@ docker compose build test
 손으로 고친 잠금 파일이 그 과정에서 다시 풀려 되돌아온다(실측).
 컨테이너는 `--no-sync`로 돌기 때문에 그 자리가 진짜다.
 
+## ingest 가 `failed` 로 끝날 때
+
+`docker compose exec api sillok ingest --project <name>` 은 `ok` 가 아니면 종료 코드 `1` 이고,
+**stderr 마지막 줄이 사유다** (D32) — 디코드 실패·NUL·taxonomy 밖 값이면 그 파일의 경로가 들어 있다.
+그 파일을 고치고 다시 돌리면 된다. 실패한 run 은 삭제를 반영하지 않으므로 색인에서 문서가 사라지지 않는다.
+사유를 보려고 `5432` 를 열지 않는다 (D16).
+
 ## 마이그레이션이 실패할 때
 
 `serve`는 bind 전에 적용하고 실패하면 **뜨지 않는다** (D17). 그것이 맞는 동작이다 —

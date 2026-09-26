@@ -528,3 +528,17 @@ def test_clip_keeps_the_domain_summaries_untouched():
         "interrupted",
     ):
         assert service._clip(summary) == summary
+
+
+# --- run 의 error 는 비지 않는다 (D32 — 2026-09-26 감사 F072) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [TimeoutError(), RuntimeError(""), RuntimeError('{"error": {"message": "본문"}}'), OSError("\nsecond")],
+)
+def test_a_run_error_is_never_empty(exc):
+    """`_clip` 이 빈 문자열을 내는 모양이다 — 메시지 없음, 직렬화로 시작, 첫 줄이 빔. 그때는 예외 클래스 이름이다."""
+    text = service._run_error(exc)
+    assert text
+    assert "본문" not in text  # 세정은 그대로다 (D31)

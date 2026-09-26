@@ -553,3 +553,60 @@ def test_kb_status_counts_exactly_the_declared_statuses(db, clean, workspace):
         )
         got = service.kb_status(DSN, clean)["last_ingest_at"]
         assert (got is not None) == counted, f"{status} 처리가 D32 와 다르다"
+
+
+# --- run 행이 생긴 뒤의 실패는 전부 failed 로 끝나고 정상 반환한다 (D32 — 2026-09-26 감사 F070) --------
+
+
+def test_an_unexpected_failure_after_the_run_row_returns_failed(db, clean, workspace, monkeypatch):
+    """예전에는 failed 를 적고 다시 올려 HTTP 가 INTERNAL 500, CLI 가 트레이스백이었다.
+    D32: run 행이 생긴 모든 경우에 ok:true 와 data.status 다."""
+    run(workspace)
+
+    def boom(*a, **k):
+        raise OSError("디스크가 사라졌다")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    (workspace / "docs" / "new.md").write_text(FM + "# 새\n\n본문\n", encoding="utf-8")
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0  # 실패한 run 은 삭제를 반영하지 않는다
+    row = db.execute("SELECT status, error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert row["status"] == "failed"
+    assert "디스크가 사라졌다" in row["error"]
+
+
+def test_a_nul_document_fails_the_run_with_its_path(db, clean, workspace):
+    run(workspace)
+    (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0
+    assert len(docs(db)) == 3
+    row = db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert "docs/nul.md" in row["error"]
+
+
+def test_http_ingest_reports_a_failed_run_as_ok_true(db, clean, workspace, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("x")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    res = _client(workspace).post("/v1/ingest", json={"project": PROJECT})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["data"]["status"] == "failed"
+    assert "error" not in body["data"]  # 사유는 HTTP 에 싣지 않는다 (D32)
+
+
+def test_the_cli_prints_the_failure_reason(db, clean, workspace, monkeypatch, capsys):
+    """사유가 `kb_ingest_runs.error` 에만 있어 5432 를 열지 않고는 볼 수 없었다. stderr 에 싣는다 (D32·D19)."""
+    from sillok import cli
+
+    (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
+    monkeypatch.setenv("DATABASE_URL", DSN)
+    monkeypatch.setenv("SILLOK_WORKSPACE", str(workspace))
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    assert cli.main(["ingest", "--project", PROJECT]) == 1
+    assert "docs/nul.md" in capsys.readouterr().err

@@ -654,6 +654,26 @@ def _clip(text: object) -> str:
     return (lines[0] if lines else "")[:ERROR_MAX]
 
 
+def _run_error(exc: BaseException) -> str:
+    """run 행의 `error` — **비지 않는다** (D32 `partial`·`failed` 에서 반드시 있다).
+
+    `_clip` 은 메시지가 없거나, 직렬화로 시작하거나, 첫 줄이 빈 예외에 빈 문자열을 낸다.
+    그때는 예외 클래스 이름이다 — 본문을 싣지 않는 세정(D31)은 그대로다.
+    """
+    return _clip(exc) or type(exc).__name__
+
+
+def ingest_run_error(dsn: str, run_id: int) -> str | None:
+    """CLI 가 실패 사유를 stderr 에 싣는 문 (D32 · D19). **HTTP 에는 싣지 않는다** (D32).
+
+    사유는 `kb_ingest_runs.error` 에만 있었고 5432 를 열지 않고는 읽을 수 없었다(2026-09-26 감사).
+    CLI 는 자기 SQL 을 갖지 않으므로 여기서 읽는다.
+    """
+    with connect(dsn) as conn, conn.cursor() as cur:
+        row = cur.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (run_id,)).fetchone()
+    return row["error"] if row else None
+
+
 def _write_document(conn: psycopg.Connection, project: str, doc: dict[str, Any]) -> int:
     """문서 하나가 트랜잭션 하나다 (D32).
 
@@ -715,7 +735,7 @@ def _backfill(conn: psycopg.Connection, project: str, api_key: str) -> tuple[int
         try:
             vector = _embed([row["text"]], api_key)[0]
         except Exception as exc:
-            return done, _clip(exc)
+            return done, _run_error(exc)
         with conn.transaction(), conn.cursor() as cur:
             cur.execute(
                 "UPDATE kb_chunks SET embedding = %s::vector WHERE id = %s",
@@ -859,13 +879,17 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
             embedded, failure = _backfill(conn, project, api_key)
             if failure is not None:
                 status, error = "partial", failure
-    except (IngestFailed, ingest_rules.DecodeFailed) as exc:
-        status, error = "failed", _clip(exc)
     except Exception as exc:
-        # run 행에 남기고 다시 올린다. api 가 INTERNAL 로 접는다 (D21).
-        _finish(conn, run_id, "failed", _clip(exc), counters)
-        raise
+        # **run 행이 생긴 뒤의 실패는 한 길이다** (D32) — failed 로 적고 정상 반환한다.
+        # 예전에는 IngestFailed·DecodeFailed 밖의 예외(파일 읽기 OSError, 문장 수준 DataError)를
+        # 적고 다시 올려 HTTP 가 INTERNAL 500, CLI 가 트레이스백이었다 (2026-09-26 감사).
+        # 예상한 실패가 아니면 서버 로그에 트레이스백을 남긴다 — 클라이언트에는 status 만 간다 (D21).
+        if not isinstance(exc, (IngestFailed, ingest_rules.DecodeFailed)):
+            log.exception("ingest run %s failed", run_id)
+        status, error = "failed", _run_error(exc)
 
+    # 이 UPDATE 자체가 실패하면(연결이 끊긴 경우) 그대로 올라간다 — 행은 running 으로 남고
+    # 다음 run 이 회수한다 (D32). 그것만이 run 행이 생긴 뒤의 INTERNAL 이다.
     _finish(conn, run_id, status, error, counters)
     with conn.cursor() as cur:
         pending = cur.execute(
