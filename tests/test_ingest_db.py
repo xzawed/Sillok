@@ -553,3 +553,104 @@ def test_kb_status_counts_exactly_the_declared_statuses(db, clean, workspace):
         )
         got = service.kb_status(DSN, clean)["last_ingest_at"]
         assert (got is not None) == counted, f"{status} 처리가 D32 와 다르다"
+
+
+# --- run 행이 생긴 뒤의 실패는 전부 failed 로 끝나고 정상 반환한다 (D32 — 2026-09-26 감사 F070) --------
+
+
+def test_an_unexpected_failure_after_the_run_row_returns_failed(db, clean, workspace, monkeypatch):
+    """예전에는 failed 를 적고 다시 올려 HTTP 가 INTERNAL 500, CLI 가 트레이스백이었다.
+    D32: run 행이 생긴 모든 경우에 ok:true 와 data.status 다."""
+    run(workspace)
+
+    def boom(*a, **k):
+        raise OSError("디스크가 사라졌다")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    (workspace / "docs" / "new.md").write_text(FM + "# 새\n\n본문\n", encoding="utf-8")
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0  # 실패한 run 은 삭제를 반영하지 않는다
+    row = db.execute("SELECT status, error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert row["status"] == "failed"
+    assert "디스크가 사라졌다" in row["error"]
+
+
+def test_a_statement_level_db_error_also_returns_failed_with_the_path(db, clean, workspace, monkeypatch, caplog):
+    """OSError 만 보면 '문장 수준 DB 오류' 를 다시 올리는 회귀가 초록이었다 (2026-09-26 리뷰 주입).
+    사유에 어느 파일인지 붙고, 서버 로그에는 트레이스백이 남는다 (D21)."""
+    import logging
+
+    run(workspace)
+
+    def boom(*a, **k):
+        raise psycopg.errors.DataError("string is too long for tsvector")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    (workspace / "docs" / "long.md").write_text(FM + "# 긴\n\n본문\n", encoding="utf-8")
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        got = run(workspace)
+    assert got["status"] == "failed"
+    row = db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert row["error"].startswith("docs/long.md: ")
+    assert "tsvector" in row["error"]
+    assert any(r.exc_info for r in caplog.records if r.name == "sillok.service")
+
+
+def test_an_expected_failure_leaves_no_traceback(db, clean, workspace, caplog):
+    """디코드·NUL·taxonomy 는 예상한 실패다 — 사유 한 줄이면 되고 트레이스백은 소음이다."""
+    import logging
+
+    (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        assert run(workspace)["status"] == "failed"
+    assert not [r for r in caplog.records if r.name == "sillok.service" and r.levelno >= logging.ERROR]
+
+
+def test_a_backfill_failure_with_an_empty_summary_still_records_a_reason(db, clean, workspace, monkeypatch):
+    """`_clip` 이 직렬화에서 끊어 빈 문자열이 되는 모양이다 — partial 의 error 도 비지 않는다 (D32)."""
+
+    def boom(texts, api_key):
+        raise RuntimeError('{"error": {"message": "본문"}}')
+
+    monkeypatch.setattr(service, "_embed", boom)
+    got = run(workspace, key="sk-not-real")
+    assert got["status"] == "partial"
+    row = db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert row["error"] == "RuntimeError"
+
+
+def test_a_nul_document_fails_the_run_with_its_path(db, clean, workspace):
+    run(workspace)
+    (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0
+    assert len(docs(db)) == 3
+    row = db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (got["run_id"],)).fetchone()
+    assert "docs/nul.md" in row["error"]
+
+
+def test_http_ingest_reports_a_failed_run_as_ok_true(db, clean, workspace, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("x")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    res = _client(workspace).post("/v1/ingest", json={"project": PROJECT})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["data"]["status"] == "failed"
+    assert "error" not in body["data"]  # 사유는 HTTP 에 싣지 않는다 (D32)
+
+
+def test_the_cli_prints_the_failure_reason(db, clean, workspace, monkeypatch, capsys):
+    """사유가 `kb_ingest_runs.error` 에만 있어 5432 를 열지 않고는 볼 수 없었다. stderr 에 싣는다 (D32·D19)."""
+    from sillok import cli
+
+    (workspace / "docs" / "nul.md").write_bytes(b"# N\n\na\x00b\n")
+    monkeypatch.setenv("DATABASE_URL", DSN)
+    monkeypatch.setenv("SILLOK_WORKSPACE", str(workspace))
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    assert cli.main(["ingest", "--project", PROJECT]) == 1
+    assert "docs/nul.md" in capsys.readouterr().err

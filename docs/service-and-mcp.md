@@ -350,8 +350,10 @@ FastAPI 기본 응답(`{"detail": ...}`)은 이 계약 위반이다. 요청 검�
 } }
 ```
 
-`status`는 `ok` | `partial` | `failed` 중 하나다 (D32). **`partial`도 봉투는 `ok: true`다** —
-요청이 처리되지 못한 것이 아니라 일부만 채워진 것이다. `status`를 안 읽는 클라이언트는 그것을 놓친다.
+`status`는 `ok` | `partial` | `failed` 중 하나다 (D32). **`partial`·`failed`도 봉투는 `ok: true`다** —
+run 이 시작됐으면 결과가 무엇이든 처리된 것이다. `status`를 안 읽는 클라이언트는 그것을 놓친다.
+run 이 시작된 뒤의 `ok: false`는 DB 연결이 끊긴 경우의 `INTERNAL` 하나다 (D32).
+실패 사유(`kb_ingest_runs.error`)는 이 응답에 싣지 않는다 — CLI 가 stderr 에 싣는다 (D32).
 락을 얻지 못하면 본문 대신 `CONFLICT` 409다.
 `skipped[]`의 `reason`은 `not-md`와 `symlink` 둘뿐이고 **응답에만 있다** — 컬럼으로 만들지 않는다.
 

@@ -654,6 +654,26 @@ def _clip(text: object) -> str:
     return (lines[0] if lines else "")[:ERROR_MAX]
 
 
+def _run_error(exc: BaseException) -> str:
+    """run 행의 `error` — **비지 않는다** (D32 `partial`·`failed` 에서 반드시 있다).
+
+    `_clip` 은 메시지가 없거나, 직렬화로 시작하거나, 첫 줄이 빈 예외에 빈 문자열을 낸다.
+    그때는 예외 클래스 이름이다 — 본문을 싣지 않는 세정(D31)은 그대로다.
+    """
+    return _clip(exc) or type(exc).__name__
+
+
+def ingest_run_error(dsn: str, run_id: int) -> str | None:
+    """CLI 가 실패 사유를 stderr 에 싣는 문 (D32 · D19). **HTTP 에는 싣지 않는다** (D32).
+
+    사유는 `kb_ingest_runs.error` 에만 있었고 5432 를 열지 않고는 읽을 수 없었다(2026-09-26 감사).
+    CLI 는 자기 SQL 을 갖지 않으므로 여기서 읽는다.
+    """
+    with connect(dsn) as conn, conn.cursor() as cur:
+        row = cur.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (run_id,)).fetchone()
+    return row["error"] if row else None
+
+
 def _write_document(conn: psycopg.Connection, project: str, doc: dict[str, Any]) -> int:
     """문서 하나가 트랜잭션 하나다 (D32).
 
@@ -715,7 +735,7 @@ def _backfill(conn: psycopg.Connection, project: str, api_key: str) -> tuple[int
         try:
             vector = _embed([row["text"]], api_key)[0]
         except Exception as exc:
-            return done, _clip(exc)
+            return done, _run_error(exc)
         with conn.transaction(), conn.cursor() as cur:
             cur.execute(
                 "UPDATE kb_chunks SET embedding = %s::vector WHERE id = %s",
@@ -783,6 +803,37 @@ def _finish(
         )
 
 
+def _index_file(
+    conn: psycopg.Connection,
+    project: str,
+    item: ingest_rules.Scanned,
+    known: dict[str, str],
+    counters: dict[str, int],
+) -> None:
+    """파일 하나를 읽고, 바뀌었으면 그 문서의 트랜잭션 하나로 쓴다 (D30 · D32)."""
+    text = ingest_rules.normalize(item.absolute.read_bytes(), item.path)
+    digest = ingest_rules.content_hash(text)
+    if known.get(item.path) == digest:
+        return
+    meta = ingest_rules.derive_meta(item.path, text)
+    _validate_meta(item.path, meta)
+    _, body = ingest_rules.split_front_matter(text)
+    pieces = ingest_rules.chunk(body)
+    _write_document(
+        conn,
+        project,
+        {
+            "path": item.path,
+            "content_hash": digest,
+            "source_mtime": datetime.fromtimestamp(item.mtime, tz=timezone.utc),
+            "chunks": pieces,
+            **meta,
+        },
+    )
+    counters["files_changed"] += 1
+    counters["chunks_upserted"] += len(pieces)
+
+
 def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> dict[str, Any]:
     with conn.cursor() as cur:
         # 락이 그 행들이 죽었다는 증거다 — 살아 있는 run 이 있었다면 락을 못 얻었다.
@@ -821,27 +872,16 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
             }
 
         for item in files:
-            text = ingest_rules.normalize(item.absolute.read_bytes(), item.path)
-            digest = ingest_rules.content_hash(text)
-            if known.get(item.path) == digest:
-                continue
-            meta = ingest_rules.derive_meta(item.path, text)
-            _validate_meta(item.path, meta)
-            _, body = ingest_rules.split_front_matter(text)
-            pieces = ingest_rules.chunk(body)
-            _write_document(
-                conn,
-                project,
-                {
-                    "path": item.path,
-                    "content_hash": digest,
-                    "source_mtime": datetime.fromtimestamp(item.mtime, tz=timezone.utc),
-                    "chunks": pieces,
-                    **meta,
-                },
-            )
-            counters["files_changed"] += 1
-            counters["chunks_upserted"] += len(pieces)
+            try:
+                _index_file(conn, project, item, known, counters)
+            except (IngestFailed, ingest_rules.DecodeFailed):
+                raise
+            except Exception as exc:
+                # 예상 밖 실패에도 **경로를 붙인다** (2026-09-26 리뷰) — 청크가 tsvector 한도를 넘거나
+                # 파일 읽기가 실패하면 사유에 어느 파일인지가 없어 운영자가 고칠 곳을 몰랐다.
+                # 트레이스백은 서버 로그에 남는다 (D21). 사유 줄은 세정한다 (D31).
+                log.error("ingest run %s failed on %s", run_id, item.path, exc_info=exc)
+                raise IngestFailed(f"{item.path}: {_run_error(exc)}") from exc
 
         # 삭제는 백필 앞이다. 뒤에 두면 백필 첫 실패에서 멈추는 run 이
         # 삭제를 영구히 건너뛴다 — 텍스트 색인의 일부인데 벡터 때문에 빠지는 것이다.
@@ -859,13 +899,19 @@ def _run(conn: psycopg.Connection, project: str, root: Path, api_key: str) -> di
             embedded, failure = _backfill(conn, project, api_key)
             if failure is not None:
                 status, error = "partial", failure
-    except (IngestFailed, ingest_rules.DecodeFailed) as exc:
-        status, error = "failed", _clip(exc)
     except Exception as exc:
-        # run 행에 남기고 다시 올린다. api 가 INTERNAL 로 접는다 (D21).
-        _finish(conn, run_id, "failed", _clip(exc), counters)
-        raise
+        # **run 행이 생긴 뒤의 실패는 한 길이다** (D32) — failed 로 적고 정상 반환한다.
+        # 예전에는 IngestFailed·DecodeFailed 밖의 예외(파일 읽기 OSError, 문장 수준 DataError)를
+        # 적고 다시 올려 HTTP 가 INTERNAL 500 이었고 CLI 는 요약 줄 없이 죽었다 (2026-09-26 감사).
+        # 예상한 실패가 아니면 서버 로그에 트레이스백을 남긴다 (D21). 메시지 줄은 세정한다 (D31) —
+        # 트레이스백 본문은 D21 이 서버 로그에 두기로 한 원문이다.
+        if not isinstance(exc, (IngestFailed, ingest_rules.DecodeFailed)):
+            log.error("ingest run %s failed: %s", run_id, _run_error(exc), exc_info=exc)
+        status, error = "failed", _run_error(exc)
 
+    # **연결이 끊기면** 여기부터 예외가 그대로 올라간다 — 종료 UPDATE, 아래 남은 벡터 조회,
+    # `ingest()` 의 락 해제 모두 (D32). 종료 UPDATE 전이면 행은 running 으로 남고 다음 run 이 회수한다.
+    # 응답을 만들 수 없는 경우이고, run 행이 생긴 뒤의 INTERNAL 은 이것뿐이다.
     _finish(conn, run_id, status, error, counters)
     with conn.cursor() as cur:
         pending = cur.execute(

@@ -129,11 +129,16 @@ def normalize(raw: bytes, path: str = "") -> str:
 
     그 밖에는 아무것도 하지 않는다. 후행 공백을 다듬지 않고 마지막 개행을
     더하지도 빼지도 않는다. 손대는 만큼 해시가 무엇의 함수인지 흐려진다.
+    NUL 은 정규화가 아니라 **거절**이다 — 못 읽는 파일과 같은 `DecodeFailed` 다 (D30 §2).
     """
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise DecodeFailed(f"UTF-8 로 읽을 수 없다: {path or '<bytes>'}") from exc
+    # NUL 은 UTF-8 로는 멀쩡하지만 `text` 컬럼이 담지 못한다 — 못 읽는 파일과 같은 부류다 (D30 §2).
+    # 넘기면 청크 INSERT 가 DataError 로 터져 경로 없는 실패가 됐다. 벗기지 않는다 — 해시가 바뀐다.
+    if "\x00" in text:
+        raise DecodeFailed(f"NUL 을 담을 수 없다: {path or '<bytes>'}")
     if text.startswith("﻿"):
         text = text[1:]
     return text.replace("\r\n", "\n").replace("\r", "\n")

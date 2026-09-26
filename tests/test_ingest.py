@@ -286,3 +286,15 @@ def test_missing_front_matter_derives_the_title_from_the_first_h1():
     assert ingest.derive_meta("docs/a.md", FM + "# 다른 제목\n\n본문\n")["title"] == "T"
     # 제목이 하나도 없으면 NULL 이다.
     assert ingest.derive_meta("docs/a.md", "본문뿐이다\n")["title"] is None
+
+
+# --- 문서 본문의 NUL (D30 §2 — 2026-09-26 감사) ---------------------------------------------
+
+
+def test_a_nul_in_the_body_is_a_decode_failure_that_names_the_file():
+    """UTF-8 로는 멀쩡하지만 `text` 가 담지 못한다. 넘기면 청크 INSERT 가 DataError 로 터져
+    경로 없는 500 이 되고 다음 run 들도 같은 파일에서 멈췄다. skip 이 아니다 — skip 은 삭제 후보가 아니라
+    옛 청크가 `ok` 인 채 검색에 남는다."""
+    with pytest.raises(ingest.DecodeFailed) as exc:
+        ingest.normalize(b"# A\n\na\x00b\n", "docs/x.md")
+    assert "docs/x.md" in str(exc.value)
