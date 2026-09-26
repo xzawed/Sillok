@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,7 +48,8 @@ _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 class DecodeFailed(Exception):
-    """UTF-8 로 못 읽는 파일. 그 파일만 건너뛰지 않고 run 을 실패로 끝낸다 (D30 §2).
+    """UTF-8 로 못 읽는 파일, 또는 이름을 담을 수 없는 문서. 그 파일만 건너뛰지 않고 run 을 실패로 끝낸다
+    (D30 §2 · D70 ②).
 
     조용히 빠진 문서는 검색 0건과 구분되지 않는다.
     """
@@ -55,14 +58,16 @@ class DecodeFailed(Exception):
 @dataclass(frozen=True)
 class Scanned:
     path: str          # workspace 루트 기준 상대 경로, 구분자는 슬래시
-    absolute: Path
-    mtime: float       # 초. UTC 변환은 service 가 한다
+    # 절대 경로와 mtime 을 싣지 않는다. 읽기는 D36 의 걸음이고 mtime 은 그 서술자의 것이다 (D70 ③) —
+    # 스캔 때의 경로를 들고 가면 그 경로를 다시 따라가는 읽기가 돌아온다.
 
 
 @dataclass(frozen=True)
 class Skipped:
     path: str
-    reason: str        # not-md | symlink
+    reason: str        # not-md | symlink | not-regular (D70 ①)
+    # 이름이 유니코드로 담기지 않으면 `path` 는 표시형이고 **삭제 판정의 키가 아니다** (D70 ②).
+    exact: bool = True
 
 
 @dataclass(frozen=True)
@@ -84,41 +89,106 @@ def scan(workspace: Path) -> tuple[list[Scanned], list[Skipped]]:
     """D9 경로를 훑어 `.md` 만 돌려준다. 제외한 것은 조용히 사라지지 않는다 (D30 §1).
 
     순서는 `path` 의 UTF-8 바이트 오름차순이다. 파일시스템이 주는 순서에 기대지 않는다 —
-    부분 run 이 남긴 상태가 실행마다 같아야 한다 (D23 선례).
+    부분 run 이 남긴 상태가 실행마다 같아야 한다 (D23 선례). 정렬 키는 이름의 **파일시스템 바이트**다 —
+    UTF-8 로 담기는 이름에서는 같은 순서이고, 담기지 않는 이름에서 `encode("utf-8")` 처럼 터지지 않는다 (D70 ②).
+
+    판정은 `lstat` 이고 **여기서는 아무것도 열지 않는다.** 읽기는 service 가 D36 의 걸음으로 한다 (D70 ③).
     """
     files: list[Scanned] = []
     skipped: list[Skipped] = []
 
-    for entry in sorted(_walk(workspace), key=lambda p: str(p)):
-        rel = entry.relative_to(workspace).as_posix()
-        if not in_index_paths(rel):
-            continue
-        # 심볼릭 링크는 따라가지 않는다. workspace 밖을 가리키는 링크 하나가
-        # D9 경로를 무의미하게 만든다.
-        if entry.is_symlink():
-            skipped.append(Skipped(rel, "symlink"))
-            continue
-        if not rel.endswith(MD_SUFFIX):
-            skipped.append(Skipped(rel, "not-md"))
-            continue
-        files.append(Scanned(rel, entry, entry.stat().st_mtime))
-
-    files.sort(key=lambda f: f.path.encode("utf-8"))
-    skipped.sort(key=lambda s: s.path.encode("utf-8"))
+    for rel, kind in sorted(_walk(workspace), key=lambda e: os.fsencode(e[0])):
+        judged = _judge(rel, kind)
+        if isinstance(judged, Scanned):
+            files.append(judged)
+        elif judged is not None:
+            skipped.append(judged)
     return files, skipped
 
 
-def _walk(root: Path) -> list[Path]:
-    found: list[Path] = []
-    for entry in root.iterdir():
-        if entry.name in _SKIP_DIRS:
-            continue
-        # is_dir() 은 링크를 따라간다. 링크는 파일로 잡아 skipped 로 흘린다.
-        if entry.is_dir() and not entry.is_symlink():
-            found.extend(_walk(entry))
-        else:
-            found.append(entry)
+def _judge(rel: str, kind: str) -> Scanned | Skipped | None:
+    """항목 하나. D9 경로 밖이면 None 이다."""
+    exact = _storable(rel)
+    shown = rel if exact else printable(rel)
+    if kind == "link":
+        # 심볼릭 링크는 따라가지 않는다. workspace 밖을 가리키는 링크 하나가
+        # D9 경로를 무의미하게 만든다. 최상위 `docs`·`adr` 자체가 링크여도 싣는다 —
+        # `docs/` 접두 판정에 걸리지 않아 조용히 사라졌고 그 아래 행이 전부 지워졌다 (D30 §1).
+        indexed = in_index_paths(rel) or in_index_paths(rel + "/")
+        return Skipped(shown, "symlink", exact) if indexed else None
+    if not in_index_paths(rel):
+        return None
+    if not rel.endswith(MD_SUFFIX):
+        return Skipped(shown, "not-md", exact)
+    if kind != "file":
+        # FIFO·소켓·장치. 읽으면 FIFO 는 쓰는 쪽을 영영 기다린다 (D70 ①).
+        return Skipped(shown, "not-regular", exact)
+    if not exact:
+        # 문서로 받을 것인데 `path` 가 `text` 컬럼과 JSON 에 담기지 않는다.
+        # 건너뛰면 옛 청크가 `ok` 인 채 남는다 — NUL 과 같은 부류다 (D30 §2 · D70 ②).
+        raise DecodeFailed(f"경로를 UTF-8 로 담을 수 없다: {shown}")
+    return Scanned(rel)
+
+
+def _walk(root: Path) -> list[tuple[str, str]]:
+    """`(상대 경로, 종류)` — 종류는 `file`·`link`·`other`. 디렉터리는 내려가고 링크는 따라가지 않는다.
+
+    **재귀하지 않는다.** 깊은 나무가 `RecursionError` 로 끝나면 그 사유에 경로가 없다 (2026-09-26 감사).
+    `DirEntry` 의 판정은 `follow_symlinks=False` 로 본다 — 기본값은 링크를 따라간다.
+    """
+    found: list[tuple[str, str]] = []
+    pending = [(os.fspath(root), "")]
+    while pending:
+        directory, prefix = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.name in _SKIP_DIRS:
+                    continue
+                rel = prefix + entry.name
+                if entry.is_symlink():
+                    found.append((rel, "link"))
+                elif entry.is_dir(follow_symlinks=False):
+                    pending.append((entry.path, rel + "/"))
+                elif entry.is_file(follow_symlinks=False):
+                    found.append((rel, "file"))
+                else:
+                    found.append((rel, "other"))
     return found
+
+
+def _storable(rel: str) -> bool:
+    """이름이 유니코드로 담기는가 — 비-UTF-8 바이트(Linux 의 surrogateescape)·짝 없는 서로게이트가 없는가."""
+    try:
+        rel.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+# --- 진단 문자열의 표시형 (D32) ----------------------------------------------
+
+# 양방향 서식 문자. 보이는 순서를 바꿔 진단 줄을 위조할 수 있다.
+_BIDI = frozenset("؜‎‏‪‫‬‭‮⁦⁧⁨⁩")
+# 제어(C0·DEL·C1)·줄 구분자·문단 구분자·짝 없는 서로게이트.
+_UNPRINTABLE = frozenset({"Cc", "Zl", "Zp", "Cs"})
+
+
+def printable(text: str) -> str:
+    """run 오류·서버 로그·CLI 에 싣는 **표시형**이다 (D32 · D70 ②).
+
+    경로에 든 줄바꿈이 첫 줄 규칙으로 사유를 경로 한가운데서 잘랐고, ESC 가 운영자 터미널에
+    그대로 닿았다 (2026-09-26 감사). 그 글자들을 `\\xNN`·`\\uNNNN` 으로 적는다.
+    **진단 전용이다** — 백슬래시가 든 진짜 이름과 같은 글자가 될 수 있어 키로 쓰지 않는다.
+    응답의 `skipped[].path` 와 행의 `path` 는 원문이다 — JSON 이 이스케이프한다.
+    """
+    return "".join(_escape(ch) for ch in text)
+
+
+def _escape(ch: str) -> str:
+    if ch in _BIDI or unicodedata.category(ch) in _UNPRINTABLE:
+        code = ord(ch)
+        return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+    return ch
 
 
 # --- 정규화와 해시 ----------------------------------------------------------
@@ -131,14 +201,16 @@ def normalize(raw: bytes, path: str = "") -> str:
     더하지도 빼지도 않는다. 손대는 만큼 해시가 무엇의 함수인지 흐려진다.
     NUL 은 정규화가 아니라 **거절**이다 — 못 읽는 파일과 같은 `DecodeFailed` 다 (D30 §2).
     """
+    # 사유에 싣는 경로는 표시형이다 (D32) — 이름의 줄바꿈이 첫 줄 규칙으로 사유를 자른다.
+    shown = printable(path) if path else "<bytes>"
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise DecodeFailed(f"UTF-8 로 읽을 수 없다: {path or '<bytes>'}") from exc
+        raise DecodeFailed(f"UTF-8 로 읽을 수 없다: {shown}") from exc
     # NUL 은 UTF-8 로는 멀쩡하지만 `text` 컬럼이 담지 못한다 — 못 읽는 파일과 같은 부류다 (D30 §2).
     # 넘기면 청크 INSERT 가 DataError 로 터져 경로 없는 실패가 됐다. 벗기지 않는다 — 해시가 바뀐다.
     if "\x00" in text:
-        raise DecodeFailed(f"NUL 을 담을 수 없다: {path or '<bytes>'}")
+        raise DecodeFailed(f"NUL 을 담을 수 없다: {shown}")
     if text.startswith("﻿"):
         text = text[1:]
     return text.replace("\r\n", "\n").replace("\r", "\n")

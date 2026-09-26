@@ -75,6 +75,29 @@ def test_ingest_accepts_the_same_tree_spelled_differently(monkeypatch, tmp_path)
     assert "SILLOK_WORKSPACE" not in str(exc.value)
 
 
+def test_ingest_prints_paths_and_the_reason_in_display_form(capsys, monkeypatch, tmp_path):
+    """파일 이름과 사유 줄은 운영자 터미널에 닿는다 (D32). 사유 줄은 DB 에서 오므로
+    경로 말고도 무엇이든 실을 수 있다 — CLI 는 받은 것을 믿지 않고 표시형으로 싣는다. DB 없이 돈다."""
+    from sillok import service
+
+    monkeypatch.setenv("SILLOK_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sillok:secret@127.0.0.1:1/sillok")
+    failed = {
+        "run_id": 1, "status": "failed", "files_seen": 1, "files_changed": 0, "files_deleted": 0,
+        "chunks_upserted": 0, "chunks_embedded": 0, "chunks_pending": 0,
+        "skipped": [{"path": "docs/\x1b[2Jwipe.json", "reason": "not-md"}],
+    }
+    monkeypatch.setattr(service, "ingest", lambda *a, **k: failed)
+    monkeypatch.setattr(service, "ingest_run_error", lambda *a, **k: "docs/a.md: 사유\x1b]0;제목\x07")
+
+    assert cli.main(["ingest", "--project", "sillok"]) == 1
+    err = capsys.readouterr().err
+    assert "\x1b" not in err
+    assert "\x07" not in err
+    assert "docs/\\x1b[2Jwipe.json (not-md)" in err
+    assert "docs/a.md: 사유\\x1b]0;제목\\x07" in err
+
+
 def test_registered_commands_are_exactly_the_implemented_ones():
     """구현되지 않은 명령을 파서에 미리 만들어 두지 않는다.
 

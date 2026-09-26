@@ -12,7 +12,7 @@
 //
 // 사용: node scripts/check-layout.test.mjs
 
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -54,6 +54,8 @@ function run(dir) {
       // stderr 를 명시하지 않으면 execFileSync 는 자식의 stderr 를 **부모에게도 흘린다.**
       // 주입한 고장이 전부 화면에 쏟아져 정작 OK/BAD 줄이 묻힌다. 잡기만 하고 흘리지 않는다.
       stdio: ['ignore', 'pipe', 'pipe'],
+      // 멈춘 게이트는 실패다. 시한이 없으면 하네스가 대신 멈춰 아무것도 보고하지 못한다 (케이스 73).
+      timeout: 120_000,
     })
     return { code: 0, out }
   } catch (e) {
@@ -871,6 +873,31 @@ const CASES = [
     mutate: (dir) => symlinkSync('spec.md', join(dir, 'docs', 'link.md')),
   },
   {
+    // D30 §1 (2026-09-26). 최상위 `adr` 자체가 링크면 `adr/` 접두에 걸리지 않아 목록에서 **조용히 빠졌다** —
+    // ingest 에서는 그 아래 행이 전부 지워졌다. 계약은 그 줄에 보이는가다. 윈도우는 권한 없이 만들 수 있는
+    // 정션으로 만든다 — Node 는 정션도 링크로 본다(실측). 다른 플랫폼은 타입 인자를 무시한다.
+    id: '72 최상위 D9 디렉터리 링크가 제외 목록에 보인다',
+    expect: 'pass',
+    optional: true,
+    expectOut: ['adr (symlink)'],
+    mutate: (dir) => {
+      renameSync(join(dir, 'adr'), join(dir, 'adr-real'))
+      symlinkSync(join(dir, 'adr-real'), join(dir, 'adr'), 'junction')
+    },
+  },
+  {
+    // D70 ①. FIFO 는 읽지 않는다 — 예전 게이트는 `readFileSync` 에서 쓰는 쪽을 영영 기다렸다.
+    // ingest 와 같은 사유(`not-regular`)로 보인다. 멈추면 아래 `run` 의 시한이 실패로 바꾼다.
+    id: '73 D9 경로의 FIFO 는 읽지 않고 not-regular 로 보인다',
+    expect: 'pass',
+    optional: true,   // 윈도우에는 파일시스템 FIFO 가 없다
+    expectOut: ['docs/x.md (not-regular)'],
+    mutate: (dir) => {
+      if (process.platform === 'win32') throw new Error('FIFO 를 만들 수 없는 플랫폼이다')
+      execFileSync('mkfifo', [join(dir, 'docs', 'x.md')])
+    },
+  },
+  {
     // 검사 18. `superseded` 는 왜 그런지를 남겨야 한다 (D61).
     id: '52 superseded 인데 superseded_by 가 없으면 운다',
     expect: 'fail',
@@ -953,14 +980,14 @@ const CASES = [
     expect: 'fail',
     mentions: ['다음 번호는 D', 'docs/open-questions.md'],
     mutate: (dir) =>
-      edit(dir, 'docs/open-questions.md', (t) => t.replace('D70 이후로', 'D60 이후로')),
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('D71 이후로', 'D60 이후로')),
   },
   {
     // 대조군. **번호가 앞서 가도 틀린 것이다** — `다음 번호` 는 하나뿐이라서다.
     id: '63 다음 D 번호가 앞서 가도 운다',
     expect: 'fail',
     mentions: ['다음 번호는 D', 'CLAUDE.md'],
-    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D70 이후로', 'D99 이후로')),
+    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace('D71 이후로', 'D99 이후로')),
   },
   {
     // 같은 몰의 두 번째 굴. 열거가 일찍 끊기면 그 뒤 결정이 `임의로 뒤집지 않는다` 밖에 남는다.
@@ -974,7 +1001,7 @@ const CASES = [
     mutate: (dir) =>
       edit(dir, 'CLAUDE.md', (t) =>
         t.replace(
-          '  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05, D66은 2026-09-12, D67–D69는 2026-09-26 확정. 임의로 뒤집지 않는다.',
+          '  D35–D46은 2026-09-02, D47–D64는 2026-09-03, D65는 2026-09-05, D66은 2026-09-12, D67–D70은 2026-09-26 확정. 임의로 뒤집지 않는다.',
           '  D35–D46은 2026-09-02, D47–D53은 2026-09-03' + NL + '  확정. 임의로 뒤집지 않는다.'
         )
       ),
@@ -983,17 +1010,17 @@ const CASES = [
     id: '65 확정 열거가 마지막 D 에서 끊기면 운다',
     expect: 'fail',
     mentions: ['임의로 뒤집지 않는다', '에서 끊긴다'],
-    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace(', D67–D69는 2026-09-26 확정', ' 확정')),
+    mutate: (dir) => edit(dir, 'CLAUDE.md', (t) => t.replace(', D67–D70은 2026-09-26 확정', ' 확정')),
   },
   {
     // 대조군 둘. **ADR 에 결정을 더하면 세 사본이 함께 따라와야 한다.**
     // 마지막 `## Dnn` 만 바꾸면 셋이 한꺼번에 낡는다 — 그때 울어야 한다.
     id: '64 ADR 에 D 를 더하고 사본을 안 고치면 운다',
     expect: 'fail',
-    mentions: ['다음 번호는 D71'],
+    mentions: ['다음 번호는 D72'],
     mutate: (dir) =>
       edit(dir, 'adr/0001-v1-stack-decisions.md', (t) =>
-        t.replace('## 나중에 바꿔도 되는 것 (v1 비범위)', '## D70 — 자리표시자\n\n## 나중에 바꿔도 되는 것 (v1 비범위)')
+        t.replace('## 나중에 바꿔도 되는 것 (v1 비범위)', '## D71 — 자리표시자\n\n## 나중에 바꿔도 되는 것 (v1 비범위)')
       ),
   },
   {
@@ -1076,13 +1103,13 @@ const META = [
     disable: (s) =>
       s.replace('if (mentioned.length && Math.max(...mentioned) !== next - 1) {', 'if (false) {'),
     inject: (dir) =>
-      edit(dir, 'CLAUDE.md', (t) => t.replace(', D67–D69는 2026-09-26 확정', ' 확정')),
+      edit(dir, 'CLAUDE.md', (t) => t.replace(', D67–D70은 2026-09-26 확정', ' 확정')),
   },
   {
     id: 'M22 검사 21(다음 D 번호)을 끄면 낡은 번호가 통과한다',
     disable: (s) => s.replace('if (Number(m[1]) !== next) {', 'if (false) {'),
     inject: (dir) =>
-      edit(dir, 'docs/open-questions.md', (t) => t.replace('D70 이후로', 'D60 이후로')),
+      edit(dir, 'docs/open-questions.md', (t) => t.replace('D71 이후로', 'D60 이후로')),
   },
   {
     id: 'M21 검사 20(SKILL 해시)을 끄면 어긋난 해시가 통과한다',

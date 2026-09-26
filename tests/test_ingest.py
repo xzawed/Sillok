@@ -9,6 +9,8 @@ D22 가 남긴 숙제(`test` 이미지에 `docs/`·`adr/` 가 없다)를 `tmp_pa
 from __future__ import annotations
 
 import hashlib
+import os
+import sys
 
 import pytest
 
@@ -138,6 +140,127 @@ def test_symlinks_are_reported_not_followed(tmp_path):
     files, skipped = ingest.scan(tmp_path)
     assert [f.path for f in files] == ["docs/real.md"]
     assert skipped == [ingest.Skipped("docs/link.md", "symlink")]
+
+
+def _link(link, target, *, directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except (OSError, NotImplementedError):
+        pytest.skip("이 환경에서는 심볼릭 링크를 만들 수 없다")
+
+
+def test_a_linked_top_level_docs_is_reported_not_dropped(tmp_path):
+    """`docs` 자체가 링크면 `docs/` 접두 판정에 걸리지 않아 **조용히 사라졌다** (2026-09-26 감사).
+    그 아래 행이 전부 삭제 후보가 됐다 — D30 §1 의 `조용히 사라지지 않는다` 가 한 층 위에서 깨진 것이다."""
+    real = tmp_path.parent / f"{tmp_path.name}-real"
+    write(real, "a.md", FM)
+    write(tmp_path, "adr/b.md", FM)
+    _link(tmp_path / "docs", real, directory=True)
+
+    files, skipped = ingest.scan(tmp_path)
+    assert [f.path for f in files] == ["adr/b.md"]
+    assert skipped == [ingest.Skipped("docs", "symlink")]
+
+
+def test_a_top_level_link_outside_the_d9_paths_is_not_reported(tmp_path):
+    """대조군. `docsx` 는 D9 경로가 아니다 — 판정은 `이름 + '/'` 가 D9 인가이지 접두 문자열이 아니다."""
+    real = tmp_path.parent / f"{tmp_path.name}-real"
+    write(real, "a.md", FM)
+    write(tmp_path, "docs/a.md", FM)
+    _link(tmp_path / "docsx", real, directory=True)
+
+    _, skipped = ingest.scan(tmp_path)
+    assert skipped == []
+
+
+fifo_only = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO 를 만들 수 없는 플랫폼이다")
+
+
+@fifo_only
+def test_a_fifo_named_md_is_skipped_as_not_regular(tmp_path):
+    """FIFO 는 받아들인 내용이 아니다 (D70 ①). `.md` 가 아니면 확장자 판정 그대로 `not-md` 다."""
+    write(tmp_path, "docs/a.md", FM)
+    os.mkfifo(tmp_path / "docs" / "x.md")
+    os.mkfifo(tmp_path / "docs" / "y.json")
+
+    files, skipped = ingest.scan(tmp_path)
+    assert [f.path for f in files] == ["docs/a.md"]
+    assert skipped == [
+        ingest.Skipped("docs/x.md", "not-regular"),
+        ingest.Skipped("docs/y.json", "not-md"),
+    ]
+
+
+undecodable_names = pytest.mark.skipif(
+    sys.platform == "win32" or os.fsencode("\udcff") != b"\xff",
+    reason="이름에 비-UTF-8 바이트를 넣을 수 있는 파일시스템 인코딩이 아니다",
+)
+
+
+def _raw(root, rel: bytes) -> None:
+    path = os.path.join(os.fsencode(root), rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(FM.encode("utf-8"))
+
+
+@undecodable_names
+def test_an_undecodable_non_md_name_is_skipped_with_a_display_path(tmp_path):
+    """예전에는 정렬 키 `encode("utf-8")` 가 터져 **이미지 하나로 매 run 이 사유 없이** `failed` 였다 (D70 ②).
+    표시형은 삭제 키가 아니다 — `exact` 가 그것을 싣는다."""
+    write(tmp_path, "docs/a.md", FM)
+    _raw(tmp_path, b"docs/\xff.json")
+
+    files, skipped = ingest.scan(tmp_path)
+    assert [f.path for f in files] == ["docs/a.md"]
+    assert skipped == [ingest.Skipped("docs/\\udcff.json", "not-md", exact=False)]
+
+
+@undecodable_names
+def test_an_undecodable_md_name_fails_the_scan_with_a_display_path(tmp_path):
+    """건너뛰면 옛 청크가 `ok` 인 채 남는다 — NUL 을 skip 으로 두지 않은 이유와 같다 (D30 §2 · D70 ②)."""
+    write(tmp_path, "docs/a.md", FM)
+    _raw(tmp_path, b"docs/\xff.md")
+
+    with pytest.raises(ingest.DecodeFailed) as caught:
+        ingest.scan(tmp_path)
+    assert "docs/\\udcff.md" in str(caught.value)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="경로 길이 한도가 깊이보다 먼저 온다")
+def test_a_deep_tree_does_not_hit_the_recursion_limit(tmp_path):
+    """재귀 걸음은 깊은 나무에서 `RecursionError` 로 끝나고 그 사유에는 경로가 없다."""
+    depth = sys.getrecursionlimit() + 50
+    # `mkdir(parents=True)`·`os.makedirs` 도 재귀다 — 준비가 먼저 한도에 걸린다. 한 단씩 만든다.
+    here = tmp_path / "docs"
+    here.mkdir()
+    for _ in range(depth):
+        here = here / "d"
+        here.mkdir()
+    (here / "deep.md").write_text(FM, encoding="utf-8")
+    rel = "docs/" + "d/" * depth + "deep.md"
+
+    files, _ = ingest.scan(tmp_path)
+    assert [f.path for f in files] == [rel]
+
+
+# --- 진단 문자열의 표시형 (D32) ----------------------------------------------
+
+
+def test_printable_escapes_what_can_forge_or_cut_a_line():
+    """제어·줄 구분·양방향 서식·짝 없는 서로게이트. 경로의 줄바꿈이 첫 줄 규칙으로 사유를 잘랐고
+    ESC 가 운영자 터미널에 그대로 닿았다 (2026-09-26 감사)."""
+    raw = "docs/a\nb\x1b[1m\x7f\x85 ‮⁦\udcff.md"
+    assert ingest.printable(raw) == (
+        "docs/a\\x0ab\\x1b[1m\\x7f\\x85\\u2028\\u202e\\u2066\\udcff.md"
+    )
+
+
+def test_printable_leaves_ordinary_names_alone_and_is_idempotent():
+    plain = "docs/한글 이름 (초안) — v2.md"
+    assert ingest.printable(plain) == plain
+    once = ingest.printable("docs/a\tb.md")
+    assert ingest.printable(once) == once
 
 
 # --- front matter 와 메타 (D30 §7 · D29) ------------------------------------

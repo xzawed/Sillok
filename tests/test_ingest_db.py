@@ -6,6 +6,10 @@ workspace 는 `tmp_path` 로 만든다. 작업 트리를 마운트하지 않는 
 
 from __future__ import annotations
 
+import os
+import signal
+from contextlib import contextmanager
+
 import psycopg
 import pytest
 from psycopg.rows import dict_row
@@ -654,3 +658,280 @@ def test_the_cli_prints_the_failure_reason(db, clean, workspace, monkeypatch, ca
     monkeypatch.setenv("OPENAI_API_KEY", "")
     assert cli.main(["ingest", "--project", PROJECT]) == 1
     assert "docs/nul.md" in capsys.readouterr().err
+
+
+# --- 파일시스템의 가장자리 (D30 §1 · D36 · D70) ------------------------------
+
+
+def _link(link, target, *, directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except (OSError, NotImplementedError):
+        pytest.skip("이 환경에서는 심볼릭 링크를 만들 수 없다")
+
+
+def _move_out(workspace, rel):
+    """workspace 안의 디렉터리를 밖으로 옮기고 그 자리를 링크로 바꾼다."""
+    inside = workspace / rel
+    outside = workspace.parent / f"{workspace.name}-{rel.replace('/', '-')}-real"
+    inside.rename(outside)
+    _link(inside, outside, directory=True)
+    return outside
+
+
+class _Stuck(Exception):
+    """`OSError` 가 아닌 것으로 깨운다 — `TimeoutError` 는 읽기 실패와 같은 부류로 접힌다."""
+
+
+@contextmanager
+def _deadline(seconds: int):
+    """회귀하면 FIFO 의 open 에서 영영 멈춘다. 멈춤을 실패로 바꾼다."""
+
+    def fire(signum, frame):
+        raise _Stuck("FIFO 에서 멈췄다")
+
+    previous = signal.signal(signal.SIGALRM, fire)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _error(db, run_id):
+    return db.execute("SELECT error FROM kb_ingest_runs WHERE id = %s", (run_id,)).fetchone()["error"]
+
+
+def _texts(db):
+    return " ".join(r["content"] for r in chunks(db))
+
+
+def test_a_fifo_named_md_is_skipped_and_keeps_its_row(db, clean, workspace):
+    """FIFO 하나가 락을 쥔 채 ingest 를 영영 멈췄다 (2026-09-26 감사). 받아들인 내용이 아니다 (D70 ①)."""
+    run(workspace)
+    target = workspace / "docs" / "a.md"
+    target.unlink()
+    os.mkfifo(target)
+
+    with _deadline(20):
+        got = run(workspace)
+    assert got["status"] == "ok"
+    assert got["skipped"] == [{"path": "docs/a.md", "reason": "not-regular"}]
+    assert got["files_deleted"] == 0
+    assert "docs/a.md" in [r["path"] for r in docs(db)]
+
+
+def test_a_linked_directory_keeps_the_rows_under_it(db, clean, workspace, write):
+    """디렉터리를 링크로 바꾸는 것만으로 그 아래 문서가 지워졌다 — `skip 은 삭제 후보가 아니다` 의 한 층 위 (D30 §1)."""
+    write("docs/sub/c.md", FM + "# 다\n\n본문 다\n")
+    run(workspace)
+    outside = _move_out(workspace, "docs/sub")
+    (outside / "secret.md").write_text(FM + "# 비밀\n\n밖에 있는 비밀\n", encoding="utf-8")
+
+    got = run(workspace)
+    assert got["status"] == "ok"
+    assert got["skipped"] == [{"path": "docs/sub", "reason": "symlink"}]
+    assert got["files_deleted"] == 0
+    paths = [r["path"] for r in docs(db)]
+    assert "docs/sub/c.md" in paths
+    assert "docs/sub/secret.md" not in paths
+
+
+def test_a_linked_top_level_docs_is_reported_and_keeps_its_rows(db, clean, workspace):
+    """`docs` 자체가 링크면 경로 판정에 걸리지 않아 조용히 사라졌고 docs/** 가 전부 지워졌다."""
+    run(workspace)
+    _move_out(workspace, "docs")
+
+    got = run(workspace)
+    assert got["status"] == "ok"
+    assert {"path": "docs", "reason": "symlink"} in got["skipped"]
+    assert got["files_deleted"] == 0
+    assert "docs/a.md" in [r["path"] for r in docs(db)]
+
+
+def test_a_link_prefix_does_not_keep_a_sibling(db, clean, workspace, write):
+    """대조군. 접두는 `링크 + '/'` 다 — 슬래시가 없으면 `docs/sub` 가 `docs/sub2.md` 를 살린다."""
+    write("docs/sub/c.md", FM + "# 다\n\n본문 다\n")
+    write("docs/sub2.md", FM + "# 라\n\n본문 라\n")
+    run(workspace)
+    _move_out(workspace, "docs/sub")
+    (workspace / "docs" / "sub2.md").unlink()
+
+    got = run(workspace)
+    assert got["status"] == "ok"
+    assert got["files_deleted"] == 1
+    paths = [r["path"] for r in docs(db)]
+    assert "docs/sub/c.md" in paths
+    assert "docs/sub2.md" not in paths
+
+
+def _swap_after_scan(monkeypatch, swap):
+    """스캔이 돌려준 뒤, 읽기 전에 나무를 바꾼다 — TOCTOU 를 결정적으로 재현한다 (D70 ③)."""
+    real_scan = service.ingest_rules.scan
+
+    def scan_then_swap(root):
+        result = real_scan(root)
+        swap()
+        return result
+
+    monkeypatch.setattr(service.ingest_rules, "scan", scan_then_swap)
+
+
+def test_a_file_swapped_for_a_link_after_the_scan_fails_the_run(db, clean, workspace, monkeypatch, caplog):
+    """스캔은 `lstat` 으로 링크를 거르고 읽기는 경로를 다시 따라갔다. 밖의 내용이 색인되고 검색으로 나갔다.
+    예상한 실패라 트레이스백을 남기지 않는다 — 사유가 전부다."""
+    import logging
+
+    run(workspace)
+    secret = workspace.parent / f"{workspace.name}-secret.md"
+    secret.write_text(FM + "# 비밀\n\n밖에 있는 비밀\n", encoding="utf-8")
+    target = workspace / "docs" / "a.md"
+
+    def swap():
+        target.unlink()
+        _link(target, secret)
+
+    _swap_after_scan(monkeypatch, swap)
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0
+    error = _error(db, got["run_id"])
+    assert error.startswith("docs/a.md: ")
+    assert error.count("docs/a.md") == 1  # `경로: 경로: 사유` 가 아니다
+    assert "밖에 있는 비밀" not in _texts(db)
+    assert not [r for r in caplog.records if r.name == "sillok.service" and r.exc_info]
+
+
+def test_an_inner_directory_swapped_for_a_link_after_the_scan_fails_the_run(db, clean, workspace, monkeypatch):
+    """마지막 성분만 막는 방어는 여기서 통과한다 — 성분마다 내려가는 이유다 (D36)."""
+    run(workspace)
+    outside = workspace.parent / f"{workspace.name}-outside"
+    outside.mkdir()
+    (outside / "a.md").write_text(FM + "# 비밀\n\n밖에 있는 비밀\n", encoding="utf-8")
+    docs_dir = workspace / "docs"
+
+    def swap():
+        docs_dir.rename(workspace.parent / f"{workspace.name}-docs-moved")
+        _link(docs_dir, outside, directory=True)
+
+    _swap_after_scan(monkeypatch, swap)
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0
+    assert _error(db, got["run_id"]).startswith("docs/a.md: ")
+    assert "밖에 있는 비밀" not in _texts(db)
+
+
+def test_ingest_refuses_before_the_scan_without_the_flags(db, clean, workspace, monkeypatch, caplog):
+    """D36 의 `방어 없이 읽지 않는다` 를 ingest 에도 적용한다 (D70 ③). run 행이 생긴 뒤라 D32 의 한 길을 탄다.
+    예상한 실패라 트레이스백을 남기지 않는다."""
+    import logging
+
+    run(workspace)
+
+    def must_not_scan(root):
+        raise AssertionError("플래그가 없는데 스캔했다")
+
+    monkeypatch.setattr(service.workspace_rules, "flags_supported", lambda: False)
+    monkeypatch.setattr(service.ingest_rules, "scan", must_not_scan)
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0
+    assert "O_NOFOLLOW" in _error(db, got["run_id"])
+    assert not [r for r in caplog.records if r.name == "sillok.service" and r.exc_info]
+    assert len(docs(db)) == 3
+
+
+undecodable_names = pytest.mark.skipif(
+    os.fsencode("\udcff") != b"\xff",
+    reason="이름에 비-UTF-8 바이트를 넣을 수 있는 파일시스템 인코딩이 아니다",
+)
+
+
+@undecodable_names
+def test_an_undecodable_md_name_fails_the_run_with_a_display_path(db, clean, workspace):
+    """예전에는 정렬 키가 터져 사유에 경로가 없었다 (D70 ②)."""
+    run(workspace)
+    with open(os.path.join(os.fsencode(workspace), b"docs/\xff.md"), "wb") as f:
+        f.write(FM.encode("utf-8"))
+
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["files_deleted"] == 0
+    assert "docs/\\udcff.md" in _error(db, got["run_id"])
+
+
+@undecodable_names
+def test_a_display_path_is_not_a_deletion_key(db, clean, workspace, write):
+    """표시형은 진단이다 — 이름이 글자 그대로 `\\udcff.md` 인 진짜 파일의 행을 살려 두면 안 된다 (D70 ②)."""
+    literal = "docs/\\udcff.md"
+    write(literal, FM + "# 글자 그대로\n\n본문\n")
+    run(workspace)
+    assert literal in [r["path"] for r in docs(db)]
+
+    (workspace / literal).unlink()
+    os.symlink(b"/nowhere", os.path.join(os.fsencode(workspace), b"docs/\xff.md"))
+
+    got = run(workspace)
+    assert got["status"] == "ok"
+    assert got["skipped"] == [{"path": literal, "reason": "symlink"}]
+    assert got["files_deleted"] == 1
+    assert literal not in [r["path"] for r in docs(db)]
+
+
+def test_a_line_break_in_a_path_stays_on_one_line_in_the_error(db, clean, workspace, write, monkeypatch, caplog):
+    """경로의 줄바꿈이 첫 줄 규칙으로 사유를 경로 한가운데서 잘랐다 (D32). 서버 로그도 표시형이다.
+    응답의 `skipped[].path` 는 원문이다 — JSON 이 이스케이프한다."""
+    import logging
+
+    run(workspace)
+    write("docs/x\ny.json", "{}")
+
+    def boom(*a, **k):
+        raise OSError("디스크가 사라졌다")
+
+    monkeypatch.setattr(service, "_write_document", boom)
+    write("docs/a\nb.md", FM + "# 새\n\n본문\n")
+    with caplog.at_level(logging.ERROR, logger="sillok.service"):
+        got = run(workspace)
+    assert got["status"] == "failed"
+    assert got["skipped"] == [{"path": "docs/x\ny.json", "reason": "not-md"}]
+    error = _error(db, got["run_id"])
+    assert error.startswith("docs/a\\x0ab.md: ")
+    assert "디스크가 사라졌다" in error
+    logged = [r.getMessage() for r in caplog.records if r.name == "sillok.service"]
+    assert logged
+    assert all("\n" not in m for m in logged)
+
+
+def test_the_cli_escapes_what_it_prints(db, clean, workspace, write, monkeypatch, capsys):
+    """ESC 가 운영자 터미널에 그대로 닿았다 (D32). 경로도 사유 줄도 표시형으로 싣는다."""
+    from sillok import cli
+
+    write("docs/\x1b[31mred.json", "{}")
+    (workspace / "docs" / "bad\x07.md").write_bytes(b"\xff\xfe")
+    monkeypatch.setenv("DATABASE_URL", DSN)
+    monkeypatch.setenv("SILLOK_WORKSPACE", str(workspace))
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    assert cli.main(["ingest", "--project", PROJECT]) == 1
+    err = capsys.readouterr().err
+    assert "\x1b" not in err
+    assert "\x07" not in err
+    assert "docs/\\x1b[31mred.json (not-md)" in err
+    assert "docs/bad\\x07.md" in err
+    # CLI 가 싣기 전에 행 자체가 표시형이다 — 서버 로그와 DB 도 같은 사유를 본다.
+    stored = db.execute(
+        "SELECT error FROM kb_ingest_runs WHERE project = %s ORDER BY id DESC LIMIT 1", (PROJECT,)
+    ).fetchone()["error"]
+    assert stored == "UTF-8 로 읽을 수 없다: docs/bad\\x07.md"
+
+
+def test_a_taxonomy_violation_names_the_path_in_display_form(db, clean, workspace, write):
+    """taxonomy 사유도 경로를 앞에 단다 — 줄바꿈이 든 이름이 사유를 자르지 않는다 (D32)."""
+    write("docs/c\nd.md", FM.replace("doc_type: other", "doc_type: bogus") + "# 다\n")
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert _error(db, got["run_id"]).startswith('docs/c\\x0ad.md: doc_type "bogus"')
