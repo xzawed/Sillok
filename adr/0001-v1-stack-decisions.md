@@ -1284,7 +1284,8 @@ SELECT pg_try_advisory_lock(hashtext('sillok:ingest'), hashtext(%(project)s));
   트레이스백은 서버 로그에 남긴다 (D21). 예전 구현은 뒤엣것을 적고 다시 올려 HTTP 가 `INTERNAL` 500 이었고
   CLI 는 요약 줄 없이 죽었다 (2026-09-26 감사)
 - **다시 올리는 것은 연결이 끊긴 경우뿐이다** — 종료 UPDATE, 그 뒤의 남은 벡터 조회, 락 해제 모두.
-  행이 이미 종단됐어도 응답을 만들 수 없다. 이것이 run 행이 생긴 뒤의 유일한 `INTERNAL` 이다
+  행이 이미 종단됐어도 응답을 만들 수 없다. 운영에서 run 행이 생긴 뒤의 `INTERNAL` 은 이것뿐이다 —
+  `_finish` 가 값 집합 밖의 `status` 를 거절하는 것은 코드의 잘못을 잡는 방어이고 검사가 그 길을 막는다
 
 CLI 와 HTTP 얼굴:
 
