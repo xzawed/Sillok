@@ -11,6 +11,8 @@ import os
 import psycopg
 import pytest
 
+from sillok import workspace
+
 DSN = os.environ.get("DATABASE_URL", "postgresql://sillok:sillok@127.0.0.1:5432/sillok")
 
 SKIP_REASON = (
@@ -30,3 +32,17 @@ def db_available() -> bool:
 
 
 needs_db = pytest.mark.skipif(not db_available(), reason=SKIP_REASON)
+
+# ingest 는 D36 의 걸음으로 읽는다 (D70 ③). 그 플래그가 없는 호스트(Windows)에서는 5432 를 게시해 DB 에 붙어도
+# ingest 가 스캔 전에 `failed` 로 끝난다 — 실패가 아니라 skip 이 맞다. 이 검사들은 --profile test 에서 돈다.
+WALK_SKIP_REASON = (
+    "O_NOFOLLOW / O_DIRECTORY 가 없는 플랫폼이다 — ingest 는 D36 의 걸음으로 읽는다 (D70 ③)."
+    " `docker compose --profile test run --rm test` 에서 돈다 (D22)."
+)
+needs_walk = pytest.mark.skipif(not workspace.flags_supported(), reason=WALK_SKIP_REASON)
+
+
+def require_walk() -> None:
+    """ingest 를 부르는 픽스처가 먼저 부른다. 모듈 전체를 막지 않아도 되는 자리다."""
+    if not workspace.flags_supported():
+        pytest.skip(WALK_SKIP_REASON)

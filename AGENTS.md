@@ -180,5 +180,6 @@ DECIDED: body is always the {ok, data|error} envelope; INTERNAL message is a fix
 DECIDED: no token -> loopback Host/Origin gate on every path, VALIDATION (D67); token -> bearer only
 DECIDED: client values never become INTERNAL; ceilings on fields, search query, 4 MiB body (D68)
 DECIDED: unknown keys -> VALIDATION on both faces; filters stripped, enums checked, [since, until) (D69)
-DECIDED: ingest reads through the D36 walk (no O_NOFOLLOW -> failed); FIFO/socket/device -> skipped not-regular (D70)
+DECIDED: ingest reads through the D36 walk (no O_NOFOLLOW -> failed); .md FIFO/socket/device -> skipped not-regular;
+         unstorable .md name -> failed in sort order (D70)
 ```

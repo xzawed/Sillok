@@ -355,7 +355,7 @@ run 이 시작됐으면 결과가 무엇이든 처리된 것이다. `status`를 
 run 이 시작된 뒤의 `ok: false`는 DB 연결이 끊긴 경우의 `INTERNAL` 하나다 (D32).
 실패 사유(`kb_ingest_runs.error`)는 이 응답에 싣지 않는다 — CLI 가 stderr 에 싣는다 (D32).
 락을 얻지 못하면 본문 대신 `CONFLICT` 409다.
-`skipped[]`의 `reason`은 `not-md`·`symlink`·`not-regular`(FIFO·소켓·장치) 셋이고 **응답에만 있다** — 컬럼으로 만들지 않는다.
+`skipped[]`의 `reason`은 `not-md`·`symlink`·`not-regular`(이름이 `.md` 인 FIFO·소켓·장치) 셋이고 **응답에만 있다** — 컬럼으로 만들지 않는다.
 이름이 유니코드로 담기지 않으면 `path` 는 표시형이고 삭제 판정의 키가 아니다 (D70).
 링크로 건너뛴 경로와 **그 아래**의 행은 지우지 않는다 (D30 §1).
 

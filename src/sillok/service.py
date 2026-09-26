@@ -777,11 +777,12 @@ def ingest(dsn: str, project: object, workspace: str, api_key: str = "") -> dict
 
 def _validate_meta(path: str, meta: dict[str, Any]) -> None:
     """taxonomy 밖이면 서비스가 거절한다. DDL 에 CHECK 를 더하지 않는다 (D25). 경로는 표시형이다 (D32)."""
+    # 값도 표시형이다 — front matter 의 ESC 가 행에 그대로 들어갔고 U+2028 이 사유를 잘랐다 (2026-09-26 리뷰).
     shown = ingest_rules.printable(path)
-    if meta["doc_type"] not in ingest_rules.DOC_TYPES:
-        raise IngestFailed(shown + ': doc_type "' + str(meta["doc_type"]) + '" is outside the taxonomy')
-    if meta["status"] not in ingest_rules.STATUSES:
-        raise IngestFailed(shown + ': status "' + str(meta["status"]) + '" is outside the taxonomy')
+    for field, allowed in (("doc_type", ingest_rules.DOC_TYPES), ("status", ingest_rules.STATUSES)):
+        if meta[field] not in allowed:
+            value = ingest_rules.printable(str(meta[field]))
+            raise IngestFailed(f'{shown}: {field} "{value}" is outside the taxonomy')
 
 
 def _finish(
@@ -817,6 +818,8 @@ def _index_file(
     **읽기는 `get_file` 과 같은 걸음이다** (D36 · D70 ③). 스캔은 `lstat` 으로 링크를 걸렀지만
     예전 읽기는 경로를 다시 따라가 그 사이 링크로 바뀐 파일이나 중간 디렉터리의 밖을 색인했다.
     """
+    if not item.storable:
+        raise ingest_rules.unstorable(item)
     fd = workspace_rules.open_regular(root, item.path)
     try:
         raw = workspace_rules.read_all(fd)

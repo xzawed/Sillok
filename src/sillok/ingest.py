@@ -60,6 +60,10 @@ class Scanned:
     path: str          # workspace 루트 기준 상대 경로, 구분자는 슬래시
     # 절대 경로와 mtime 을 싣지 않는다. 읽기는 D36 의 걸음이고 mtime 은 그 서술자의 것이다 (D70 ③) —
     # 스캔 때의 경로를 들고 가면 그 경로를 다시 따라가는 읽기가 돌아온다.
+    # 이름이 유니코드로 담기지 않는 문서다 (D70 ②). 스캔에서 터뜨리지 않고 **정렬 순서의 제자리에서**
+    # service 가 실패시킨다 — 스캔에서 터지면 앞 순서의 NUL·디코드 실패보다 먼저 나오고 앞 파일도 색인되지 않았다
+    # (2026-09-26 리뷰 실측). 첫 실패는 순서대로다 (D30 §2).
+    storable: bool = True
 
 
 @dataclass(frozen=True)
@@ -92,7 +96,9 @@ def scan(workspace: Path) -> tuple[list[Scanned], list[Skipped]]:
     부분 run 이 남긴 상태가 실행마다 같아야 한다 (D23 선례). 정렬 키는 이름의 **파일시스템 바이트**다 —
     UTF-8 로 담기는 이름에서는 같은 순서이고, 담기지 않는 이름에서 `encode("utf-8")` 처럼 터지지 않는다 (D70 ②).
 
-    판정은 `lstat` 이고 **여기서는 아무것도 열지 않는다.** 읽기는 service 가 D36 의 걸음으로 한다 (D70 ③).
+    판정은 `lstat` 이고 **파일은 열지 않는다.** 읽기는 service 가 D36 의 걸음으로 한다 (D70 ③).
+    디렉터리는 경로로 나열한다 — 나열과 진입 사이에 디렉터리가 링크로 바뀌는 경합은 닫지 않았다.
+    그때 새는 것은 이름이고 내용은 읽기 걸음이 막는다 (D70 이 닫지 않는 것).
     """
     files: list[Scanned] = []
     skipped: list[Skipped] = []
@@ -123,11 +129,15 @@ def _judge(rel: str, kind: str) -> Scanned | Skipped | None:
     if kind != "file":
         # FIFO·소켓·장치. 읽으면 FIFO 는 쓰는 쪽을 영영 기다린다 (D70 ①).
         return Skipped(shown, "not-regular", exact)
-    if not exact:
-        # 문서로 받을 것인데 `path` 가 `text` 컬럼과 JSON 에 담기지 않는다.
-        # 건너뛰면 옛 청크가 `ok` 인 채 남는다 — NUL 과 같은 부류다 (D30 §2 · D70 ②).
-        raise DecodeFailed(f"경로를 UTF-8 로 담을 수 없다: {shown}")
-    return Scanned(rel)
+    # `exact` 가 거짓이면 문서로 받을 것인데 `path` 가 `text` 컬럼과 JSON 에 담기지 않는다.
+    # 건너뛰면 옛 청크가 `ok` 인 채 남는다 — NUL 과 같은 부류다 (D30 §2 · D70 ②). 실패는 service 가
+    # 그 순서에서 낸다 (`unstorable`).
+    return Scanned(rel, exact)
+
+
+def unstorable(item: Scanned) -> DecodeFailed:
+    """이름을 담을 수 없는 문서의 실패. 열기 전에 낸다 — 열 이유가 없다 (D70 ②)."""
+    return DecodeFailed(f"경로를 UTF-8 로 담을 수 없다: {printable(item.path)}")
 
 
 def _walk(root: Path) -> list[tuple[str, str]]:
@@ -135,6 +145,9 @@ def _walk(root: Path) -> list[tuple[str, str]]:
 
     **재귀하지 않는다.** 깊은 나무가 `RecursionError` 로 끝나면 그 사유에 경로가 없다 (2026-09-26 감사).
     `DirEntry` 의 판정은 `follow_symlinks=False` 로 본다 — 기본값은 링크를 따라간다.
+    **D9 디렉터리 밖으로는 내려가지 않는다.** 색인 집합은 같고, 뿌리의 `build/` 같은 읽을 수 없는
+    디렉터리 하나가 run 을 실패시키지 않는다 (2026-09-26 리뷰). 뿌리의 항목 자체는 본다 — 루트 `README*` 와
+    최상위 `docs`·`adr` 링크가 거기 있다.
     """
     found: list[tuple[str, str]] = []
     pending = [(os.fspath(root), "")]
@@ -145,15 +158,23 @@ def _walk(root: Path) -> list[tuple[str, str]]:
                 if entry.name in _SKIP_DIRS:
                     continue
                 rel = prefix + entry.name
-                if entry.is_symlink():
-                    found.append((rel, "link"))
-                elif entry.is_dir(follow_symlinks=False):
+                kind = _kind(entry)
+                if kind != "dir":
+                    found.append((rel, kind))
+                elif in_index_paths(rel + "/"):
                     pending.append((entry.path, rel + "/"))
-                elif entry.is_file(follow_symlinks=False):
-                    found.append((rel, "file"))
-                else:
-                    found.append((rel, "other"))
     return found
+
+
+def _kind(entry: os.DirEntry) -> str:
+    """링크를 먼저 본다 — `is_dir()`·`is_file()` 의 기본값은 링크를 따라간다."""
+    if entry.is_symlink():
+        return "link"
+    if entry.is_dir(follow_symlinks=False):
+        return "dir"
+    if entry.is_file(follow_symlinks=False):
+        return "file"
+    return "other"
 
 
 def _storable(rel: str) -> bool:

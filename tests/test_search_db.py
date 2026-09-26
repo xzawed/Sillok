@@ -14,13 +14,13 @@ from psycopg.rows import dict_row
 
 from sillok import search, service
 
-from dbcheck import DSN, needs_db
+from dbcheck import DSN, needs_db, needs_walk
 from test_service import vector_mechanism_in
 
 PROJECT = "t_step6"
 FM = "---\ntitle: T\ndoc_type: other\nstatus: current\nmodule: null\n---\n\n"
 
-pytestmark = needs_db
+pytestmark = [needs_db, needs_walk]
 
 
 @pytest.fixture

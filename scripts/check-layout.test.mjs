@@ -898,6 +898,21 @@ const CASES = [
     },
   },
   {
+    // 73 의 짝. walk 가 찾은 것만 거르면 **이름으로 여는 고정 경로**가 남는다 — `README.md` 가 FIFO 면
+    // 진입점 검사가 `readFileSync` 에서 영영 멈췄다 (2026-09-26 Grok 리뷰, 실측 exit 124).
+    // 게이트는 멈추지 않고 울어야 한다. 읽기 문을 되돌리면 시한에 걸려 사유가 없는 실패가 되고, mentions 가 문다.
+    id: '74 이름으로 여는 고정 경로가 FIFO 면 멈추지 않고 운다',
+    expect: 'fail',
+    optional: true,   // 윈도우에는 파일시스템 FIFO 가 없다
+    mentions: ['README.md : 정규 파일이 아니다'],
+    expectOut: ['README.md (not-regular)'],
+    mutate: (dir) => {
+      if (process.platform === 'win32') throw new Error('FIFO 를 만들 수 없는 플랫폼이다')
+      rmSync(join(dir, 'README.md'))
+      execFileSync('mkfifo', [join(dir, 'README.md')])
+    },
+  },
+  {
     // 검사 18. `superseded` 는 왜 그런지를 남겨야 한다 (D61).
     id: '52 superseded 인데 superseded_by 가 없으면 운다',
     expect: 'fail',

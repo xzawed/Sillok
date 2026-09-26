@@ -217,14 +217,37 @@ def test_an_undecodable_non_md_name_is_skipped_with_a_display_path(tmp_path):
 
 
 @undecodable_names
-def test_an_undecodable_md_name_fails_the_scan_with_a_display_path(tmp_path):
-    """건너뛰면 옛 청크가 `ok` 인 채 남는다 — NUL 을 skip 으로 두지 않은 이유와 같다 (D30 §2 · D70 ②)."""
+def test_an_undecodable_md_name_is_a_document_that_cannot_be_stored(tmp_path):
+    """건너뛰면 옛 청크가 `ok` 인 채 남는다 — NUL 을 skip 으로 두지 않은 이유와 같다 (D30 §2 · D70 ②).
+    스캔은 터뜨리지 않고 표시만 한다 — 실패는 정렬 순서의 제자리에서 service 가 낸다."""
     write(tmp_path, "docs/a.md", FM)
     _raw(tmp_path, b"docs/\xff.md")
 
-    with pytest.raises(ingest.DecodeFailed) as caught:
-        ingest.scan(tmp_path)
-    assert "docs/\\udcff.md" in str(caught.value)
+    files, skipped = ingest.scan(tmp_path)
+    assert [(f.path, f.storable) for f in files] == [("docs/a.md", True), ("docs/\udcff.md", False)]
+    assert skipped == []
+    assert "docs/\\udcff.md" in str(ingest.unstorable(files[1]))
+
+
+def test_the_walk_does_not_descend_outside_the_d9_directories(tmp_path, monkeypatch):
+    """색인 집합은 같고, 뿌리의 읽을 수 없는 디렉터리 하나가 run 을 실패시키지 않는다 (2026-09-26 리뷰).
+    뿌리의 항목 자체는 본다 — 루트 README 와 최상위 `docs`·`adr` 링크가 거기 있다."""
+    write(tmp_path, "docs/a.md", FM)
+    write(tmp_path, "adr/b.md", FM)
+    write(tmp_path, "README.md", "# r\n")
+    write(tmp_path, "build/private/x.md", FM)
+    write(tmp_path, "src/docs/y.md", FM)
+    listed: list[str] = []
+    real = os.scandir
+
+    def recording(path):
+        listed.append(os.path.relpath(path, tmp_path).replace(os.sep, "/"))
+        return real(path)
+
+    monkeypatch.setattr(ingest.os, "scandir", recording)
+    files, _ = ingest.scan(tmp_path)
+    assert [f.path for f in files] == ["README.md", "adr/b.md", "docs/a.md"]
+    assert sorted(listed) == [".", "adr", "docs"]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="경로 길이 한도가 깊이보다 먼저 온다")

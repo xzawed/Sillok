@@ -109,8 +109,9 @@ node scripts/check-layout.test.mjs   # 그 검사가 실제로 무는지 (고장
   막힌 단계가 하나도 없으면 §7 번호 목록의 **마지막 단계**가 N이다 — 여기서 유도를 멈추면
   마지막 Q가 닫히는 날 검사의 절반이 조용히 은퇴한다
 - **색인 제외 목록** — D9 경로 안인데 먹지 않은 파일을 사유(`not-md`·`symlink`·`not-regular`)와 함께
-  **출력한다** (실패가 아니다). 심볼릭 링크는 게이트의 walk 도 따라가지 않고 FIFO 같은 비정규 파일은 읽지 않는다 —
-  ingest 와 같다 (D70). 최상위 `docs`·`adr` 자체가 링크여도 목록에 보인다
+  **출력한다** (실패가 아니다). 심볼릭 링크는 게이트의 walk 도 따라가지 않고 FIFO 같은 비정규 파일은 열지 않는다 —
+  ingest 와 같다 (D70). 이름으로 여는 고정 경로(`README.md`·`docs/plan.md` …)도 같은 문을 지나 열기 전에 본다 —
+  비정규면 멈추지 않고 실패한다. 최상위 `docs`·`adr` 자체가 링크여도 목록에 보인다
   ingest 의 `skipped[]` 와 같은 사실을 게이트에서도 보이게 해서 두 벌이 갈라지지 않게 한다 (D30)
 - **`status`의 생애** — `superseded`는 `superseded_by`(색인 대상이고 자기 자신이 아닌 경로),
   `stale`은 `stale_since`(오늘 이전의 `YYYY-MM-DD`)를 front matter에 요구한다 (D61).

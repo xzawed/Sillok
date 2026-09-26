@@ -5,7 +5,7 @@
 // ingest 가 실제로 무엇을 집는지(**실측**)는 scripts/check-index-parity.mjs 가 이 목록과 대조한다.
 // 사용: node scripts/check-layout.mjs
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync as readOpened, readdirSync, statSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,6 +40,17 @@ const problems = []
 const fail = (m) => problems.push(m)
 
 const rel = (p) => relative(ROOT, p).split(sep).join('/')
+// **모든 읽기가 지나는 문 하나다.** FIFO·소켓·장치는 열지 않는다 (D70 ①) — `open` 이 FIFO 에서 쓰는 쪽을
+// 영영 기다린다. walk 만 거르면 이름으로 여는 고정 경로(README·plan·ADR·SKILL …)가 남아
+// `mkfifo README.md` 하나에 게이트가 멈췄다 (2026-09-26 Grok 리뷰, 실측 exit 124).
+// `statSync` 는 열지 않고 본다. 링크는 지금처럼 따라간다 — 멈추는 것은 링크가 아니라 FIFO 를 여는 것이다.
+function readFileSync(path, encoding) {
+  if (!statSync(path).isFile()) {
+    fail(`${rel(path)} : 정규 파일이 아니다 — 열지 않는다 (D70)`)
+    return ''
+  }
+  return readOpened(path, encoding)
+}
 // D47. ingest 의 _SKIP_DIRS 와 **같은 목록**이어야 한다. 정본은 ADR 이다 —
 // 게이트는 JS 이고 ingest 는 파이썬이라 코드로 공유할 수 없다.
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.pytest_cache'])

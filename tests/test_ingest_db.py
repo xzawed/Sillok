@@ -18,12 +18,12 @@ from sillok import service
 
 from test_service import MEASURED_OPENAI_FAILURE
 
-from dbcheck import DSN, needs_db
+from dbcheck import DSN, needs_db, needs_walk
 
 PROJECT = "t_step5"
 FM = "---\ntitle: T\ndoc_type: other\nstatus: current\nmodule: null\n---\n\n"
 
-pytestmark = needs_db
+pytestmark = [needs_db, needs_walk]
 
 
 @pytest.fixture
@@ -861,7 +861,75 @@ def test_an_undecodable_md_name_fails_the_run_with_a_display_path(db, clean, wor
     got = run(workspace)
     assert got["status"] == "failed"
     assert got["files_deleted"] == 0
-    assert "docs/\\udcff.md" in _error(db, got["run_id"])
+    # 문구까지 본다 — 이 판정이 빠져도 드라이버의 인코드 오류가 경로를 달고 와 `in` 은 초록이었다 (2026-09-26 주입).
+    assert _error(db, got["run_id"]) == "경로를 UTF-8 로 담을 수 없다: docs/\\udcff.md"
+
+
+@undecodable_names
+def test_an_unstorable_name_fails_in_sort_order_like_nul(db, clean, workspace, write):
+    """이름 실패도 **정렬 순서의 제자리에서** 난다 (D30 §2 · D70 ②). 예전 구현은 스캔에서 터뜨려
+    앞 순서의 NUL 실패보다 먼저 나왔고, 앞 파일의 변경도 색인되지 않았다 (2026-09-26 리뷰 실측)."""
+    run(workspace)
+    write("docs/0.md", FM + "# 영\n\n새로 바뀐 본문\n")
+    (workspace / "docs" / "a.md").write_bytes(FM.encode("utf-8") + b"a\x00b\n")
+    with open(os.path.join(os.fsencode(workspace), b"docs/\xff.md"), "wb") as f:
+        f.write(FM.encode("utf-8"))
+
+    got = run(workspace)
+    assert got["status"] == "failed"
+    assert _error(db, got["run_id"]) == "NUL 을 담을 수 없다: docs/a.md"  # 순서상 먼저인 실패
+    assert got["files_changed"] == 1  # docs/0.md 는 그 앞이라 색인됐다
+    assert "새로 바뀐 본문" in _texts(db)
+    assert got["files_seen"] == 5
+
+
+@undecodable_names
+def test_an_undecodable_link_name_is_not_a_prefix_key(db, clean, workspace, write):
+    """표시형 링크 이름이 접두 키가 되면 글자 그대로 같은 **진짜 디렉터리**의 옛 행을 살린다 (D70 ②, 2026-09-26 리뷰)."""
+    literal = "docs/\\udcff"
+    write(literal + "/k.md", FM + "# 글자 그대로\n\n본문\n")
+    run(workspace)
+    assert literal + "/k.md" in [r["path"] for r in docs(db)]
+
+    (workspace / literal / "k.md").unlink()
+    (workspace / literal).rmdir()
+    os.symlink(b"/nowhere", os.path.join(os.fsencode(workspace), b"docs/\xff"))
+
+    got = run(workspace)
+    assert got["status"] == "ok"
+    assert got["skipped"] == [{"path": literal, "reason": "symlink"}]
+    assert got["files_deleted"] == 1
+    assert literal + "/k.md" not in [r["path"] for r in docs(db)]
+
+
+def test_source_mtime_is_the_descriptors_not_the_paths(db, clean, workspace, monkeypatch):
+    """경로를 다시 stat 하면 TOCTOU 가 돌아온다 (D70 ③). 읽은 뒤 그 경로를 다른 파일로 바꿔도
+    `source_mtime` 은 **읽은 서술자의** 것이다."""
+    from datetime import datetime, timezone
+
+    target = workspace / "docs" / "a.md"
+    target.write_text(FM + "# 가\n\n바뀐 본문\n", encoding="utf-8")
+    read_at = datetime(2020, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
+    os.utime(target, (read_at, read_at))
+    real_read_all = service.workspace_rules.read_all
+
+    def read_then_swap(fd):
+        data = real_read_all(fd)
+        if os.fstat(fd).st_ino == os.stat(target).st_ino:
+            replacement = workspace / "docs" / "a.md.new"
+            replacement.write_text("다른 파일\n", encoding="utf-8")
+            later = datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()
+            os.utime(replacement, (later, later))
+            os.replace(replacement, target)
+        return data
+
+    monkeypatch.setattr(service.workspace_rules, "read_all", read_then_swap)
+    got = run(workspace)
+    assert got["status"] == "ok"
+    row = db.execute(
+        "SELECT source_mtime FROM kb_documents WHERE project = %s AND path = 'docs/a.md'", (PROJECT,)
+    ).fetchone()
+    assert row["source_mtime"].timestamp() == read_at
 
 
 @undecodable_names
@@ -930,8 +998,9 @@ def test_the_cli_escapes_what_it_prints(db, clean, workspace, write, monkeypatch
 
 
 def test_a_taxonomy_violation_names_the_path_in_display_form(db, clean, workspace, write):
-    """taxonomy 사유도 경로를 앞에 단다 — 줄바꿈이 든 이름이 사유를 자르지 않는다 (D32)."""
-    write("docs/c\nd.md", FM.replace("doc_type: other", "doc_type: bogus") + "# 다\n")
+    """taxonomy 사유도 경로를 앞에 단다 — 줄바꿈이 든 이름이 사유를 자르지 않는다 (D32).
+    값도 표시형이다 — front matter 의 ESC 가 행에 그대로 들어갔다 (2026-09-26 리뷰)."""
+    write("docs/c\nd.md", FM.replace("doc_type: other", "doc_type: bo\x1b[31mgus") + "# 다\n")
     got = run(workspace)
     assert got["status"] == "failed"
-    assert _error(db, got["run_id"]).startswith('docs/c\\x0ad.md: doc_type "bogus"')
+    assert _error(db, got["run_id"]) == 'docs/c\\x0ad.md: doc_type "bo\\x1b[31mgus" is outside the taxonomy'
