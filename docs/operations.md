@@ -104,7 +104,7 @@ PowerShell 에는 `test` 도, 그 뜻의 `<` 리다이렉션도 없다.
 ```bash
 git clone https://github.com/xzawed/Sillok.git
 cd Sillok
-cp .env.example .env          # OPENAI_API_KEY 를 채운다. 비우면 키워드 검색만 돈다 (D2)
+cp .env.example .env          # 키가 있으면 OPENAI_API_KEY 를 채운다. 비우면 키워드 검색만 돈다 (D2)
 docker compose up -d --wait   # 마이그레이션이 bind 전에 적용된다 (D17)
 ```
 
