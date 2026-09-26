@@ -331,6 +331,219 @@ def test_h1_strips_inline_markup():
     assert ingest.first_h1("# **굵은** `코드` [링크](http://x)\n") == "굵은 코드 링크"
 
 
+# --- 인라인 마크업 (D29 — 2026-09-26 감사 F099) ---------------------------------
+
+# 표는 두 번 쓰인다 — 각 줄의 기대값 검사와 유도 규칙의 digest(D71). 규칙을 바꾸면 여기 줄이 바뀌고 판이 오른다.
+_STRIP_CASES = [
+    # 코드 스팬 안은 글자 그대로다 — `event_stats` 가 `eventstats` 였다.
+    ("`event_stats` 응답", "event_stats 응답"),
+    ("루트 `README*`", "루트 README*"),
+    ("`docs/**`·`adr/**`", "docs/**·adr/**"),
+    ("``a`b_c``", "a`b_c"),
+    ("`` a_b ``", "a_b"),
+    ("`[not](url)`", "[not](url)"),
+    # 링크·이미지는 표시 텍스트만. 링크 텍스트의 강조는 그 안에서만 짝을 짓고, 코드 스팬이 링크 괄호보다 먼저다.
+    ("[`a_b`](http://x) 끝", "a_b 끝"),
+    ("![그림](a.png) 설명", "그림 설명"),
+    ("*a [b* c](d)", "*a b* c"),
+    ("[`a](b)`", "[a](b)"),
+    # 강조는 짝이 맞는 구분자만 지운다 — CommonMark 의 강조 처리 그대로 (markdown-it-py 와 대조, 2026-09-26 리뷰).
+    ("**검증하다**", "검증하다"),
+    ("_이탤릭_", "이탤릭"),
+    ("**굵은**다", "굵은다"),
+    ("***a**", "*a"),
+    ("*foo**bar*", "foo**bar"),
+    ("**a*b*c**", "abc"),
+    ("*a **b***", "a b"),
+    ("1*2**3", "1*2**3"),
+    # 코드 스팬 밖의 글롭 하나는 글자다 — 3의 배수 규칙이 없으면 `docs/*/.md` 가 됐다.
+    ("docs/**/*.md", "docs/**/*.md"),
+    ("**/*.md", "**/*.md"),
+    # 둘이면 CommonMark 가 그 사이를 굵게 본다 — GitHub 가 보여 주는 글자가 이것이다 (markdown-it-py 와 같다).
+    # 식별자를 지키려면 코드 스팬에 넣는다.
+    ("docs/**/*.md 와 src/**/*.py", "docs//*.md 와 src//*.py"),
+    # 단어 안의 `_` 는 글자다. 짝 없는 `*` 도 글자다.
+    ("snake_case 이름", "snake_case 이름"),
+    ("a_b_c 와 D30_x_y", "a_b_c 와 D30_x_y"),
+    ("2*3", "2*3"),
+    ("a ` b_c", "a ` b_c"),
+    # 백슬래시 이스케이프는 그 글자다.
+    (r"\*별\* 과 \_밑줄\_", "*별* 과 _밑줄_"),
+    (r"\[x\] 와 \`y\`", "[x] 와 `y`"),
+]
+
+
+@pytest.mark.parametrize("raw, want", _STRIP_CASES)
+def test_strip_inline_keeps_code_spans_and_strips_only_real_markup(raw, want):
+    assert ingest.strip_inline(raw) == want
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "_a " * 11_000 + "a* " * 11_000,  # 짝 없는 닫는 구분자가 여는 것 더미를 매번 다시 훑었다
+        "".join("`" * k + "x" for k in range(1, 500)),  # 못 닫는 백틱 줄기마다 줄 끝까지 다시 훑었다
+        "[" * 100_000,  # 실패한 링크 시도를 되풀이했다 (옛 정규식도 제곱이었다)
+        "*" * 100_000 + "a" + "_" * 100_000,
+    ],
+    # 입력 자체를 id 로 쓰면 pytest 가 그것을 환경 변수에 넣어 Windows 의 32767자 한도에 걸린다.
+    ids=["unmatched-closers", "unclosed-backtick-runs", "brackets", "long-runs"],
+)
+def test_strip_inline_is_near_linear(heading):
+    """ingest 는 모든 헤딩을 이 함수에 넣고 run 내내 락을 쥔다 (D32). 처음 구현은 3만 자에 1.4초, 12만 자에 20초였다
+    (2026-09-26 리뷰 실측) — 이 변경이 없앤 `\\s+#.*$` 과 같은 부류다."""
+    import time
+
+    started = time.perf_counter()
+    ingest.strip_inline(heading)
+    assert time.perf_counter() - started < 0.5
+
+
+def test_heading_path_keeps_identifiers_inside_code_spans():
+    pieces = ingest.chunk("## `event_stats` 응답\n\n본문\n")
+    assert pieces[0].heading_path == "event_stats 응답"
+
+
+# --- 메타 파서의 가장자리 (D29 · D30 §7 — 2026-09-26 감사 F020) --------------------
+
+
+def test_tilde_is_not_null():
+    """D30 §7 은 빈 값과 `null` 만 NULL 이다. 코드가 적힌 적 없는 `~` 까지 접고 있었다."""
+    text = "---\ntitle: T\ndoc_type: other\nstatus: current\nmodule: ~\n---\n\n본문\n"
+    assert ingest.derive_meta("docs/a.md", text)["module"] == "~"
+    assert ingest.derive_meta("docs/a.md", FM + "본문\n")["module"] is None
+
+
+def test_an_empty_title_with_front_matter_stays_null():
+    """H1 유도는 front matter 가 **없을 때만**이다 (D30 §7). front matter 안의 `# 주석` 줄도 제목이 아니다."""
+    for title in ("", "null"):
+        text = f"---\ntitle: {title}\n# 주석\ndoc_type: other\nstatus: current\nmodule: null\n---\n\n# 본문 제목\n"
+        assert ingest.derive_meta("docs/a.md", text)["title"] is None
+
+
+def test_a_readme_with_front_matter_looks_for_its_h1_after_it():
+    """README 는 front matter 를 갖지 않는다(D29). 다른 project 의 README 에 있으면 안의 `# 주석` 이 제목이 됐다."""
+    text = "---\ntitle: x\n# 주석\n---\n\n# 진짜\n"
+    assert ingest.derive_meta("README.md", text)["title"] == "진짜"
+
+
+_H1_CASES = [
+    # D29: HTML 블록(6형)은 지나가고 빈 줄에서 끝난다. 빈 줄 없이 블록 안에 든 `# ` 를 제목으로 잡았다.
+    ('<div align="center">\n# 가짜\n\n# 진짜\n', "진짜"),
+    ('<div align="center">\n\n# Sillok · 실록\n', "Sillok · 실록"),
+    # 6형이 아닌 태그는 블록을 열지 않는다.
+    ("<span>x</span>\n# 제목\n", "제목"),
+    # 빈 `# ` 도 첫 H1 이다 — 텍스트가 비어 NULL 이 되고 다음 H1 으로 넘어가지 않는다 (지금 동작 그대로).
+    ("# \n# 두번째\n", None),
+    ("#붙음\n", None),
+    ("```\n# 가짜\n```\n\n# 진짜\n", "진짜"),
+    ("~~~\n# 가짜\n~~~\n\n# 진짜\n", "진짜"),
+]
+
+
+@pytest.mark.parametrize("text, want", _H1_CASES)
+def test_first_h1_passes_html_blocks_and_fences(text, want):
+    assert ingest.first_h1(text) == want
+
+
+# --- 선형 파서 (Sonar S8786) --------------------------------------------------
+
+_HEADING_CASES = [
+    ("####### 일곱\n본문\n", [None]),
+    ("#\t탭\n본문\n", ["탭"]),
+    ("###### 여섯\n본문\n", ["여섯"]),
+    # 청크는 D30 §5 그대로 HTML 블록을 보지 않는다.
+    ("<div>\n# 안\n본문\n", [None, "안"]),
+]
+
+
+@pytest.mark.parametrize("text, want", _HEADING_CASES)
+def test_atx_heading_recognition_is_unchanged(text, want):
+    assert [c.heading_path for c in ingest.chunk(text)] == want
+
+
+_COMMENT_CASES = [
+    ("T  # 주석", "T"),
+    ("C# 가이드", "C# 가이드"),
+    ("foo  # a # b", "foo"),
+    # 콜론 뒤의 공백 다음 `#` 은 주석이다 — 값이 빈다 (게이트와 같다, 지금 동작 그대로).
+    ("#맨앞", ""),
+]
+
+
+def _title_of(value: str) -> str:
+    return ingest.split_front_matter(f"---\ntitle: {value}\n---\n")[0]["title"]
+
+
+@pytest.mark.parametrize("value, want", _COMMENT_CASES)
+def test_front_matter_comment_cut_is_unchanged(value, want):
+    assert _title_of(value) == want
+
+
+def test_a_long_whitespace_value_is_parsed_in_linear_time():
+    """`\\s+#.*$` 는 `#` 없는 긴 공백에서 자리마다 다시 시도해 제곱 시간이 걸렸다."""
+    import time
+
+    started = time.perf_counter()
+    title = _title_of("T" + " " * 50_000 + "x")
+    assert time.perf_counter() - started < 0.5
+    assert title.endswith("x")
+
+
+# --- 유도 규칙의 판 (D71) --------------------------------------------------------
+
+# 규칙이 닿는 가장자리를 담은 고정 표본이다. 위의 표들도 함께 digest 에 들어간다.
+# 규칙을 바꾸는 변경은 그 경우를 표본이나 표에 더한다 (D71 이 닫지 않는 것).
+_DERIVATION_SAMPLE = {
+    "README.md": '<div align="center">\n# 가짜\n\n# 진짜 `a_b` **굵게**\n\n소개\n',
+    "README.ko.md": "---\ntitle: x\n# 주석\n---\n\n# 진짜\n",
+    "docs/a.md": (
+        "---\ntitle: T  # 주석\ndoc_type: other\nstatus: current\nmodule: ~\n---\n\n"
+        "서두\n\n# 하나 `event_stats`\n\n본문 가\n\n### `README*` [링크](x) _기울임_\n\n본문 나\n\n"
+        "```\n# 펜스 안\n```\n\n## snake_case 2*3 \\*별\\*\n\n본문 다\n\n제목\n===\n\n<div>\n# 블록 안\n</div>\n"
+    ),
+    "docs/b.md": "---\ntitle:\n# 주석\ndoc_type: api\nstatus: draft\nmodule: null\n---\n\n# 본문 제목\n\n본문\n",
+    "docs/c.md": "<p>\n# 가짜\n</p>\n\n# 제목 ***a** \n\n본문\n",
+    # 청크의 상한 셋(1200 소프트 · 4000 하드 · 줄 하나)과 `~~~` 펜스.
+    "docs/long.md": (
+        FM + "# 긴\n\n" + ("가" * 700 + "\n\n") * 3 + "나" * 4100 + "\n\n" + "줄 다\n" * 1500
+        + "\n~~~\n# 펜스 안\n~~~\n"
+    ),
+}
+
+# 판마다 digest. 규칙을 바꾸면 `RULES_VERSION` 을 올리고 새 판의 줄을 더한다 — 옛 줄은 지우지 않는다.
+_DERIVATION_DIGEST = {
+    1: "ad854c4d6c26f0df6fa2f4e6ee5784268d537f4ed4f13efcaaf0b86699444359",
+}
+
+
+def _derivation_digest() -> str:
+    import json
+
+    rows: list[object] = []
+    for path in sorted(_DERIVATION_SAMPLE):
+        text = _DERIVATION_SAMPLE[path]
+        meta = ingest.derive_meta(path, text)
+        _, body = ingest.split_front_matter(text)
+        rows.append([path, meta, [[c.chunk_idx, c.heading_path, c.content] for c in ingest.chunk(body)]])
+    rows.append([[raw, ingest.strip_inline(raw)] for raw, _ in _STRIP_CASES])
+    rows.append([[text, ingest.first_h1(text)] for text, _ in _H1_CASES])
+    rows.append([[text, [c.heading_path for c in ingest.chunk(text)]] for text, _ in _HEADING_CASES])
+    rows.append([[value, _title_of(value)] for value, _ in _COMMENT_CASES])
+    return hashlib.sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def test_derivation_rules_are_pinned_to_their_version():
+    """유도 규칙이 바뀌면 본문이 같은 문서는 판이 올라야만 다시 만들어진다 (D71).
+    올리지 않고 바꾸면 여기서 운다 — 사람이 기억하는 길을 두지 않는다 (D31 이 버린 모양)."""
+    assert sorted(_DERIVATION_DIGEST) == list(range(1, ingest.RULES_VERSION + 1)), (
+        f"판마다 한 줄이다 — RULES_VERSION {ingest.RULES_VERSION} 의 줄을 더한다: {_derivation_digest()}"
+    )
+    assert _derivation_digest() == _DERIVATION_DIGEST[ingest.RULES_VERSION], (
+        f"유도 규칙이 바뀌었다 — RULES_VERSION 을 올리고 새 판의 digest 를 더한다: {_derivation_digest()}"
+    )
+
+
 # --- 청크 (D30 §5) ----------------------------------------------------------
 
 

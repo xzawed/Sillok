@@ -94,6 +94,7 @@ migrations/002_schema.sql       data-model.md 의 DDL
 migrations/003_ingest_counters.sql  kb_ingest_runs.files_deleted (D30)
 migrations/004_event_tsv.sql        kb_events.tsv + GIN (D34)
 migrations/005_query_log_index.sql  kb_query_logs (project, created_at DESC) (D51)
+migrations/006_rules_version.sql    kb_documents.rules_version (D71)
 ```
 
 DDL 정본은 [data-model.md](../docs/data-model.md)다. 마이그레이션 파일은 그 SQL을 실행할 뿐 **두 번째 스키마 정의가 아니다.**
@@ -595,9 +596,19 @@ gh api repos/xzawed/Sillok/readme -H "Accept: application/vnd.github.html+json"
   front matter 를 파일 밖으로 옮긴 것일 뿐이라 버렸다
 - H1 은 **줄 단위로 찾는다.** `<div align="center">` 같은 HTML 블록은 지나가고, 코드 펜스 안의 `# ` 는 제목이 아니다.
   인라인 마크업은 벗기고 텍스트만 쓴다
+  → **2026-09-26**: 벗기는 규칙을 못 박는다. **코드 스팬은 안의 글자를 그대로 둔다** — `` `event_stats` `` 가
+  `eventstats` 였다(감사 F099). 코드 스팬이 링크 괄호보다 먼저다. 링크·이미지는 표시 텍스트만 남기고 그 텍스트의 강조는
+  그 안에서만 짝을 짓는다. 강조 `*`·`_` 는 **CommonMark 0.31.2 의 강조 처리 그대로** 짝이 맞는 구분자만 지운다 —
+  flanking, 단어 안의 `_`, 3의 배수 규칙까지. 그래서 코드 스팬 밖의 `docs/**/*.md` 하나는 글자 그대로이고, 둘이면
+  GitHub 처럼 그 사이가 굵게 읽힌다 — 식별자는 코드 스팬에 넣는다. 백슬래시 이스케이프는 그 글자다.
+  참조 링크·HTML 태그는 벗기지 않는다. 줄 길이에 거의 선형이다 (처음 구현은 12만 자 제목에 20초였다, 리뷰 실측).
+  `heading_path` 도 같은 함수다 (D30 §5). 규칙이 바뀌면 판을 올린다 (D71)
 - **HTML 블록은 빈 줄에서 끝난다** — `</div>` 를 기다리지 않는다 (CommonMark 6형). 두 README 가 정확히 그 모양이라
   `<div align="center">` · 빈 줄 · `# Sillok · 실록` 로 이어지고 그 H1 이 제목이다.
   `</div>` 까지 건너뛰는 구현은 제목을 놓쳐 NULL 을 넣는다 — 추측하지 않도록 여기 적는다
+  → **2026-09-26**: 코드가 이 줄을 지키지 않았다 — 빈 줄 없이 HTML 블록 안에 든 `# ` 를 제목으로 잡았다(감사 F020).
+  **6형만** 건너뛴다 — 6형 태그로 시작하는 줄부터 빈 줄까지다. 주석·`<pre>` 같은 1–5형과 7형은 보지 않는다.
+  청크는 D30 §5 그대로 HTML 블록을 보지 않는다
 - `kb_documents.title` 에 길이 상한을 두지 않는다. D25 의 `title` 200자는 `kb_events` 의 것이지 여기가 아니다
 - **`doc_type` enum 에서 `readme` 를 빼지 않는다.** enum 은 [data-model.md](../docs/data-model.md) 가 소유하고,
   ingest 가 루트 README 에 경로 기준으로 그 값을 부여한다. 선언하는 파일이 없어졌을 뿐 값은 살아 있다
@@ -756,6 +767,7 @@ D9 경로 아래 비-.md 파일 0 · 최장 코드 펜스 999자 · 최장 표 1
   mtime 은 클론할 때마다 새로 찍힌다.
 - 해시가 같으면 그 문서에 아무 쓰기도 하지 않는다. 그래서 `indexed_at` 은 "마지막으로 스캔한 시각"이 아니라
   **"마지막으로 내용이 바뀌어 다시 색인한 시각"** 이다.
+  → **D71**: 유도 규칙의 판(`rules_version`)이 낡은 행은 예외다 — 메타와 청크를 다시 만들되 `indexed_at` 은 그대로다
 - 해시가 다르면 문서 행을 `INSERT … ON CONFLICT (project, repo, path) DO UPDATE` 로 갱신하면서
   **`indexed_at = now()` 를 명시한다.** `DEFAULT now()` 는 INSERT 에만 걸린다 —
   빠뜨리면 최초 색인 시각으로 굳는다. 이 upsert 형태 자체가 계약이다:
@@ -849,6 +861,7 @@ D9 경로 아래 비-.md 파일 0 · 최장 코드 펜스 999자 · 최장 표 1
 
 - `files_seen` 은 스캔이 본 `.md` 수다. `skipped` 는 여기에 포함하지 않는다.
 - `files_changed` 는 새로 넣은 것 + 해시가 다른 것이다. **삭제는 포함하지 않는다** — `files_deleted` 가 센다.
+  → **D71**: 판만 낡아 다시 만든 문서도 세지 않는다 — 그 청크는 `chunks_upserted` 가 센다
 - `chunks_upserted` 는 이번 run 이 INSERT 한 청크 수다. 지운 청크는 세지 않는다.
 - `chunks_embedded`·`chunks_pending` 은 D31 이 소유한다.
 - `commit_sha` 는 v1 내내 빈 문자열이다 (§3).
@@ -866,9 +879,13 @@ D9 경로 아래 비-.md 파일 0 · 최장 코드 펜스 999자 · 최장 표 1
 - 읽는 키는 `title`·`doc_type`·`status`·`module` 넷뿐이다. 나머지 키는 무시한다.
   **빈 값과 `null` 은 NULL 로 넣는다** — 색인 대상 문서가 전부 `module: null` 이라 이 한 줄이 없으면
   문자열 `"null"` 이 들어간다.
+  → **2026-09-26**: `~` 는 NULL 이 아니다 — 코드가 적힌 적 없는 `~` 까지 접고 있었다(감사 F020). 게이트도 접지 않는다
 - **`doc_type`·`status` 가 taxonomy 밖이면 서비스가 거절한다.** DDL CHECK 를 더하지 않는다 — D25 그대로다.
 - front matter 가 없으면 DDL 기본값을 쓰고 `title` 은 D29 의 첫 H1 규칙으로 유도한다.
   이 저장소에서는 게이트가 먼저 막지만, D5 가 말하는 다른 project 에서는 없는 것이 정상이다.
+  → **2026-09-26**: 코드는 front matter 가 있어도 `title` 이 비면 H1 으로 채웠고, front matter 안의 `# 주석` 줄까지 훑었다
+  (감사 F020). **front matter 가 없을 때만, 본문에서** 찾는다. 있는데 `title` 이 비면 NULL 이다.
+  루트 `README*` 는 front matter 를 갖지 않지만(D29) 다른 project 의 README 에 있으면 그 뒤에서 H1 을 찾는다
 
 ### 어겨지면 무엇이 비명을 지르는가
 
@@ -3050,7 +3067,7 @@ D35 의 표는 *만들었다면* 의 규칙으로 남는다 — 그 표도 단�
 |---|---|
 | [docs/plan.md](../docs/plan.md) §2 | 확정 스택 표 전체 |
 | [CLAUDE.md](../CLAUDE.md) | 확정 스택 표 (도구 컨텍스트용 미러), Q32 요약 |
-| [docs/data-model.md](../docs/data-model.md) | `vector(1536)`, 모델 ID, 확장 목록, 질의 로그 컬럼 의미 (D48–D52), 자유 텍스트·`query` 천장 주석 (D68) |
+| [docs/data-model.md](../docs/data-model.md) | `vector(1536)`, 모델 ID, 확장 목록, 질의 로그 컬럼 의미 (D48–D52), 자유 텍스트·`query` 천장 주석 (D68), `rules_version` (D71) |
 | [docs/service-and-mcp.md](../docs/service-and-mcp.md) | 서비스 주소, 인증, `top_k`, 색인 경로, `kb_status` 가 로그를 쓰지 않는다는 것(D48), 입력 천장(D68), 모르는 키·되풀이 키 문구와 기간 `[since, until)`·필터 벗김(D69), `skipped[]` 사유 셋(D70). **`heading_path` 형식은 그쪽이 정본** |
 | [docs/skills/sillok-storage/SKILL.md](../docs/skills/sillok-storage/SKILL.md) | 이벤트 필드 천장의 수 (D25·D58·D68). 수의 정본은 이 파일이고, 거절 규칙의 서술은 SKILL 이 소유한다 |
 | [scripts/check-layout.mjs](../scripts/check-layout.mjs) | ingest 확장자 필터 `.md` (D30 이 정본), `skipped[]` 사유 셋의 출력 (D30 · D70) |
@@ -3490,6 +3507,57 @@ run 행이 생긴 뒤라서 D32 의 한 길(`failed` · 정상 반환 · CLI 가
   `ENOENT` 로 죽는다. ingest 는 `not-md` 로 건너뛴다. 조용하지 않은 실패라 두고, 이 결정 전부터 그랬다
 - **하네스의 FIFO 케이스(73·74)는 FIFO 를 만들 수 있는 플랫폼에서만 돈다.** 호스트(Windows)에서는 SKIP 이다
 
+## D71 — Q39 의 답: 유도 규칙이 바뀌면 본문이 같은 문서도 다시 만든다 — 규칙 판을 행에 둔다 (2026-09-26 확정)
+
+[open-questions.md](../docs/open-questions.md) O절 Q39 를 닫는다. **단계를 막지 않는다** — 열 단계는 이미 구현됐다.
+
+| ID | 선택 | 결정 내용 | 닫은 질문 |
+|---|---|---|---|
+| D71 | B | ① `kb_documents.rules_version int NOT NULL DEFAULT 0`(마이그레이션 `006`, `ADD COLUMN IF NOT EXISTS`, `UPDATE` 없음)과 ingest 의 상수 `RULES_VERSION`. ② 해시가 같고 `rules_version >= RULES_VERSION` 이면 쓰지 않는다(D30 §2 그대로). 해시가 같고 **판만 낡았으면** 메타와 청크를 다시 만들고 판을 올린다 — `content_hash`·`indexed_at`·`source_mtime` 은 그대로이고, `files_changed` 에 세지 않고 `chunks_upserted` 에는 센다. 청크가 새로 들어가므로 벡터는 NULL 이 되고 백필이 채운다(D31). ③ 청크·`heading_path`·메타 유도가 바뀌면 상수를 올린다. **올리지 않고 바꾸면 검사가 운다** — 고정 표본의 유도 결과 digest 를 판에 묶어 둔다 | Q39 |
+
+### 왜 — 감사가 잰 것
+
+2026-09-26 감사 F099 가 쟀다. 제목의 인라인 마크업을 벗기는 함수가 **코드 스팬 안의 `_`·`*` 까지** 지워
+`` `event_stats` `` 가 `eventstats` 가 됐다 — 헤딩 26개, 그때 청크 357 중 90 의 `heading_path` 다.
+`heading_path` 는 `tsv` 와 임베딩 입력의 일부라(D31 · data-model) 식별자로 찾는 검색이 빗나간다.
+
+규칙을 고쳐도 **본문이 같아 해시가 같다.** D30 §2 가 "해시가 같으면 쓰지 않는다" 이므로 낡은 `heading_path` 는
+영영 남는다. 규칙이 바뀐 날을 사람이 기억해 행을 지우는 길은 D31 이 벡터에서 버린 그 모양이다.
+
+### 판을 무엇에 묶는가
+
+`content_hash` 에 섞지 않는다 — 본문만의 함수이고(D30 §2) `save_doc` 의 `base_hash` 다(D40).
+판을 올리는 날 모든 제안이 충돌한다. 그래서 **행에 따로 둔다.**
+마이그레이션은 `ADD COLUMN IF NOT EXISTS … DEFAULT 0` 하나다. 러너는 매 기동 모든 `.sql` 을 다시 돌리므로(D17)
+`UPDATE … SET rules_version = 0` 을 두면 `serve` 마다 판이 되돌아가 매번 전량 재색인한다.
+
+판만 낡은 행을 다시 만들 때 **`indexed_at`·`source_mtime` 을 건드리지 않는다** — "마지막으로 내용이 바뀌어 다시 색인한 시각"
+(D30 §2)이고 내용은 바뀌지 않았다. `files_changed` 도 같은 이유로 세지 않는다. 그 run 이 한 일은 `chunks_upserted` 와 run 행에 남는다.
+
+### 올리는 것을 잊지 않게
+
+검사 하나가 고정 표본(코드 스팬·강조·링크·HTML 블록·front matter 가장자리를 담은 작은 마크다운)을
+`derive_meta`·`chunk` 에 넣고, 결과의 SHA-256 을 **지금 판에 적힌 값**과 대조한다.
+규칙을 바꾸면 digest 가 바뀌어 운다 — 상수를 올리고 새 digest 를 적는 것이 그 변경의 일부다.
+상수만 올리고 digest 를 적지 않아도 운다.
+
+### D71 선택지
+
+| A | B | C | D | 버린 이유 |
+|---|---|---|---|---|
+| 운영자가 행을 지우고 다시 ingest 하는 절차 | **행에 규칙 판** | 매 run 모든 문서를 다시 잘라 저장된 청크와 비교 | 판을 `content_hash` 에 섞는다 | A는 사람이 기억해야 하고(D31 이 버린 모양), 지운 뒤 실패한 run 이 색인을 반쯤 빈 채로 둔다. C는 "해시가 같으면 쓰지 않는다" 를 이유 없이 바꾸고, 청크가 아닌 메타(`title`)는 비교에서 빠진다. D는 `base_hash`(D40)를 깨 판을 올리는 날 모든 `save_doc` 이 충돌한다. `--force` 플래그는 D19·D30 이 CLI 를 두 인자로 닫았고 D31 이 버렸다 |
+
+### D71 이 닫지 않는 것
+
+- **표본이 닿지 않는 규칙 변경은 검사가 못 잡는다.** 규칙을 바꾸는 변경은 그 경우를 표본에 더한다
+- **키가 있으면 판을 올릴 때마다 전 문서의 벡터를 한 번 다시 만든다.** 청크가 새로 들어가기 때문이다.
+  지금은 키가 없다(D2) — 비용은 0 이다
+- **판은 project 마다 따로 따라온다.** 그 project 를 다시 ingest 하기 전까지 옛 판의 청크가 검색에 남는다
+- **D71 앞의 코드로 되돌렸다가 다시 올리면 판이 거짓이 된다.** 옛 코드는 본문이 바뀐 문서를 옛 규칙으로 다시 쓰면서
+  `rules_version` 을 건드리지 않고, 돌아온 코드는 해시와 판이 맞아 그 행을 건너뛴다 (2026-09-26 리뷰 실측).
+  되돌렸던 설치는 다시 올린 뒤 그 project 의 판을 한 번 0 으로 내린다 — 절차는
+  [operations.md](../docs/operations.md) 가 갖는다. 006 에 그 `UPDATE` 를 넣지 않는다 — 러너가 매 기동 다시 돈다
+
 ## 나중에 바꿔도 되는 것 (v1 비범위)
 
 - D2를 Voyage / Gemini / Qwen3 / xAI로 교체 → **스키마 변경 + 전체 재색인**이 따라온다
@@ -3500,7 +3568,7 @@ run 행이 생긴 뒤라서 D32 의 한 길(`failed` · 정상 반환 · CLI 가
 
 ## 미기록
 
-D71 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
+D72 이후로 기록해야 할 미해결 결정은 [docs/open-questions.md](../docs/open-questions.md)에 전부 모여 있다.
 **2026-09-03 기준 열린 항목은 하나도 없다.** 마지막 일곱(C절의 Q13·Q14 · D절의 Q22·Q23 ·
 Q24·Q25 · G절의 Q30)은 D58–D64가 닫았다.
 **2026-09-04에 I절의 Q33이 열렸고 이튿날 D65가 닫았다** — 키를 넣어 봐야 볼 수 있는 자리였다.
@@ -3515,5 +3583,5 @@ F절(Q27–Q29)은 7단계를 구현하다 열렸고 같은 날 D39–D41로 닫
 **G절은 7단계를 검증하다 열렸다** — Q31은 D47로, **Q30은 D64로 닫혔다.**
 둘 다 단계를 막지 않았으므로 §7 의 게이트 문장에는 넣지 않았다.
 **H절의 Q32는 9단계를 막았고 D48–D52로 닫혔다** (2026-09-03) — 그 게이트 문장은 §7 에 넣는다 (D52).
-J절의 Q34는 2026-09-12 에 D66이, K절의 Q35·L절의 Q36·M절의 Q37은 2026-09-26 감사에서 D67·D68·D69가 각각 연 날 닫았다 — 넷 다 단계를 막지 않았다.
+J절의 Q34는 2026-09-12 에 D66이, K절의 Q35·L절의 Q36·M절의 Q37·N절의 Q38·O절의 Q39는 2026-09-26 감사에서 D67–D71이 각각 연 날 닫았다 — 여섯 다 단계를 막지 않았다.
 **지금 단계를 막는 Q는 하나도 없다.**

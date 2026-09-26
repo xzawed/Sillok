@@ -182,4 +182,5 @@ DECIDED: client values never become INTERNAL; ceilings on fields, search query, 
 DECIDED: unknown keys -> VALIDATION on both faces; filters stripped, enums checked, [since, until) (D69)
 DECIDED: ingest reads through the D36 walk (no O_NOFOLLOW -> failed); .md FIFO/socket/device -> skipped not-regular;
          unstorable .md name -> failed in sort order (D70)
+DECIDED: kb_documents.rules_version + RULES_VERSION: same hash but older rules -> re-chunk, indexed_at kept (D71)
 ```
