@@ -369,6 +369,9 @@ docker compose -p other-repo \
 그 분리입니다. 검색과 파일과 통계와 MCP 입구가 그 나무를 답하고,
 첫 스택은 그대로 돕니다.
 
+그 스택을 백업·복원하려면 먼저 `COMPOSE_PROJECT_NAME` 과 `COMPOSE_FILE` 을 내보냅니다.
+그러면 운영 절차의 블록이 그 스택을 따릅니다 — [docs/operations.md](docs/operations.md) 를 봅니다.
+
 </details>
 
 ## 코드 배치

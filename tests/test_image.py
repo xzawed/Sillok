@@ -5,6 +5,10 @@
 
 **판정은 텍스트를 받는 함수 하나씩이다.** 진짜 파일에는 빈 목록을, 대조군의 망가진 텍스트에는 무언가를 내야 한다 —
 첫 판은 파일에 묶인 판정이라 대조군을 둘 수 없었고, 리뷰가 그 틈으로 16가지 되돌림을 초록으로 통과시켰다.
+
+**이것은 정직한 되돌림을 잡는 자물쇠이지 경계가 아니다.** 셸·YAML 을 다 해석하지 않으므로 일부러 숨긴 입력
+(난독화한 명령, 문자열을 조립해 부르는 설치)은 지나갈 수 있다. 그것을 막는 것은 PR 리뷰다 (AGENTS.md).
+리뷰가 찾은 모양은 대조군으로 남긴다 — 같은 되돌림이 다시 초록으로 지나가지 않게.
 """
 
 from __future__ import annotations
@@ -38,8 +42,20 @@ INSTRUCTIONS = frozenset(
 # OS 패키지도 판 없이 들어오므로 막는다 — 필요해지면 고정하는 법과 함께 여기를 고친다.
 FETCHING = re.compile(
     r"\bpip[0-9.]*\b|\bpipx\b|\bcurl\b|\bwget\b|<<|\buvx\b|\buv\s+(?:tool|pip|python)\s+install\b"
-    r"|--python-preference\b|\bapt(?:-get)?\s+install\b|\bapk\s+add\b"
+    r"|--python-preference\b|\bapt(?:-get)?\b[^&;|]*\binstall\b|\bapk\b[^&;|]*\badd\b"
 )
+_UV = re.compile(r"(?:^|/)uvx?$")  # `uv`·`uvx`·`/bin/uv`·`/bin/uvx` — 이미지는 둘 다 복사해 온다
+
+
+def _shell(words: list[str]) -> str:
+    """RUN 의 셸 문장. exec 형(`["uv", "sync"]`)은 풀고, 셸이 버릴 `# …` 주석은 판정에서도 버린다."""
+    rest = " ".join(words)
+    if rest.startswith("["):
+        try:
+            rest = " ".join(json.loads(rest))
+        except json.JSONDecodeError:
+            pass
+    return re.sub(r"(^|\s)#.*$", "", rest)
 
 
 # --- Dockerfile ------------------------------------------------------------------
@@ -102,6 +118,8 @@ def dockerfile_problems(text: str) -> list[str]:
             env[stage] = dict(env.get(base, {}))
             execs[stage] = list(execs.get(base, []))
             defined.add(stage)
+            if stage == "runtime":
+                compiled_src = False  # 다시 정의된 runtime 은 앞의 컴파일을 물려받지 않는다
         elif op in {"COPY", "ADD"}:
             for w in c[1:]:
                 if w.startswith("--from=") and not _pinned_or_stage(w.split("=", 1)[1], defined):
@@ -109,27 +127,30 @@ def dockerfile_problems(text: str) -> list[str]:
             if op == "ADD" and any(re.match(r"https?://|git@", w) for w in c[1:]):
                 problems.append(f"ADD 가 원격을 받는다: {' '.join(c)}")
         elif op == "RUN":
-            joined = " ".join(c[1:])
+            words = c[1:]
+            flags = []
+            while words and words[0].startswith("--"):
+                flags.append(words.pop(0))
             # `--mount=type=bind,from=…` 도 이미지를 받아 온다 — uv 문서가 보여 주는 모양이다
-            for option in (w for w in c[1:] if w.startswith("--mount=")):
-                for part in option.removeprefix("--mount=").split(","):
-                    key, _, value = part.partition("=")
-                    if key == "from" and not _pinned_or_stage(value, defined):
-                        problems.append(f"digest 없는 마운트 원천: {option}")
-            if FETCHING.search(joined):
-                problems.append(f"RUN 이 판 없이 내려받는다: {joined}")
+            for option in (f for f in flags if f.startswith("--mount=")):
+                parts = dict(p.partition("=")[::2] for p in option.removeprefix("--mount=").split(","))
+                if parts.get("type") == "image" or ("from" in parts and not _pinned_or_stage(parts["from"], defined)):
+                    problems.append(f"digest 없는 마운트 원천: {option}")
+            shell = _shell(words)
+            if FETCHING.search(shell):
+                problems.append(f"RUN 이 판 없이 내려받는다: {shell}")
             # 잠금을 벗어난 해석은 판을 고정하지 않는다 — `uv sync` 는 늘 잠금 그대로다 (D18)
-            for step in re.split(r"&&|\|\||;", joined):
+            for step in re.split(r"&&|\|\||;", shell):
                 if re.search(r"\buv\s+sync\b", step) and not re.search(r"--frozen\b|--locked\b", step):
                     problems.append(f"uv sync 가 잠금을 벗어날 수 있다: {step.strip()}")
+            if stage == "runtime" and re.search(r"\bpython\s+-m\s+compileall\b(?:\s+-\S+)*\s+src\b", shell):
+                compiled_src = True
         elif op == "USER":
             problems.append("Dockerfile 의 USER — test 스테이지의 uv sync 가 실패한다(실측). compose 가 정한다")
         elif op == "ENV":
             words = shlex.split(" ".join(c[1:]))
             pairs = [w.split("=", 1) for w in words] if all("=" in w for w in words) else [[words[0], " ".join(words[1:])]]
             env[stage].update(dict(pairs))
-        if op == "RUN" and stage == "runtime" and re.search(r"\bcompileall\b.*\bsrc\b", " ".join(c[1:])):
-            compiled_src = True
         elif op in {"CMD", "ENTRYPOINT"}:
             execs[stage] = [e for e in execs[stage] if e[0].upper() != op] + [c]
     if "runtime" not in env:
@@ -149,7 +170,7 @@ def dockerfile_problems(text: str) -> list[str]:
             if env[name].get(key) != "1":
                 problems.append(f"{name} 의 {key} 가 1 이 아니다")
         for c in execs[name]:
-            if any(w == "uv" or w.endswith("/uv") for w in _exec_words(c)):
+            if any(_UV.search(w) for w in _exec_words(c)):
                 problems.append(f"{name} 이 uv 를 거쳐 뜬다: {' '.join(c)}")
     return problems
 
@@ -189,6 +210,14 @@ def test_the_dockerfile_pins_its_inputs_and_starts_without_uv():
         ("WORKDIR /app", "WORKDIR /app\nRUN uv tool install ruff"),
         ("RUN uv sync --frozen --no-dev", "RUN uv sync --frozen --no-dev --python-preference only-managed"),
         ('CMD ["sillok", "serve"]', 'ENV UV_NO_CACHE=0 X="a b"\nCMD ["sillok", "serve"]'),
+        ("WORKDIR /app", "WORKDIR /app\nRUN apt-get -y install gcc"),
+        ("WORKDIR /app", "WORKDIR /app\nRUN apk --no-cache add gcc"),
+        ("RUN uv sync --frozen --no-dev", "RUN uv sync --no-dev # --frozen"),
+        ("RUN uv sync --frozen --no-dev", 'RUN ["uv", "sync", "--no-dev"]'),
+        ("RUN python -m compileall -q src", "RUN echo compileall src"),
+        ("RUN python -m compileall -q src", "RUN python -m compileall -q /tmp/src"),
+        ("RUN uv sync --frozen --no-dev", "RUN --mount=type=image,source=ghcr.io/astral-sh/uv:latest,target=/uv uv sync --frozen --no-dev"),
+        ('CMD ["sillok", "serve"]', 'CMD ["/bin/uvx", "sillok"]'),
     ],
 )
 def test_the_dockerfile_check_bites(old, new):
@@ -311,7 +340,7 @@ def compose_problems(text: str) -> list[str]:
     # 흐름 모양(`["sillok", "serve"]`)도 목록 모양(`- sillok`)도 같은 command 다
     raw = api.get("command", [])
     command = json.loads(raw[0]) if len(raw) == 1 and raw[0].startswith("[") else raw
-    if not command or any(w == "uv" or w.endswith("/uv") for item in command for w in str(item).split()):
+    if not command or any(_UV.search(w) for item in command for w in str(item).split()):
         problems.append(f"api 의 command 가 없거나 uv 를 거친다: {command}")
     uid, _, gid = (api.get("user") or [""])[0].partition(":")
     if not (uid.isdigit() and int(uid) > 0 and gid.isdigit() and int(gid) > 0):
@@ -362,6 +391,7 @@ def test_compose_pins_images_and_runs_api_unprivileged():
         ('    user: "10001:10001"', '    user: "10001:10001"\n    "privileged": true'),
         ('    user: "10001:10001"', '    user: "10001:10001"\n    volumes_from:\n      - db'),
         ('    user: "10001:10001"', '    user: "10001:10001"\n    cgroup_parent: host'),
+        ('    command: ["sillok", "serve"]', "    command:\n      - /bin/uvx\n      - sillok"),
     ],
 )
 def test_the_compose_check_bites(old, new):

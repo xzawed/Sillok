@@ -369,6 +369,9 @@ and naming a path that does not exist makes Compose refuse to start at all.
 not the label. Its search, files, statistics and MCP entrance answer for that tree
 while the first stack carries on untouched.
 
+To back up or restore that stack, export `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` first.
+The runbook blocks then follow that stack — see [docs/operations.md](docs/operations.md).
+
 </details>
 
 ## Project layout
