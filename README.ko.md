@@ -70,8 +70,9 @@ RAG 플랫폼이 **아닙니다.**
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
 첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI·Docker Hub·`ghcr.io`에 닿아야 합니다.
-Linux 에서는 api 가 비루트 사용자로 돕니다.
-그래서 api 가 마운트하는 나무는 다른 사용자에게 읽혀야 합니다 — 파일은 `o+r`, 디렉터리는 `o+x` 입니다.
+api는 비루트 사용자로 돕니다.
+그래서 Linux에서는 api가 마운트하는 나무를 다른 사용자도 읽을 수 있어야 합니다.
+파일은 `o+r`, 디렉터리는 `o+rx`입니다.
 
 아래 셸 예제는 POSIX 셸 기준입니다 — Git Bash · WSL · macOS · Linux.
 Windows PowerShell에서는 적힌 그대로 돌지 않습니다 — `curl`이 `Invoke-WebRequest`의 별칭이고,

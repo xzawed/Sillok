@@ -70,8 +70,9 @@ not directories, and they do not have to match.
 
 Requires Docker. Nothing else — the API container carries its own Python.
 The first `up` builds that image, so the build sandbox has to reach PyPI, Docker Hub and `ghcr.io`.
-On Linux the API runs as a non-root user.
-Any tree it mounts has to be readable by other users — files `o+r`, directories `o+x`.
+The API runs as a non-root user.
+On Linux that means any tree it mounts has to be readable by other users.
+Files need `o+r` and directories `o+rx`.
 
 The shell examples below are POSIX — Git Bash, WSL, macOS, Linux.
 They do not run as written in Windows PowerShell, which aliases `curl` to `Invoke-WebRequest`

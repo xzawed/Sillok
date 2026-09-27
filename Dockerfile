@@ -29,6 +29,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.13@sha256:b485bd65cc2cf1c9a93b3554012c9c37
 COPY pyproject.toml uv.lock ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
+# 앱 자신은 편집 설치라 UV_COMPILE_BYTECODE 가 닿지 않는다 — /app/src 의 .pyc 도 여기서 굽는다 (D18).
+RUN python -m compileall -q src
 
 # D17 러너가 읽는다. DDL 정본은 docs/data-model.md 다.
 COPY migrations ./migrations
