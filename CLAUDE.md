@@ -83,7 +83,7 @@ Sillok은 RAG 플랫폼이 아니라 **저장 위치를 강제하는 지식 원�
 | MCP | stdio + Streamable HTTP, **같은 앱** |
 | Service 주소 | `http://127.0.0.1:8080` |
 | 인증 | 로컬 무인증(루프백 `Host`·`Origin` 게이트, D67). 외부 노출 시에만 `Authorization: Bearer` |
-| 배포 | Docker Compose (db + api 2개) |
+| 배포 | Docker Compose (db + api 2개). `api` 는 비루트·읽기 전용 루트 — `docker cp` 불가, 파일은 표준입력 (D18). 이벤트 덤프는 저장소 밖 (D37) |
 | 런타임 | CPython 3.12, uv, pytest (D18) |
 | 환경변수 | `DATABASE_URL` + `SILLOK_HOST`·`SILLOK_PORT`·`SILLOK_WORKSPACE`·`SILLOK_BEARER_TOKEN` + `OPENAI_API_KEY` (D16) |
 | 마이그레이션 | 버전 붙인 raw `.sql`, `serve` 기동 시 bind 전 멱등 적용 (D17) |

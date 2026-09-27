@@ -13,10 +13,12 @@ FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4d
 # PATH: plan.md §9 의 판정 명령이 `compose exec api sillok ingest` 다. 이것이 없으면
 # 그 줄이 `executable file not found` 로 죽는다 (2026-09-02 실측). uv run 은 그대로 돈다.
 # UV_NO_CACHE: 캐시가 runtime 이미지에 66 MB 로 구워지고 있었다. 읽기 전용 루트에서 `uv run` 을 불러도 캐시를 만들지 않는다.
+# UV_COMPILE_BYTECODE: compose 의 api 는 읽기 전용 루트라 .pyc 를 쓰지 못한다 — 굽는 때 미리 만든다 (D18).
 ENV PYTHONUNBUFFERED=1 \
     PYTHONUTF8=1 \
     UV_LINK_MODE=copy \
     UV_NO_CACHE=1 \
+    UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app

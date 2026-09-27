@@ -29,13 +29,20 @@ module: null
 
 ## 이벤트 백업
 
+**셸은 POSIX 다.** 이 절부터 아래 블록들은 `bash` 이고, Windows 에서는 Git Bash 로 돌린다 —
+PowerShell 에는 `test` 도, 그 뜻의 `<` 리다이렉션도 없다. Git Bash 의 `$HOME` 은 `C:\Users\<사용자>` 다.
+
 `5432`는 호스트에 게시되지 않는다 (D16). 그래서 컨테이너 안에서 뜬다.
 
-**덤프는 저장소 밖에 둔다** (D37). `api` 는 저장소 전체를 `/workspace` 로 읽으므로, 안에 두면 그 컨테이너가 원장
-전체를 파일로 읽을 수 있다. `.gitignore` 는 커밋만 막지 마운트는 막지 않는다.
+**덤프는 저장소 밖에 둔다** (D37). `api` 는 저장소 전체를 `/workspace` 로 읽는다. 원장은 `DATABASE_URL` 로도
+닿지만, 덤프에는 원장에서 이미 지운 행이 남을 수 있다. `.gitignore` 는 커밋만 막지 마운트는 막지 않는다.
+
+**자리는 스택마다 다르다.** 기본은 저장소 디렉터리 이름이다. D66 의 복제 스택은 `COMPOSE_PROJECT_NAME` 을
+내보내고 같은 블록을 돌린다 — compose 명령과 덤프 자리가 함께 그 스택을 따른다. 한 자리를 나눠 쓰면
+한 스택의 백업이 다른 스택의 것을 덮고, 복원 가드는 그것이 누구의 덤프인지 모른다.
 
 ```bash
-DUMP="$HOME/sillok-backup/kb_events.sql"      # 저장소 밖. 복원 절도 이 이름을 쓴다
+DUMP="$HOME/sillok-backup/${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}/kb_events.sql"   # 저장소 밖, 스택마다. 아래 두 절도 이 줄을 쓴다
 mkdir -p "$(dirname "$DUMP")"
 docker compose exec -T db pg_dump -U sillok -d sillok --data-only --table=kb_events > "$DUMP"
 ```
@@ -49,7 +56,7 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 
 ```bash
 PROJECT=sillok                                # ingest 가 다시 만들 project. 기본값이 없다 (D19)
-DUMP="$HOME/sillok-backup/kb_events.sql"       # 위 백업 절이 둔 곳. 저장소 밖이다 (D37)
+DUMP="$HOME/sillok-backup/${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}/kb_events.sql"   # 위 백업 절이 둔 곳 (D37)
 
 docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
 docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
@@ -104,18 +111,19 @@ docker compose exec -T api sillok ingest --project "$PROJECT"   # 문서 인덱�
 그 머신에서만 끊긴다 — `kb_events` 는 Git 에 원본이 없는 유일한 데이터다 (D11).
 질의 로그와 색인 이력은 옮기지 않는다 (위 표) — `같은 상태`는 **문서 인덱스와 원장**을 말한다.
 
-**셸은 POSIX 다.** 아래 블록과 `복원` 절은 `bash` 이고, Windows 에서는 Git Bash 로 돌린다 —
-PowerShell 에는 `test` 도, 그 뜻의 `<` 리다이렉션도 없다.
+셸은 위 `이벤트 백업` 절과 같다 — POSIX 이고 Windows 에서는 Git Bash 다.
 
 ```bash
 git clone https://github.com/xzawed/Sillok.git
 cd Sillok
 cp .env.example .env          # 키가 있으면 OPENAI_API_KEY 를 채운다. 비우면 키워드 검색만 돈다 (D2)
 docker compose up -d --wait   # 마이그레이션이 bind 전에 적용된다 (D17)
+DUMP="$HOME/sillok-backup/${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}/kb_events.sql"   # 가져온 덤프를 여기에 둔다
+mkdir -p "$(dirname "$DUMP")"
 ```
 
-덤프를 **`$HOME/sillok-backup/kb_events.sql`** 에 두고 위 `복원` 절을 그대로 돌린다 —
-그 절이 이 경로를 박아 쓰므로 다른 곳이면 가드가 `1` 을 내고 거기서 멈춘다(원장은 안전하다).
+가져온 덤프를 **`$DUMP` 자리**에 두고 위 `복원` 절을 그대로 돌린다 —
+그 절이 같은 줄로 경로를 정하므로 다른 곳이면 가드가 `1` 을 내고 거기서 멈춘다(원장은 안전하다).
 그 절이 색인까지 다시 만들고 끝난다.
 **저장소 안에 두지 않는다** — `api` 가 읽는다 (D37). `kb_events*.sql*` 이 `.gitignore` 에 있는 것은
 실수로 둔 덤프가 커밋되지 않게 하려는 것이다. 그것을 커밋하면 이 저장소가 첫 줄에서 금지한 것이
@@ -158,6 +166,15 @@ docker compose up -d --wait
 ```
 
 프록시가 필요한 환경이면 `--build-arg HTTP_PROXY=… --build-arg HTTPS_PROXY=…`를 붙인다.
+
+## Dockerfile·compose 를 바꾼 커밋을 받은 뒤
+
+`up` 은 이미지가 있으면 **다시 굽지 않는다.** 그대로 두면 `api` 는 옛 판으로 돈다.
+compose 가 `api` 의 `command` 를 적어 두므로 옛 이미지로도 뜨기는 한다(D18) — 뜬다는 것이 새 판이라는 뜻은 아니다.
+
+```bash
+docker compose up -d --build --wait
+```
 
 ## 의존성을 바꾼 뒤
 

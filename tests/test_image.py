@@ -1,7 +1,10 @@
 """이미지 입력 고정과 `api` 컨테이너 권한 (D18, 2026-09-27 감사 F110·F111).
 
 값(digest·판)은 원천에만 있다 — 여기서는 **모양**만 잠근다. 떠 있는 태그, 판 없는 설치, root 로 도는 api 로
-조용히 되돌아가지 않게 한다. Dockerfile·docker-compose.yml 은 이미지 안에 없으므로 호스트에서 돈다.
+조용히 되돌아가지 않게 한다. Dockerfile·docker-compose.yml 은 이미지 안에 없으므로 그 둘의 검사는 호스트에서 돈다.
+
+**판정은 텍스트를 받는 함수 하나씩이다.** 진짜 파일에는 빈 목록을, 대조군의 망가진 텍스트에는 무언가를 내야 한다 —
+첫 판은 파일에 묶인 판정이라 대조군을 둘 수 없었고, 리뷰가 그 틈으로 16가지 되돌림을 초록으로 통과시켰다.
 """
 
 from __future__ import annotations
@@ -17,121 +20,256 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "Dockerfile"
 COMPOSE = ROOT / "docker-compose.yml"
 
-pytestmark = pytest.mark.skipif(
-    not DOCKERFILE.exists() or not COMPOSE.exists(),
-    reason="이미지 안에는 Dockerfile·docker-compose.yml 이 없다 — 호스트에서 돈다",
+needs_dockerfile = pytest.mark.skipif(
+    not DOCKERFILE.exists(), reason="이미지 안에는 Dockerfile 이 없다 — 호스트에서 돈다"
+)
+needs_compose = pytest.mark.skipif(
+    not COMPOSE.exists(), reason="이미지 안에는 docker-compose.yml 이 없다 — 호스트에서 돈다"
 )
 
 # `이름:태그@sha256:…` — 태그는 사람이 읽으라고 남기고, 받는 것은 digest 가 정한다.
 PINNED = re.compile(r"[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}")
+INSTRUCTIONS = frozenset(
+    "FROM RUN CMD LABEL EXPOSE ENV ADD COPY ENTRYPOINT VOLUME USER WORKDIR ARG ONBUILD STOPSIGNAL "
+    "HEALTHCHECK SHELL MAINTAINER".split()
+)
+# 판도 해시도 없이 무언가를 내려받아 설치하는 길. `pipefail` 같은 낱말은 걸리지 않게 경계를 둔다.
+FETCHING = re.compile(r"\bpip[0-9.]*\b|\bcurl\b|\bwget\b|\bpipx\b|<<")
 
 
-def _stages() -> list[tuple[str, list[list[str]]]]:
-    """(스테이지 이름, 명령들). 주석을 버리고 줄 이음(`\\`)을 합친다. 명령은 낱말 목록이다."""
-    stages: list[tuple[str, list[list[str]]]] = []
+# --- Dockerfile ------------------------------------------------------------------
+
+
+def _commands(text: str) -> list[list[str]]:
+    """주석을 버리고 줄 이음(`\\`)을 합친 명령들. 명령은 낱말 목록이다."""
+    commands: list[list[str]] = []
     buffer = ""
-    for line in DOCKERFILE.read_text(encoding="utf-8").splitlines():
-        text = line.strip()
-        if not text or text.startswith("#"):
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        if text.endswith("\\"):
-            buffer += text[:-1] + " "
+        if stripped.endswith("\\"):
+            buffer += stripped[:-1] + " "
             continue
-        words = (buffer + text).split()
+        commands.append((buffer + stripped).split())
         buffer = ""
-        if words[0].upper() == "FROM":
-            args = [w for w in words[1:] if not w.startswith("--")]
-            stages.append((args[2] if len(args) >= 3 and args[1].upper() == "AS" else "", [words]))
-        else:
-            stages[-1][1].append(words)
-    return stages
-
-
-def _runtime() -> list[list[str]]:
-    (commands,) = [c for name, c in _stages() if name == "runtime"]
     return commands
 
 
-def test_every_base_image_is_pinned_by_digest():
-    """앞 스테이지를 잇는 `FROM runtime` 은 이미지가 아니다. 그 밖은 전부 digest 다."""
-    names = {name for name, _ in _stages()}
-    bases = [
-        [w for w in commands[0][1:] if not w.startswith("--")][0]
-        for _, commands in _stages()
-    ]
-    external = [b for b in bases if b not in names]
-    assert external, "대조군 — FROM 을 하나도 읽지 못했다"
-    assert all(PINNED.fullmatch(b) for b in external), external
+def _exec_words(command: list[str]) -> list[str]:
+    """CMD·ENTRYPOINT 의 낱말. JSON 배열이면 원소를 다시 공백으로 쪼갠다 — `sh -c "uv run …"` 도 본다."""
+    rest = " ".join(command[1:])
+    try:
+        items = json.loads(rest)
+    except json.JSONDecodeError:
+        items = command[1:]
+    return [word for item in items for word in str(item).split()]
 
 
-def test_tools_come_from_pinned_images_not_from_pip():
-    """uv 는 판·digest 가 붙은 공식 이미지에서 복사한다. `pip install uv` 는 판도 해시도 없었다."""
-    commands = [c for _, cs in _stages() for c in cs]
-    sources = [w.split("=", 1)[1] for c in commands if c[0].upper() == "COPY" for w in c if w.startswith("--from=")]
-    names = {name for name, _ in _stages()}
-    external = [s for s in sources if s not in names]
-    assert external, "uv 를 이미지에서 복사해 오는 줄이 없다"
-    assert all(PINNED.fullmatch(s) for s in external), external
-    assert not any("pip" in c for c in commands if c[0].upper() == "RUN"), "RUN 이 pip 로 무언가를 설치한다"
+def dockerfile_problems(text: str) -> list[str]:
+    problems: list[str] = []
+    commands = _commands(text)
+    problems += [f"알 수 없는 명령(heredoc 본문?): {c[0]}" for c in commands if c[0].upper() not in INSTRUCTIONS]
+    defined: set[str] = set()  # **앞에서** 정의된 스테이지 이름만 내부다 — `FROM debian AS debian` 은 이미지다
+    stage = ""
+    env: dict[str, dict[str, str]] = {}
+    execs: dict[str, list[list[str]]] = {}
+    for c in commands:
+        op = c[0].upper()
+        if op == "FROM":
+            args = [w for w in c[1:] if not w.startswith("--")]
+            base = args[0]
+            if base not in defined and ("$" in base or not PINNED.fullmatch(base)):
+                problems.append(f"digest 없는 베이스: {base}")
+            stage = args[2] if len(args) >= 3 and args[1].upper() == "AS" else base
+            # 앞 스테이지에서 이어받는 것을 따라간다 — default 는 runtime 의 ENV 를 물려받는다
+            env[stage] = dict(env.get(base, {}))
+            execs[stage] = list(execs.get(base, []))
+            defined.add(stage)
+        elif op in {"COPY", "ADD"}:
+            for w in c[1:]:
+                if w.startswith("--from="):
+                    source = w.split("=", 1)[1]
+                    if source not in defined and not PINNED.fullmatch(source):
+                        problems.append(f"digest 없는 복사 원천: {source}")
+            if op == "ADD" and any(re.match(r"https?://", w) for w in c[1:]):
+                problems.append(f"ADD 가 URL 을 받는다: {' '.join(c)}")
+        elif op == "RUN" and FETCHING.search(" ".join(c[1:])):
+            problems.append(f"RUN 이 판 없이 내려받는다: {' '.join(c)}")
+        elif op == "USER":
+            problems.append("Dockerfile 의 USER — test 스테이지의 uv sync 가 실패한다(실측). compose 가 정한다")
+        elif op == "ENV":
+            words = c[1:]
+            pairs = [w.split("=", 1) for w in words] if all("=" in w for w in words) else [[words[0], " ".join(words[1:])]]
+            env[stage].update({k: v.strip("\"'") for k, v in pairs})
+        elif op in {"CMD", "ENTRYPOINT"}:
+            execs[stage] = [e for e in execs[stage] if e[0].upper() != op] + [c]
+    if "runtime" not in env:
+        return problems + ["runtime 스테이지가 없다"]
+    for name in ("runtime", "default"):
+        if name not in env:
+            continue
+        for key in ("UV_NO_CACHE", "UV_COMPILE_BYTECODE"):
+            if env[name].get(key) != "1":
+                problems.append(f"{name} 의 {key} 가 1 이 아니다")
+        for c in execs[name]:
+            if any(w == "uv" or w.endswith("/uv") for w in _exec_words(c)):
+                problems.append(f"{name} 이 uv 를 거쳐 뜬다: {' '.join(c)}")
+    return problems
 
 
-def test_the_runtime_neither_starts_through_uv_nor_keeps_a_cache():
-    """compose 의 api 는 읽기 전용 루트다 — `uv run` 은 캐시 디렉터리를 만들려다 죽는다. PATH 에 가상환경이 있다.
-    캐시는 쓰지 않는다 — 이미지에 66 MB 로 구워지고 있었다. `test` 스테이지도 이 ENV 를 물려받는다."""
-    commands = _runtime()
-    (cmd,) = [c for c in commands if c[0].upper() == "CMD"]
-    assert json.loads(" ".join(cmd[1:]))[0] != "uv", cmd
-    env = [w for c in commands if c[0].upper() == "ENV" for w in c[1:]]
-    assert "UV_NO_CACHE=1" in env, env
-    assert not any(c[0].upper() == "USER" for _, cs in _stages() for c in cs), (
-        "Dockerfile 에 USER 를 두면 test 스테이지의 uv sync 가 root 가 아니어서 실패한다 — compose 에서 정한다"
+@needs_dockerfile
+def test_the_dockerfile_pins_its_inputs_and_starts_without_uv():
+    assert dockerfile_problems(DOCKERFILE.read_text(encoding="utf-8")) == []
+
+
+@needs_dockerfile
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("@sha256:", "@sha256:x"),  # 베이스와 uv 가 모두 걸린다 — 아래 둘이 각각을 본다
+        ("FROM python:3.12-slim@", "FROM ${BASE}@"),
+        ("COPY --from=ghcr.io/astral-sh/uv:0.12.13@sha256:", "COPY --from=ghcr.io/astral-sh/uv:0.12.13@sha256:0"),
+        ('CMD ["sillok", "serve"]', 'CMD ["uv", "run", "--no-sync", "sillok", "serve"]'),
+        ('CMD ["sillok", "serve"]', 'CMD ["sh", "-c", "uv run sillok serve"]'),
+        ('CMD ["sillok", "serve"]', 'ENTRYPOINT ["/bin/uv", "run"]\nCMD ["sillok", "serve"]'),
+        ("    UV_NO_CACHE=1 \\", "    UV_NO_CACHE=0 \\"),
+        ("    UV_COMPILE_BYTECODE=1 \\", ""),
+        ('CMD ["sillok", "serve"]', 'CMD ["sillok", "serve"]\nENV UV_NO_CACHE=0'),
+        ('CMD ["sillok", "serve"]', 'USER 10001\nCMD ["sillok", "serve"]'),
+        ("WORKDIR /app", "WORKDIR /app\nRUN pip3 install uv"),
+        ("WORKDIR /app", "WORKDIR /app\nRUN /usr/local/bin/pip install uv"),
+        ("WORKDIR /app", "WORKDIR /app\nRUN curl -LsSf https://astral.sh/uv/install.sh | sh"),
+        ("WORKDIR /app", "WORKDIR /app\nRUN <<EOF\npip install uv\nEOF"),
+        ("WORKDIR /app", "WORKDIR /app\nADD https://example.invalid/uv.tar.gz /tmp/"),
+        ("FROM runtime AS default", "FROM runtime AS default\nCMD uv run sillok serve"),
+    ],
+)
+def test_the_dockerfile_check_bites(old, new):
+    """대조군. 진짜 Dockerfile 에서 한 곳만 되돌려도 판정이 무언가를 내야 한다. 앵커가 없으면 대조군이 낡은 것이다."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert old in text, f"대조군의 앵커가 사라졌다: {old!r}"
+    assert dockerfile_problems(text.replace(old, new, 1)), (old, new)
+
+
+def test_a_stage_alias_does_not_hide_an_unpinned_image():
+    """`FROM debian AS debian` 의 debian 은 이미지다 — 이름이 스테이지 목록에 있다고 내부로 보면 BuildKit 이 latest 를 받는다(실측)."""
+    assert dockerfile_problems("FROM debian AS debian\nFROM debian AS runtime\nENV UV_NO_CACHE=1 UV_COMPILE_BYTECODE=1\n")
+    assert dockerfile_problems(
+        "FROM busybox AS busybox\nFROM python:3.12-slim@sha256:" + "0" * 64 + " AS runtime\n"
+        "ENV UV_NO_CACHE=1 UV_COMPILE_BYTECODE=1\nCOPY --from=busybox /bin/sh /x\n"
     )
 
 
-def test_the_build_backend_is_pinned():
-    """`uv.lock` 밖이라 판을 적지 않으면 빌드마다 PyPI 의 그 시점 최신이 들어온다."""
-    requires = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["build-system"]["requires"]
-    assert requires and all(re.fullmatch(r"[A-Za-z0-9_.-]+==[0-9][\w.]*", r) for r in requires), requires
+# --- pyproject · uv.lock -----------------------------------------------------------
 
 
-def test_every_compose_image_is_pinned_by_digest():
-    images = [
-        line.split("image:", 1)[1].strip()
-        for line in COMPOSE.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith("image:")
-    ]
-    assert images, "대조군 — image: 를 하나도 읽지 못했다"
-    assert all(PINNED.fullmatch(i) for i in images), images
+def test_the_build_backend_and_its_build_deps_are_pinned_and_locked():
+    """빌드 백엔드는 `uv.lock` 밖이다. hatchling 과 그것이 끌어오는 것까지 `==` 로 적고, `uv lock` 이 옮겨 적은 사본이
+    같아야 한다 — `uv sync --frozen` 은 잠금의 사본을 쓰므로 pyproject 만 고치면 옛 판이 조용히 쓰였다(실측)."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    requires = project["build-system"]["requires"]
+    constraints = project["tool"]["uv"]["build-constraint-dependencies"]
+    pinned = re.compile(r"[A-Za-z0-9_.-]+==[0-9][\w.]*")
+    assert requires and all(pinned.fullmatch(r) for r in requires), requires
+    assert constraints and all(pinned.fullmatch(c) for c in constraints), constraints
+    locked = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))["manifest"]["build-constraints"]
+    assert sorted(f"{c['name']}{c['specifier']}" for c in locked) == sorted(constraints), "`uv lock` 을 다시 돌린다"
 
 
-def _api() -> dict[str, list[str]]:
+# --- docker-compose.yml ------------------------------------------------------------
+
+
+def _api(text: str) -> dict[str, list[str]]:
     """compose `api` 의 키 → 값들(같은 줄의 값이나 아래 목록 항목). YAML 파서는 의존성이 아니다."""
-    lines = COMPOSE.read_text(encoding="utf-8").splitlines()
+    lines = text.splitlines()
     start = lines.index("  api:")
     keys: dict[str, list[str]] = {}
     current = None
     for line in lines[start + 1 :]:
-        text = line.strip()
-        if not text or text.startswith("#"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
         if not line.startswith("    "):
             break
         if not line.startswith("     "):
-            current, _, value = text.partition(":")
+            current, _, value = stripped.partition(":")
             keys[current] = [value.strip().strip("\"'")] if value.strip() else []
-        elif current and text.startswith("- "):
-            keys[current].append(text[2:].strip().strip("\"'"))
+        elif current and stripped.startswith("- "):
+            keys[current].append(stripped[2:].strip().strip("\"'"))
     return keys
 
 
-def test_api_runs_unprivileged_on_a_read_only_root():
+# 이것들 중 하나라도 있으면 아래의 권한 설정이 무력해지거나 호스트에 닿는다.
+_FORBIDDEN_API_KEYS = frozenset(
+    {"privileged", "cap_add", "env_file", "extends", "<<", "pid", "ipc", "network_mode", "userns_mode", "uts",
+     "devices", "cgroup", "group_add", "sysctls"}
+)
+
+
+def compose_problems(text: str) -> list[str]:
+    problems: list[str] = []
+    body = [line for line in text.splitlines() if not line.strip().startswith("#")]
+    # 병합 키와 extends 는 다른 곳의 설정을 이 블록에 들인다 — 블록만 봐서는 안 보인다
+    problems += [f"병합·상속: {line.strip()}" for line in body if line.strip().startswith(("<<", "extends"))]
+    images = [line.split("image:", 1)[1].strip() for line in body if line.strip().startswith("image:")]
+    if not images:
+        problems.append("image: 를 하나도 읽지 못했다")
+    problems += [f"digest 없는 이미지: {i}" for i in images if not PINNED.fullmatch(i)]
+    api = _api(text)
+    if "environment" not in api:
+        return problems + ["api 블록을 읽지 못했다"]
+    problems += [f"api 에 {k}" for k in sorted(_FORBIDDEN_API_KEYS & set(api))]
+    command = json.loads(api.get("command", ["[]"])[0] or "[]")
+    if not command or any(w == "uv" or w.endswith("/uv") for item in command for w in str(item).split()):
+        problems.append(f"api 의 command 가 없거나 uv 를 거친다: {command}")
+    uid, _, gid = (api.get("user") or [""])[0].partition(":")
+    if not (uid.isdigit() and int(uid) > 0 and gid.isdigit() and int(gid) > 0):
+        problems.append(f"api 가 비루트 숫자 uid:gid 로 돌지 않는다: {api.get('user')}")
+    if api.get("read_only") != ["true"]:
+        problems.append("api 의 루트가 읽기 전용이 아니다")
+    if "/tmp" not in api.get("tmpfs", []):
+        problems.append("api 에 /tmp tmpfs 가 없다")
+    if api.get("cap_drop") != ["ALL"]:
+        problems.append("api 가 capability 를 전부 버리지 않는다")
+    if api.get("security_opt") != ["no-new-privileges:true"]:
+        problems.append(f"api 의 security_opt 가 no-new-privileges 하나가 아니다: {api.get('security_opt')}")
+    if api.get("volumes") != [".:/workspace:ro"]:
+        problems.append(f"api 의 마운트가 읽기 전용 나무 하나가 아니다: {api.get('volumes')}")
+    return problems
+
+
+@needs_compose
+def test_compose_pins_images_and_runs_api_unprivileged():
     """비루트·읽기 전용 루트·capability 없음·권한 상승 없음. `/workspace` 를 가리지는 않는다 (D37)."""
-    api = _api()
-    assert "environment" in api and "volumes" in api, "대조군 — api 블록을 읽지 못했다"
-    uid, _, gid = api["user"][0].partition(":")
-    assert uid.isdigit() and int(uid) > 0 and gid.isdigit() and int(gid) > 0, api["user"]
-    assert api["read_only"] == ["true"]
-    assert "/tmp" in api["tmpfs"]
-    assert api["cap_drop"] == ["ALL"]
-    assert "no-new-privileges:true" in api["security_opt"]
-    assert not {"privileged", "cap_add", "env_file"} & set(api), sorted(api)
+    assert compose_problems(COMPOSE.read_text(encoding="utf-8")) == []
+
+
+@needs_compose
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("pgvector/pgvector:pg16@sha256:", "pgvector/pgvector:pg16@sha256:x"),
+        ('    user: "10001:10001"', '    user: "0:0"'),
+        ('    user: "10001:10001"', ""),
+        ("    read_only: true", "    read_only: false"),
+        ("    cap_drop:\n      - ALL", ""),
+        ("    cap_drop:\n      - ALL", "    cap_drop:\n      - ALL\n    cap_add:\n      - SYS_ADMIN"),
+        ("      - no-new-privileges:true", "      - no-new-privileges:true\n      - seccomp:unconfined"),
+        ("      - no-new-privileges:true", "      - no-new-privileges:false"),
+        ('    command: ["sillok", "serve"]', '    command: ["uv", "run", "--no-sync", "sillok", "serve"]'),
+        ('    command: ["sillok", "serve"]', ""),
+        ("      - .:/workspace:ro", "      - .:/workspace"),
+        ("      - .:/workspace:ro", "      - .:/workspace:ro\n      - /var/run/docker.sock:/var/run/docker.sock"),
+        ('    user: "10001:10001"', '    user: "10001:10001"\n    privileged: true'),
+        ('    user: "10001:10001"', '    user: "10001:10001"\n    pid: host'),
+        ('    user: "10001:10001"', '    user: "10001:10001"\n    <<: *priv'),
+        ('    user: "10001:10001"', '    user: "10001:10001"\n    extends: {file: x.yml, service: y}'),
+        ('    user: "10001:10001"', '    user: "10001:10001"\n    env_file: .env'),
+    ],
+)
+def test_the_compose_check_bites(old, new):
+    """대조군. 리뷰가 초록으로 통과시킨 되돌림들이다 (병합 키·extends 는 `docker compose config` 로 privileged 가 됐다)."""
+    text = COMPOSE.read_text(encoding="utf-8")
+    assert old in text, f"대조군의 앵커가 사라졌다: {old!r}"
+    assert compose_problems(text.replace(old, new, 1)), (old, new)

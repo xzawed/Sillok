@@ -145,41 +145,116 @@ def test_restore_runbook_chains_its_guard_to_the_truncate():
         assert "test -s" in block, "TRUNCATE 가 있는 블록에 `test -s` 가드가 없다"
 
 
-def _dump_paths_outside_the_repo(blocks: list[str]) -> list[str]:
-    """덤프를 쓰고 읽는 줄이 **저장소 밖**을 가리키는가. 어긋난 줄을 돌려준다 (D37, 2026-09-27).
+# `DUMP=` 을 여는 모든 모양 — `export`·`readonly`·한 줄의 둘째 문장까지. 값은 `_word` 가 읽는다.
+_DUMP_ASSIGN = re.compile(r"(?:^|[\s;&|(])(?:(?:export|readonly|local|declare(?:\s+-\w+)*)\s+)?DUMP=")
+_DUMP_FILE = re.compile(r"kb_events[\w.-]*\.sql")
+_REDIRECT = re.compile(r"(?<![0-9&])[<>]{1,2}\s*(\S+)")
 
-    `api` 는 저장소 전체를 `/workspace` 로 읽는다. 덤프를 그 안에 두면 그 컨테이너가 원장 전체를 파일로 읽는다.
-    판정: `pg_dump` 의 리다이렉트와 `test -s`·`<` 는 `"$DUMP"` 만 쓰고, `DUMP=` 는 `$HOME` 이나 절대 경로에서 시작한다.
+
+def _word(text: str, start: int) -> int:
+    """셸 낱말 하나의 끝. `$( … )`·`${ … }` 안의 따옴표는 바깥 낱말을 끝내지 않는다 — 덤프 자리가 그 모양이다."""
+    depth, quote, i = 0, "", start
+    while i < len(text):
+        ch = text[i]
+        if depth == 0 and quote and ch == quote:
+            quote = ""
+        elif depth == 0 and not quote and ch in "\"'":
+            quote = ch
+        elif text.startswith(("$(", "${"), i) and quote != "'":
+            depth, i = depth + 1, i + 1
+        elif depth and ch in ")}":
+            depth -= 1
+        elif depth == 0 and not quote and ch in " \t;&|":
+            break
+        i += 1
+    return i
+
+
+def _assignments(code: str) -> tuple[list[str], str]:
+    """(DUMP 에 넣는 값들, 그것을 뺀 나머지)."""
+    values, rest, last = [], [], 0
+    for m in _DUMP_ASSIGN.finditer(code):
+        end = _word(code, m.end())
+        values.append(code[m.end() : end])
+        rest.append(code[last : m.start()])
+        last = end
+    return values, " ".join(rest + [code[last:]])
+
+
+def _outside_quotes(code: str) -> str:
+    """`"$DUMP"` 는 표시로 남기고 나머지 따옴표 안은 지운다 — `-c "… '<name>'"` 의 `<` 는 리다이렉트가 아니다."""
+    code = code.replace('"$DUMP"', "@DUMP@")
+    return re.sub(r"\"[^\"]*\"|'[^']*'", "''", code)
+
+
+def dump_problems(blocks: list[str], repo_name: str) -> list[str]:
+    """덤프를 쓰고 읽는 자리가 **저장소 밖, 스택마다, 모든 절에서 같은 한 줄**인가 (D37, 2026-09-27).
+
+    `api` 는 저장소 전체를 `/workspace` 로 읽고, 덤프에는 원장에서 이미 지운 행이 남을 수 있다.
+    복원 절은 백업 절이 둔 자리를 같은 줄로 다시 정한다 — 둘이 갈라지면 가드가 `1` 을 내고 멈추거나, 남의 덤프를 붓는다.
+    D66 의 복제 스택이 한 자리를 나눠 쓰면 한 스택의 백업이 다른 스택의 것을 덮는다.
     """
-    bad = []
+    problems: list[str] = []
+    values: list[str] = []
     for block in blocks:
         for line in block.splitlines():
-            text = line.strip()
-            if text.startswith("#"):
+            code = re.sub(r"(^|\s)#.*$", "", line).strip()
+            if not code:
                 continue
-            if text.startswith("DUMP=") and not text.startswith(('DUMP="$HOME/', 'DUMP="/')):
-                bad.append(text)
-            if ("pg_dump" in text and ">" in text) or "test -s" in text or ("psql" in text and " < " in text):
-                if '"$DUMP"' not in text:
-                    bad.append(text)
-    return bad
+            found, rest = _assignments(code)
+            values += found
+            if _DUMP_FILE.search(rest):
+                problems.append(f"덤프 파일 이름을 변수 밖에서 쓴다: {code}")
+            rest = _outside_quotes(rest)
+            if not re.search(r"\bpg_dump\b|\bpsql\b|\btest\s+-s\b", rest):
+                continue
+            if re.search(r"\|(?!\|)|\btee\b", rest):
+                problems.append(f"덤프를 파이프로 나른다: {code}")
+            targets = _REDIRECT.findall(rest) + re.findall(r"\btest\s+-s\s+(\S+)", rest)
+            problems += [f"`\"$DUMP\"` 밖을 읽거나 쓴다: {code}" for t in targets if t not in {"@DUMP@", "/dev/null"}]
+    if len(values) < 3:
+        problems.append(f"백업·복원·새 머신 세 절이 모두 `DUMP=` 로 자리를 정하지 않는다: {values}")
+    if len(set(values)) > 1:
+        problems.append(f"절마다 덤프 자리가 다르다: {sorted(set(values))}")
+    for value in set(values):
+        first = value.strip("\"'").removeprefix("$HOME/").split("/", 1)[0]
+        if not value.startswith('"$HOME/') or first.lower() == repo_name.lower():
+            problems.append(f"덤프 자리가 저장소 밖의 홈 아래가 아니다: {value}")
+        if "COMPOSE_PROJECT_NAME" not in value:
+            problems.append(f"덤프 자리가 스택마다 다르지 않다: {value}")
+    return problems
+
+
+def _operations_bash() -> list[str]:
+    return _bash_blocks(OPERATIONS.read_text(encoding="utf-8"))
 
 
 @needs_repo_docs
 def test_the_event_dump_lives_outside_the_repository():
+    assert dump_problems(_operations_bash(), REPO.name) == []
+
+
+@needs_repo_docs
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ('> "$DUMP"', "> kb_events.sql"),
+        ('test -s "$DUMP"', "test -s kb_events.sql"),
+        ('< "$DUMP"', '<"$HOME/other.sql"'),
+        ('< "$DUMP"', '< "$DUMP" \\\n  && cat kb_events.sql | psql'),
+        ('> "$DUMP"', '| tee "$DUMP"'),
+        ('mkdir -p "$(dirname "$DUMP")"', 'mkdir -p "$(dirname "$DUMP")"; export DUMP=kb_events.sql'),
+        ('mkdir -p "$(dirname "$DUMP")"', "readonly DUMP=kb_events.sql"),
+        ("${COMPOSE_PROJECT_NAME:-$(basename \"$PWD\")}", "Sillok"),
+        ("${COMPOSE_PROJECT_NAME:-$(basename \"$PWD\")}", "backup"),
+        ('"$HOME/sillok-backup/', '"kb/'),
+    ],
+)
+def test_the_dump_check_bites(old, new):
+    """대조군. 리뷰가 초록으로 통과시킨 모양들이다. 앞의 것만 바꾸므로 절끼리 갈라진 경우도 함께 본다."""
     text = OPERATIONS.read_text(encoding="utf-8")
-    blocks = [b for b in _bash_blocks(text) if "pg_dump" in b or "TRUNCATE" in b]
-    assert len(blocks) >= 2, "백업·복원 블록을 찾지 못했다 — 이 검사가 낡았다"
-    assert all("DUMP=" in b for b in blocks), "덤프 경로를 한 변수로 정하지 않은 블록이 있다"
-    assert _dump_paths_outside_the_repo(blocks) == []
-
-
-def test_the_dump_check_would_catch_a_dump_in_the_repo():
-    """대조군. 옛 블록(저장소 루트의 `kb_events.sql`)을 넣으면 위 판정이 물어야 한다."""
-    assert _dump_paths_outside_the_repo(["docker compose exec -T db pg_dump --table=kb_events > kb_events.sql\n"])
-    assert _dump_paths_outside_the_repo(['DUMP="kb_events.sql"\n'])
-    assert _dump_paths_outside_the_repo(["test -s kb_events.sql \\\n"])
-    assert not _dump_paths_outside_the_repo(['DUMP="$HOME/b/kb_events.sql"\ntest -s "$DUMP" \\\n'])
+    assert old in text, f"대조군의 앵커가 사라졌다: {old!r}"
+    assert dump_problems(_bash_blocks(text.replace(old, new, 1)), REPO.name), (old, new)
 
 
 def test_the_guard_check_would_catch_the_old_block():
