@@ -25,8 +25,21 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# D18: uv.lock 밖이라 판을 적지 않으면 빌드마다 PyPI 의 그 시점 최신이 들어온다.
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# D18: hatchling 이 빌드 때 끌어오는 것도 판을 고정한다. `uv lock` 이 uv.lock 의 [manifest] 에 옮겨 적고,
+# `uv sync --frozen` 은 그 사본을 쓴다 — 여기만 고치고 `uv lock` 을 잊으면 옛 판이 조용히 쓰인다(실측).
+build-constraint-dependencies = [
+  "editables==0.6",
+  "packaging==26.3",
+  "pathspec==1.1.1",
+  "pluggy==1.6.0",
+  "tomlkit==0.15.1",
+  "trove-classifiers==2026.9.21.13",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sillok"]

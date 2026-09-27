@@ -69,7 +69,10 @@ Events here use the label `demo` and indexing uses `sillok` — two labels on th
 not directories, and they do not have to match.
 
 Requires Docker. Nothing else — the API container carries its own Python.
-The first `up` builds that image, so the build sandbox has to reach PyPI.
+The first `up` builds that image, so the build sandbox has to reach PyPI, Docker Hub and `ghcr.io`.
+The API runs as a non-root user.
+On Linux that means any tree it mounts has to be readable by other users.
+Files need `o+r` and directories `o+rx`.
 
 The shell examples below are POSIX — Git Bash, WSL, macOS, Linux.
 They do not run as written in Windows PowerShell, which aliases `curl` to `Invoke-WebRequest`
@@ -365,6 +368,9 @@ and naming a path that does not exist makes Compose refuse to start at all.
 `-p` gives the stack its own network, volume and database — that separation is what keeps the two apart,
 not the label. Its search, files, statistics and MCP entrance answer for that tree
 while the first stack carries on untouched.
+
+To back up or restore that stack, export `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` first.
+The runbook blocks then follow that stack — see [docs/operations.md](docs/operations.md).
 
 </details>
 

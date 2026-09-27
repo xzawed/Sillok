@@ -10,7 +10,8 @@ services:
   db:
     # 확장 파일이 들어 있는 이미지를 쓴다. 이미지가 있어도 DB 마다
     # CREATE EXTENSION 은 따로 필요하다 — migrations/001_extensions.sql (D17).
-    image: pgvector/pgvector:pg16
+    # digest 로 고정한다 (D18, 2026-09-27). 올리는 PR 하나에서 바꾸고 다시 증거를 낸다.
+    image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sillok}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sillok}
@@ -42,6 +43,20 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # D18 (2026-09-27). 비루트·읽기 전용 루트·capability 없음·권한 상승 없음. Dockerfile 이 아니라 여기서 정한다 —
+    # Dockerfile 의 USER 는 test 스테이지가 물려받아 uv sync 가 실패한다(실측). 앱이 쓰는 곳은 /tmp 하나다.
+    # `docker cp` 로 파일을 넣지 못한다 — 표준입력으로 넘긴다. /workspace 는 가리지 않는다 (D37 의 비용).
+    # command 를 여기서도 적는다 — `up` 은 이미지가 있으면 다시 굽지 않으므로, CMD 가 `uv run` 이던 옛 이미지가
+    # 이 설정으로 뜨면 uv 캐시를 만들지 못해 죽기를 되풀이했다(실측). 이렇게 두면 이미지 판과 무관하게 뜬다.
+    command: ["sillok", "serve"]
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       # D16. 컨테이너 안에서는 호스트가 db 이고 bind 는 0.0.0.0 이어야
       # 호스트의 127.0.0.1:8080 에 닿는다.

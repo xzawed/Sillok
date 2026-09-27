@@ -125,6 +125,34 @@ tests    uv run pytest -q                             호스트. DB 검사는 sk
 
 문서 게이트는 파이썬 툴체인과 무관하게 그대로 남는다.
 
+→ **2026-09-27** (감사 F110·F111): **빌드 입력과 `api` 컨테이너의 권한도 여기서 고정한다.** 값은 원천에만 있다 —
+digest 는 `Dockerfile`·`docker-compose.yml`, 빌드 백엔드와 그 의존성의 판은 `pyproject.toml`(과 `uv lock` 이 옮겨 적은
+`uv.lock` 의 사본), uid 는 `docker-compose.yml` 이 갖는다. 이 문단은 규칙만 적는다.
+
+- **베이스 이미지는 digest 로 고정한다** — `python:3.12-slim`(api)과 `pgvector/pgvector:pg16`(db).
+  태그만 두면 같은 커밋이 머신마다 다른 판으로 구워진다. 실측(2026-09-26 감사 호스트): 로컬 태그는 3.12.13 이었고
+  레지스트리의 같은 태그는 3.12.14 였다. 셋 다 amd64·arm64 를 담은 다중 아키텍처 인덱스다.
+- **uv 는 판과 digest 를 붙인 공식 이미지에서 복사한다.** `pip install uv` 는 판도 해시도 없었다 —
+  감사 때 0.12.13 이던 것이 다음 날 구운 이미지에서는 0.12.19 였다. 고정한 판은 감사 때의 것이다.
+- **빌드 백엔드 `hatchling` 과 그것이 빌드 때 끌어오는 것은 `==` 로 고정한다.** `uv.lock` 밖이라 빌드마다
+  PyPI 의 그 시점 최신이 들어왔다. 끌어오는 것은 `build-constraint-dependencies` 이고, `uv lock` 이 그것을
+  `uv.lock` 에 옮겨 적는다 — `uv sync --frozen` 은 그 사본을 쓰므로 pyproject 만 고치면 옛 판이 조용히 쓰인다(실측).
+- **올리는 법:** 판을 올리는 PR 하나에서 digest·판을 바꾸고(`uv lock` 포함), 이미지를 다시 굽고, 증거를 다시 낸다.
+  떠 있는 태그로 되돌리지 않는다. `tests/test_image.py` 가 모양을 잠근다 — 되돌림마다 대조군이 있다.
+- **compose 의 `api` 는 비루트 uid·읽기 전용 루트·`/tmp` tmpfs·capability 전부 제거·`no-new-privileges` 로 돈다.**
+  자리는 D16 의 `environment:` 와 같은 compose `api` 블록이다.
+  - Dockerfile 에 `USER` 를 두지 않는다. `test` 스테이지가 그것을 물려받아 `uv sync` 가 실패한다(실측).
+    그래서 compose 밖의 `docker run` 은 여전히 root 다.
+  - `CMD` 도 compose 의 `command` 도 `uv run` 을 거치지 않는다 — PATH 에 가상환경이 있다.
+    compose 에도 적는 것은 `up` 이 이미지를 다시 굽지 않기 때문이다. CMD 가 `uv run` 이던 옛 이미지가 이 설정으로
+    뜨면 uv 캐시를 만들지 못해 죽기를 되풀이했다(실측).
+  - uv 는 캐시를 쓰지 않는다. 캐시는 이미지에 66 MB 로 구워지고 있었다. 바이트코드는 굽는 때 만든다 —
+    읽기 전용 루트에서는 `.pyc` 를 쓰지 못해 `exec` 마다 모듈을 다시 컴파일했다. 의존성은 uv 가, 편집 설치인
+    앱 자신(`src/`)은 `compileall` 이 굽는다 — uv 의 설정은 앱에 닿지 않았다(실측).
+  - `docker cp` 로 `api` 에 파일을 넣지 못한다. 파일은 표준입력으로 넘긴다.
+  - 이것은 `/workspace` 를 가리지 않는다 — D37 의 비용이다. 거꾸로 Linux 호스트에서는 나무가 그 uid 에게
+    읽혀야 한다 (D37).
+
 ### D19 CLI 계약
 
 ```text
@@ -2233,6 +2261,28 @@ Q20이 매핑 문제로 되살아난다 — **Q22는 열어 둔다.**
 **`여럿 띄운다` 의 단위는 D66 이 정했다 — 스택 전체다.**
 v1이 노리는 배치는 "작업 중인 저장소 하나 + 그 저장소의 지식"이고, 그것은 이 형태로 충분하다.
 
+→ **2026-09-27** (감사 F111): **`api` 프로세스는 이 나무 전체를 읽는다.**
+`.env`·`.git`·무시된 파일(`compose.override.yml`·키 파일)이 다 든다. 받아들이는 비용이고, 이유는 넷이다.
+
+- **HTTP·MCP 로는 닿지 않는다.** `get_file` 과 `save_doc` 은 `kb_documents` 에 행이 있는 경로만 연다 (D36·D38).
+  감사가 `.env`·덤프·`.git/config`·경로 넘기를 재어 모두 `NOT_FOUND` 였다.
+  ingest 는 `.git` 을 걷지 않는다.
+- **가리는 마운트는 이 저장소가 허용하는 배치를 깬다** (실측).
+  - `.env` 에 빈 파일을, `.git` 에 tmpfs 를 덮으면 둘이 있을 때는 가려진다.
+  - 그러나 `.env` 가 없거나(선택 파일이다, D16), `.git` 이 없거나(소스 묶음), `.git` 이 파일이면(워크트리 —
+    예를 들어 워크트리로 만든 D66 의 복제 스택) 컨테이너가 뜨지 않는다. 읽기 전용 마운트 안에 마운트 지점을
+    만들 수 없어서다.
+- **마운트를 `docs/`·`adr/`·README 파일로 좁히면** D9 의 `README*` 가 고정 목록이 된다.
+  새 루트 README 는 호스트에서는 색인 대상인데 컨테이너에는 없고, 아무 오류도 없다.
+- **비루트는 Docker Desktop 에서 가리지 않는다.** 그 바인드 마운트는 모든 파일이 0777 로 보인다(실측).
+  모드 비트를 지키는 Linux 파일시스템에서는 양쪽으로 다르다(VM 안 볼륨으로 실측) — `api` 의 비루트 uid 는
+  0600 파일·0700 디렉터리를 읽지 못한다. 그래서 거기서는 `.env` 가 0600 이면 가려지지만, umask 077 로 만든
+  나무는 ingest 가 `Permission denied` 로 실패한다. **나무는 다른 사용자에게 읽혀야 한다** (파일 o+r, 디렉터리 o+rx — x 만으로는 걸음이 목록을 못 읽는다, 실측).
+
+그래서 **옮길 수 있는 것은 옮긴다.** 이벤트 덤프는 저장소 밖에 둔다 — 절차는
+[operations.md](../docs/operations.md) 가 갖는다 (D54). 덤프에는 원장에서 이미 지운 행이 남을 수 있어
+`DATABASE_URL` 로 닿는 것과 같지 않다.
+
 ### D38 `save_doc` 계약
 
 `POST /v1/docs/proposals`
@@ -3127,8 +3177,9 @@ D35 의 표는 *만들었다면* 의 규칙으로 남는다 — 그 표도 단�
 | [AGENTS.md](../AGENTS.md) | 확정 전제 요약 블록 |
 | [.env.example](../.env.example) | D16 환경변수 이름과 기본값 |
 | [README.md](../README.md) · [README.ko.md](../README.ko.md) | `5432` 미게시(D16), CLI 이름, 상태표 |
-| [docker-compose.yml](../docker-compose.yml) | 서비스 둘(D13), `5432` 미게시(D16), `test` 프로파일(D22) |
-| [Dockerfile](../Dockerfile) | 파이썬 버전·uv(D18), runtime 의 PATH |
+| [docker-compose.yml](../docker-compose.yml) | 서비스 둘(D13), `5432` 미게시(D16), `test` 프로파일(D22), db digest·`api` 의 uid·권한·command(D18) |
+| [Dockerfile](../Dockerfile) | 파이썬 버전과 digest·uv 의 판과 digest(D18), runtime 의 PATH·CMD |
+| [pyproject.toml](../pyproject.toml) | 빌드 백엔드와 그 의존성의 판(D18). `uv lock` 이 `uv.lock` 에 옮겨 적는다 |
 | [compose.override.example.yml](../compose.override.example.yml) | 호스트에서 `5432` 를 여는 예 (D16 의 예외) |
 
 ## D65 — Q33 의 답: 죽은 신호를 대신할 것을 만들지 않는다 (2026-09-05 확정)

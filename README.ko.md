@@ -69,7 +69,10 @@ RAG 플랫폼이 **아닙니다.**
 디렉터리가 아니고, 같을 필요도 없습니다.
 
 Docker만 있으면 됩니다. api 컨테이너가 자기 파이썬을 들고 있습니다.
-첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI에 닿아야 합니다.
+첫 `up`이 그 이미지를 굽기 때문에 빌드 샌드박스가 PyPI·Docker Hub·`ghcr.io`에 닿아야 합니다.
+api는 비루트 사용자로 돕니다.
+그래서 Linux에서는 api가 마운트하는 나무를 다른 사용자도 읽을 수 있어야 합니다.
+파일은 `o+r`, 디렉터리는 `o+rx`입니다.
 
 아래 셸 예제는 POSIX 셸 기준입니다 — Git Bash · WSL · macOS · Linux.
 Windows PowerShell에서는 적힌 그대로 돌지 않습니다 — `curl`이 `Invoke-WebRequest`의 별칭이고,
@@ -365,6 +368,9 @@ docker compose -p other-repo \
 `-p` 가 그 스택에 자체 네트워크와 볼륨과 DB를 줍니다 — 둘을 갈라 두는 것은 라벨이 아니라
 그 분리입니다. 검색과 파일과 통계와 MCP 입구가 그 나무를 답하고,
 첫 스택은 그대로 돕니다.
+
+그 스택을 백업·복원하려면 먼저 `COMPOSE_PROJECT_NAME` 과 `COMPOSE_FILE` 을 내보냅니다.
+그러면 운영 절차의 블록이 그 스택을 따릅니다 — [docs/operations.md](docs/operations.md) 를 봅니다.
 
 </details>
 

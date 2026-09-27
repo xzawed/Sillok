@@ -145,6 +145,167 @@ def test_restore_runbook_chains_its_guard_to_the_truncate():
         assert "test -s" in block, "TRUNCATE 가 있는 블록에 `test -s` 가드가 없다"
 
 
+# `DUMP=` 을 여는 모든 모양 — `export`·`readonly`·한 줄의 둘째 문장까지. 값은 `_word` 가 읽는다.
+_DUMP_ASSIGN = re.compile(r"(?:^|[\s;&|(])(?:(?:export|readonly|local|declare(?:\s+-\w+)*)\s+)?DUMP\+?=")
+_DUMP_FILE = re.compile(r"\S*\.sql\b")
+_REDIRECT = re.compile(r"(?<![0-9])[<>]{1,2}\s*(\S+)")  # `&>` 도 리다이렉트다. `2>&1` 은 아니다
+# "$DUMP" 가 설 수 있는 자리 — 리다이렉트, 빈 덤프 가드, 디렉터리 만들기, 지우기. 그 밖에 넘기면 옮겨 쓰는 길이 된다.
+_DUMP_ALLOWED = re.compile(r'(?:[<>]{1,2}\s*|\btest\s+-s\s+|\brm\s+-f\s+)"\$DUMP"|"\$\(dirname "\$DUMP"\)"')
+# 덤프 자리는 이 한 줄이다. **판정이 값을 들고 있다** — "저장소 밖" 을 경로 모양으로 짐작하면 `$HOME/src/Sillok/…` 처럼
+# 저장소가 거기 있을 때만 안인 자리를 못 가른다(리뷰 실측). 저장소 디렉터리가 될 수 없는 이름 아래, 스택마다 한 자리다.
+DUMP_PLACE = '"$HOME/sillok-backup/${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}/kb_events.sql"'
+
+
+def _word(text: str, start: int) -> int:
+    """셸 낱말 하나의 끝. `$( … )`·`${ … }` 안의 따옴표는 바깥 낱말을 끝내지 않는다 — 덤프 자리가 그 모양이다."""
+    depth, quote, i = 0, "", start
+    while i < len(text):
+        ch = text[i]
+        if depth == 0 and quote and ch == quote:
+            quote = ""
+        elif depth == 0 and not quote and ch in "\"'":
+            quote = ch
+        elif text.startswith(("$(", "${"), i) and quote != "'":
+            depth, i = depth + 1, i + 1
+        elif depth and ch in ")}":
+            depth -= 1
+        elif depth == 0 and not quote and ch in " \t;&|":
+            break
+        i += 1
+    return i
+
+
+def _assignments(code: str) -> tuple[list[str], str]:
+    """(DUMP 에 넣는 값들, 그것을 뺀 나머지)."""
+    values, rest, last = [], [], 0
+    for m in _DUMP_ASSIGN.finditer(code):
+        end = _word(code, m.end())
+        values.append(code[m.end() : end])
+        rest.append(code[last : m.start()])
+        last = end
+    return values, " ".join(rest + [code[last:]])
+
+
+def _outside_quotes(code: str) -> str:
+    """`"$DUMP"` 는 표시로 남기고 나머지 따옴표 안은 지운다 — `-c "… '<name>'"` 의 `<` 는 리다이렉트가 아니다."""
+    code = code.replace('"$DUMP"', "@DUMP@")
+    return re.sub(r"\"[^\"]*\"|'[^']*'", "''", code)
+
+
+def _statements(block: str) -> list[str]:
+    """주석을 버리고 줄 이음(`\\`)을 합친 문장들 — 리다이렉트를 다음 줄로 넘겨도 한 문장으로 본다."""
+    statements, buffer = [], ""
+    for line in block.splitlines():
+        code = re.sub(r"(^|\s)#.*$", "", line).rstrip()
+        if code.endswith("\\"):
+            buffer += code[:-1] + " "
+            continue
+        if (buffer + code).strip():
+            statements.append((buffer + code).strip())
+        buffer = ""
+    return statements
+
+
+def dump_problems(blocks: list[str]) -> list[str]:
+    """덤프를 쓰고 읽는 자리가 **저장소 밖, 스택마다, 모든 절에서 같은 한 줄**인가 (D37, 2026-09-27).
+
+    `api` 는 저장소 전체를 `/workspace` 로 읽고, 덤프에는 원장에서 이미 지운 행이 남을 수 있다.
+    복원 절은 백업 절이 둔 자리를 같은 줄로 다시 정한다 — 둘이 갈라지면 가드가 `1` 을 내고 멈추거나, 남의 덤프를 붓는다.
+    D66 의 복제 스택이 한 자리를 나눠 쓰면 한 스택의 백업이 다른 스택의 것을 덮는다.
+    """
+    problems: list[str] = []
+    values: list[str] = []
+    for block in blocks:
+        for code in _statements(block):
+            found, rest = _assignments(code)
+            values += found
+            if _DUMP_FILE.search(rest):
+                problems.append(f"덤프 파일 이름을 변수 밖에서 쓴다: {code}")
+            touches = re.search(r"\$\{?DUMP\b|\bpg_dump\b|\bpsql\b|\btest\s+-s\b", rest)
+            if re.search(r"\$\{?DUMP\b", _DUMP_ALLOWED.sub(" ", rest)):
+                problems.append(f"덤프를 다른 명령에 넘긴다: {code}")
+            rest = _outside_quotes(rest)
+            if not touches:
+                continue
+            if re.search(r"(?<!\|)\|(?!\|)|\btee\b", rest):
+                problems.append(f"덤프를 파이프로 나른다: {code}")
+            if re.search(r"\b(?:cp|mv|rsync|scp)\b|\bpg_dump\b[^|;&]*\s(?:-f|--file)\b", rest):
+                problems.append(f"덤프를 다른 자리로 옮기거나 쓴다: {code}")
+            targets = _REDIRECT.findall(rest) + re.findall(r"\btest\s+-s\s+(\S+)", rest)
+            problems += [
+                f"`\"$DUMP\"` 밖을 읽거나 쓴다: {code}"
+                for t in targets
+                if t not in {"@DUMP@", "/dev/null"} and not t.startswith("&")
+            ]
+    if len(values) < 3:
+        problems.append(f"백업·복원·새 머신 세 절이 모두 `DUMP=` 로 자리를 정하지 않는다: {values}")
+    problems += [f"덤프 자리가 정한 한 줄이 아니다: {v}" for v in sorted(set(values)) if v != DUMP_PLACE]
+    return problems
+
+
+def _operations_bash() -> list[str]:
+    return _bash_blocks(OPERATIONS.read_text(encoding="utf-8"))
+
+
+@needs_repo_docs
+def test_the_event_dump_lives_outside_the_repository():
+    assert dump_problems(_operations_bash()) == []
+    # 복제 스택은 이름과 파일 목록을 함께 내보낸다 — 이름만이면 복원 절의 `up` 이 커밋된 설정으로
+    # 그 스택을 다시 만들어 8080 이 겹쳤다(리뷰 실측). 산문의 안내라 있는지만 본다.
+    text = OPERATIONS.read_text(encoding="utf-8")
+    backup = text[text.index("## 이벤트 백업") : text.index("## 복원")]
+    assert "`COMPOSE_PROJECT_NAME`" in backup and "`COMPOSE_FILE`" in backup
+
+
+_BASENAME = '$(basename "$PWD")'
+
+
+@needs_repo_docs
+@pytest.mark.parametrize(
+    "old, new, count",
+    [
+        ('> "$DUMP"', "> kb_events.sql", 1),
+        ('test -s "$DUMP"', "test -s kb_events.sql", 1),
+        ('< "$DUMP"', '<"$HOME/other.sql"', 1),
+        ('< "$DUMP"', "\\\n  < ./backup.sql", 1),  # 리다이렉트를 다음 줄로 넘긴다
+        ('< "$DUMP"', '< "$DUMP" \\\n  && cat kb_events.sql | psql', 1),
+        ('> "$DUMP"', '| tee "$DUMP"', 1),
+        ('> "$DUMP"', "-f /tmp/e", 1),
+        ('mkdir -p "$(dirname "$DUMP")"', 'mkdir -p "$(dirname "$DUMP")" && cp "$DUMP" ./backup', 1),
+        ('mkdir -p "$(dirname "$DUMP")"', 'mkdir -p "$(dirname "$DUMP")"; export DUMP=kb_events.sql', 1),
+        ('mkdir -p "$(dirname "$DUMP")"', "readonly DUMP=kb_events.sql", 1),
+        ("${COMPOSE_PROJECT_NAME:-" + _BASENAME + "}", "Sillok", 1),  # 절끼리 갈라진다
+        ('"$HOME/sillok-backup/', '"$HOME/', -1),  # 셋 다 같지만 저장소가 `~/Sillok` 이면 그 뿌리다
+        ("sillok-backup", "src/Sillok", -1),
+        (_BASENAME, "default", -1),  # 셋 다 같지만 스택끼리 한 자리다
+        ('"$HOME/sillok-backup/', '"$HOME/../Sillok/', -1),
+        ('mkdir -p "$(dirname "$DUMP")"', 'mkdir -p "$(dirname "$DUMP")"; DUMP+="/../../in-repo"', 1),
+        ('mkdir -p "$(dirname "$DUMP")"', 'mkdir -p "$(dirname "$DUMP")" && dd if="$DUMP" of=./backup', 1),
+        ('> "$DUMP"', '> "$DUMP" &>./backup', 1),
+    ],
+)
+def test_the_dump_check_bites(old, new, count):
+    """대조군. 리뷰가 초록으로 통과시킨 모양들이다. `count` 1 은 앞의 절만, -1 은 세 절 모두를 바꾼다."""
+    text = OPERATIONS.read_text(encoding="utf-8")
+    assert old in text, f"대조군의 앵커가 사라졌다: {old!r}"
+    assert dump_problems(_bash_blocks(text.replace(old, new, count))), (old, new)
+
+
+@needs_repo_docs
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ('> "$DUMP"', '> "$DUMP" || rm -f "$DUMP"'),
+        ('test -s "$DUMP"', 'test -s "$DUMP" || echo "empty dump" >&2'),
+    ],
+)
+def test_the_dump_check_leaves_ordinary_shell_alone(old, new):
+    """거짓 양성 대조군. `||` 는 파이프가 아니고 `>&2` 는 덤프 자리가 아니다."""
+    text = OPERATIONS.read_text(encoding="utf-8")
+    assert old in text
+    assert dump_problems(_bash_blocks(text.replace(old, new, 1))) == []
+
+
 def test_the_guard_check_would_catch_the_old_block():
     """대조군. **옛 블록을 넣으면 위 검사가 물어야 한다.**
 
