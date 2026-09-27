@@ -145,6 +145,43 @@ def test_restore_runbook_chains_its_guard_to_the_truncate():
         assert "test -s" in block, "TRUNCATE 가 있는 블록에 `test -s` 가드가 없다"
 
 
+def _dump_paths_outside_the_repo(blocks: list[str]) -> list[str]:
+    """덤프를 쓰고 읽는 줄이 **저장소 밖**을 가리키는가. 어긋난 줄을 돌려준다 (D37, 2026-09-27).
+
+    `api` 는 저장소 전체를 `/workspace` 로 읽는다. 덤프를 그 안에 두면 그 컨테이너가 원장 전체를 파일로 읽는다.
+    판정: `pg_dump` 의 리다이렉트와 `test -s`·`<` 는 `"$DUMP"` 만 쓰고, `DUMP=` 는 `$HOME` 이나 절대 경로에서 시작한다.
+    """
+    bad = []
+    for block in blocks:
+        for line in block.splitlines():
+            text = line.strip()
+            if text.startswith("#"):
+                continue
+            if text.startswith("DUMP=") and not text.startswith(('DUMP="$HOME/', 'DUMP="/')):
+                bad.append(text)
+            if ("pg_dump" in text and ">" in text) or "test -s" in text or ("psql" in text and " < " in text):
+                if '"$DUMP"' not in text:
+                    bad.append(text)
+    return bad
+
+
+@needs_repo_docs
+def test_the_event_dump_lives_outside_the_repository():
+    text = OPERATIONS.read_text(encoding="utf-8")
+    blocks = [b for b in _bash_blocks(text) if "pg_dump" in b or "TRUNCATE" in b]
+    assert len(blocks) >= 2, "백업·복원 블록을 찾지 못했다 — 이 검사가 낡았다"
+    assert all("DUMP=" in b for b in blocks), "덤프 경로를 한 변수로 정하지 않은 블록이 있다"
+    assert _dump_paths_outside_the_repo(blocks) == []
+
+
+def test_the_dump_check_would_catch_a_dump_in_the_repo():
+    """대조군. 옛 블록(저장소 루트의 `kb_events.sql`)을 넣으면 위 판정이 물어야 한다."""
+    assert _dump_paths_outside_the_repo(["docker compose exec -T db pg_dump --table=kb_events > kb_events.sql\n"])
+    assert _dump_paths_outside_the_repo(['DUMP="kb_events.sql"\n'])
+    assert _dump_paths_outside_the_repo(["test -s kb_events.sql \\\n"])
+    assert not _dump_paths_outside_the_repo(['DUMP="$HOME/b/kb_events.sql"\ntest -s "$DUMP" \\\n'])
+
+
 def test_the_guard_check_would_catch_the_old_block():
     """대조군. **옛 블록을 넣으면 위 검사가 물어야 한다.**
 

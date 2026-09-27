@@ -25,7 +25,8 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# D18: uv.lock 밖이라 판을 적지 않으면 빌드마다 PyPI 의 그 시점 최신이 들어온다.
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

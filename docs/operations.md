@@ -31,8 +31,13 @@ module: null
 
 `5432`는 호스트에 게시되지 않는다 (D16). 그래서 컨테이너 안에서 뜬다.
 
+**덤프는 저장소 밖에 둔다** (D37). `api` 는 저장소 전체를 `/workspace` 로 읽으므로, 안에 두면 그 컨테이너가 원장
+전체를 파일로 읽을 수 있다. `.gitignore` 는 커밋만 막지 마운트는 막지 않는다.
+
 ```bash
-docker compose exec -T db pg_dump -U sillok -d sillok --data-only --table=kb_events > kb_events.sql
+DUMP="$HOME/sillok-backup/kb_events.sql"      # 저장소 밖. 복원 절도 이 이름을 쓴다
+mkdir -p "$(dirname "$DUMP")"
+docker compose exec -T db pg_dump -U sillok -d sillok --data-only --table=kb_events > "$DUMP"
 ```
 
 `--data-only`인 이유는 스키마의 정본이 `migrations/`이기 때문이다.
@@ -44,15 +49,16 @@ DDL을 함께 뜨면 그 사본이 마이그레이션과 갈라진다.
 
 ```bash
 PROJECT=sillok                                # ingest 가 다시 만들 project. 기본값이 없다 (D19)
+DUMP="$HOME/sillok-backup/kb_events.sql"       # 위 백업 절이 둔 곳. 저장소 밖이다 (D37)
 
 docker compose up -d --wait                   # 마이그레이션이 bind 전에 적용된다 (D17)
 docker compose stop api                       # 붓는 동안 쓰는 쪽이 없어야 한다
 
 # 아래 넷은 **한 덩어리다.** `test` 를 따로 한 줄에 두면 그 종료 코드를 아무도 보지 않고
 # 다음 줄이 그냥 돈다 — 빈 덤프에도 TRUNCATE 가 돌아 원장이 사라진다 (아래 실측).
-test -s kb_events.sql \
+test -s "$DUMP" \
   && docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 -c "TRUNCATE kb_events;" \
-  && docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 < kb_events.sql \
+  && docker compose exec -T db psql -U sillok -d sillok -v ON_ERROR_STOP=1 < "$DUMP" \
   && docker compose exec -T db psql -U sillok -d sillok -c "SELECT count(*) FROM kb_events;"
 
 docker compose start api
@@ -108,11 +114,12 @@ cp .env.example .env          # 키가 있으면 OPENAI_API_KEY 를 채운다. �
 docker compose up -d --wait   # 마이그레이션이 bind 전에 적용된다 (D17)
 ```
 
-덤프를 **`kb_events.sql` 이라는 이름으로** 이 디렉터리에 두고 위 `복원` 절을 그대로 돌린다 —
-그 절이 이름을 박아 쓰므로 다른 이름이면 가드가 `1` 을 내고 거기서 멈춘다(원장은 안전하다).
+덤프를 **`$HOME/sillok-backup/kb_events.sql`** 에 두고 위 `복원` 절을 그대로 돌린다 —
+그 절이 이 경로를 박아 쓰므로 다른 곳이면 가드가 `1` 을 내고 거기서 멈춘다(원장은 안전하다).
 그 절이 색인까지 다시 만들고 끝난다.
-`kb_events*.sql*` 은 `.gitignore` 에 있어 커밋되지 않는다 — **장기 보관은 저장소 밖이다.**
-그것을 커밋하면 이 저장소가 첫 줄에서 금지한 것이 다른 이름으로 들어온다.
+**저장소 안에 두지 않는다** — `api` 가 읽는다 (D37). `kb_events*.sql*` 이 `.gitignore` 에 있는 것은
+실수로 둔 덤프가 커밋되지 않게 하려는 것이다. 그것을 커밋하면 이 저장소가 첫 줄에서 금지한 것이
+다른 이름으로 들어온다.
 
 **판정은 `count(*)` 와 현황이다.** 복원 절의 마지막 `count(*)` 가 원장의 증거이고,
 전체는 현황 하나로 본다.
