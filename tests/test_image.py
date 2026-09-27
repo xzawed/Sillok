@@ -134,7 +134,8 @@ def dockerfile_problems(text: str) -> list[str]:
             # `--mount=type=bind,from=…` 도 이미지를 받아 온다 — uv 문서가 보여 주는 모양이다
             for option in (f for f in flags if f.startswith("--mount=")):
                 parts = dict(p.partition("=")[::2] for p in option.removeprefix("--mount=").split(","))
-                if parts.get("type") == "image" or ("from" in parts and not _pinned_or_stage(parts["from"], defined)):
+                source = parts.get("from") or (parts.get("source") if parts.get("type") == "image" else None)
+                if source is not None and not _pinned_or_stage(source, defined):
                     problems.append(f"digest 없는 마운트 원천: {option}")
             shell = _shell(words)
             if FETCHING.search(shell):
@@ -143,7 +144,8 @@ def dockerfile_problems(text: str) -> list[str]:
             for step in re.split(r"&&|\|\||;", shell):
                 if re.search(r"\buv\s+sync\b", step) and not re.search(r"--frozen\b|--locked\b", step):
                     problems.append(f"uv sync 가 잠금을 벗어날 수 있다: {step.strip()}")
-            if stage == "runtime" and re.search(r"\bpython\s+-m\s+compileall\b(?:\s+-\S+)*\s+src\b", shell):
+            # 인자는 `src` 그 자체다 — `src/sillok` 은 일부만 굽고, `-j 4` 같은 값 있는 옵션은 받는다
+            if stage == "runtime" and re.search(r"\bpython\s+-m\s+compileall\b[^&;|]*\ssrc/?(?=\s|$|[&;|])", shell):
                 compiled_src = True
         elif op == "USER":
             problems.append("Dockerfile 의 USER — test 스테이지의 uv sync 가 실패한다(실측). compose 가 정한다")
@@ -218,6 +220,7 @@ def test_the_dockerfile_pins_its_inputs_and_starts_without_uv():
         ("RUN python -m compileall -q src", "RUN python -m compileall -q /tmp/src"),
         ("RUN uv sync --frozen --no-dev", "RUN --mount=type=image,source=ghcr.io/astral-sh/uv:latest,target=/uv uv sync --frozen --no-dev"),
         ('CMD ["sillok", "serve"]', 'CMD ["/bin/uvx", "sillok"]'),
+        ("RUN python -m compileall -q src", "RUN python -m compileall -q src/sillok"),
     ],
 )
 def test_the_dockerfile_check_bites(old, new):
@@ -257,6 +260,26 @@ def test_the_dockerfile_check_leaves_ordinary_lines_alone(addition):
     """거짓 양성 대조군. 판정이 낱말 경계 없이 문자열을 찾으면 여기서 붉어진다."""
     text = DOCKERFILE.read_text(encoding="utf-8").replace('CMD ["sillok", "serve"]', addition + '\nCMD ["sillok", "serve"]', 1)
     assert dockerfile_problems(text) == []
+
+
+@needs_dockerfile
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("RUN python -m compileall -q src", "RUN python -m compileall -j 4 src"),
+        ("RUN python -m compileall -q src", "RUN python -m compileall -q src/"),
+        (
+            "RUN uv sync --frozen --no-dev",
+            "RUN --mount=type=image,source=ghcr.io/astral-sh/uv:0.12.13@sha256:" + "0" * 64
+            + ",target=/uv uv sync --frozen --no-dev",
+        ),
+    ],
+)
+def test_the_dockerfile_check_accepts_equivalent_forms(old, new):
+    """거짓 양성 대조군. 같은 일을 다른 모양으로 적은 줄 — 값 있는 옵션, 끝의 `/`, digest 가 붙은 마운트."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert old in text
+    assert dockerfile_problems(text.replace(old, new, 1)) == []
 
 
 def test_a_stage_alias_does_not_hide_an_unpinned_image():
