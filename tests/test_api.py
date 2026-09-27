@@ -960,6 +960,15 @@ def test_an_unknown_path_is_still_404_without_a_content_type():
     assert r.json()["error"]["code"] == "NOT_FOUND"
 
 
+def test_the_app_holds_only_routes_the_content_type_rule_can_see():
+    """JsonBody 는 `APIRoute` 만 본다. FastAPI 0.141 의 `include_router` 는 라우트를 다른 형으로 싸서 넣고,
+    그 안의 `/v1` POST 는 검사를 건너뛴 채 200 이었다 (2026-09-27 리뷰 실측). 라우터를 들이려면 JsonBody 를 먼저 고친다."""
+    from fastapi.routing import APIRoute
+    from starlette.routing import Route
+
+    assert {type(r) for r in api.create_app(_config()).routes} == {APIRoute, Route}
+
+
 @pytest.mark.parametrize("path", ["/v1/status", "/v1/files", "/v1/events/1"])
 def test_a_post_to_a_get_route_is_still_the_routers_answer(path):
     """대상은 경로와 메서드가 **둘 다** 맞는 라우트다 (`Match.FULL`). 경로만 맞는 GET 라우트까지 넣으면

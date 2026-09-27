@@ -575,5 +575,5 @@ def test_the_embedding_client_has_explicit_bounds(monkeypatch):
     assert service._embed(["가"], "not-a-real-key") == [[0.0, 0.0, 0.0]]
     (client,) = built
     assert client.max_retries == service.EMBED_MAX_RETRIES == 0
-    assert client.timeout.read == service.EMBED_TIMEOUT_SECONDS == 10.0
+    assert client.timeout.read == client.timeout.write == client.timeout.pool == service.EMBED_TIMEOUT_SECONDS == 10.0
     assert client.timeout.connect == service.EMBED_CONNECT_SECONDS == 3.0

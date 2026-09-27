@@ -616,7 +616,8 @@ class IngestFailed(Exception):
 # 임베딩 요청 하나의 한계 (D31 이 구현으로 둔 값). SDK 기본값이면 search_docs 요청 하나가 HTTP·MCP 가 나눠 쓰는
 # 작업 스레드를 30분 넘게 잡았고 ingest 는 그동안 프로젝트 락을 쥐었다 (감사 F013). healthcheck 는 3초를 기다린다.
 # **벽시계 상한은 아니다** — 시간은 연결 3초, 그 밖의 읽기·쓰기·풀은 각각 10초의 무응답이다. 바이트를 조금씩
-# 계속 보내는 서버는 막지 못한다. 재시도는 두지 않는다 — SDK 의 재시도는 Retry-After 를 60초까지 기다린다.
+# 계속 보내는 서버는 막지 못한다. 재시도는 두지 않는다 — SDK 의 재시도는 Retry-After 를 120초까지 기다린다
+# (openai 3.6 `MAX_RETRY_AFTER_DELAY`).
 # 백필도 같은 값이다 — 첫 실패에서 멈추고 다음 run 이 잇는다 (D31).
 EMBED_TIMEOUT_SECONDS = 10.0
 EMBED_CONNECT_SECONDS = 3.0

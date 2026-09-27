@@ -109,7 +109,8 @@ def test_api_takes_exactly_the_six_names_and_no_env_file():
     """D16. 표 밖의 변수(`PGHOSTADDR`·`OPENAI_BASE_URL` …)를 api 에서 막는 것은 `environment:` 목록이다.
     `env_file` 을 붙이면 `.env` 의 모든 이름이 들어와도 검사는 초록이었다 (2026-09-27 리뷰)."""
     block = _api_block()
-    assert not any(line.strip().startswith("env_file") for line in block)
+    # `extends:` 와 병합 키(`<<: *common`)는 다른 곳의 `env_file` 을 들인다 — 이 블록만 봐서는 안 보인다.
+    assert not any(line.strip().startswith(("env_file", "extends", "<<")) for line in block)
     start = block.index("    environment:")
     names = set()
     for line in block[start + 1 :]:

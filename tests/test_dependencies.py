@@ -83,17 +83,53 @@ def test_everything_installed_is_locked_at_the_same_version():
     )
 
 
+def _reach(packages: dict[str, list[dict]], start: list[dict]) -> set[str]:
+    """잠금 파일에서 `start` 가 끌어오는 배포 이름 전부. extra(`psycopg[binary]`)도 따라간다.
+    마커는 무시한다 — 어느 플랫폼에서든 끌려오면 든다고 본다(런타임 쪽이 넓어지므로 dev 전용 판정이 좁아지는 쪽이다)."""
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    todo = list(start)
+    while todo:
+        dep = todo.pop()
+        key = (_canon(dep["name"]), tuple(dep.get("extra", ())))
+        if key in seen:
+            continue
+        seen.add(key)
+        for package in packages.get(key[0], []):
+            todo += package.get("dependencies", [])
+            for extra in key[1]:
+                todo += package.get("optional-dependencies", {}).get(extra, [])
+    return {name for name, _ in seen}
+
+
+def _dev_only_modules() -> set[str]:
+    """dev 그룹을 통해서**만** 설치되는 배포의 최상위 모듈. 이름 규칙으로 짐작하지 않고 설치된 메타데이터로 읽는다."""
+    from importlib.metadata import packages_distributions
+
+    data = tomllib.loads(LOCK.read_text(encoding="utf-8"))
+    packages: dict[str, list[dict]] = {}
+    for package in data["package"]:
+        packages.setdefault(_canon(package["name"]), []).append(package)
+    (root,) = packages["sillok"]
+    runtime = _reach(packages, root.get("dependencies", []))
+    dev_only = _reach(packages, root["dev-dependencies"]["dev"]) - runtime
+    return {
+        module
+        for module, dists in packages_distributions().items()
+        if dists and all(_canon(d) in dev_only for d in dists)
+    }
+
+
 def test_the_app_imports_nothing_that_only_the_dev_group_installs():
-    """런타임 이미지는 `--no-dev` 로 굽는다. dev 그룹에만 있는 것을 `src/` 가 import 하면 호스트 검사는 초록이고
+    """런타임 이미지는 `--no-dev` 로 굽는다. dev 그룹으로만 설치되는 것을 `src/` 가 import 하면 호스트 검사는 초록이고
     이미지에서만 죽는다 — `_embed` 가 `httpx.Timeout` 을 쓴 첫 판이 그랬다 (2026-09-27 리뷰, 키가 있는 모든 임베딩).
-    패키지 이름을 모듈 이름으로 읽는다(`-` → `_`). dev 그룹의 둘은 그 규칙대로다 — 규칙 밖의 것을 더하면 여기를 고친다.
+    dev 그룹의 **전이** 의존성(`packaging`·`certifi`·`httpcore` …)도 이미지에 없다 — 그래서 목록은 잠금 파일의 두 닫힘의 차다.
     """
     import ast
-    import re
 
-    groups = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["dependency-groups"]
-    dev_only = {re.match(r"[A-Za-z0-9_.-]+", spec).group(0).lower().replace("-", "_") for spec in groups["dev"]}
-    assert dev_only >= {"pytest", "httpx"}, dev_only  # 대조군 — 읽기가 비면 아래는 언제나 통과한다
+    dev_only = _dev_only_modules()
+    # 대조군 — 닫힘 계산이나 메타데이터 읽기가 비면 아래는 언제나 통과한다
+    assert dev_only >= {"pytest", "httpx", "packaging", "certifi", "httpcore"}, sorted(dev_only)
+    assert not dev_only & {"openai", "fastapi", "psycopg", "mcp", "httpx2", "uvicorn"}, sorted(dev_only)
     found = []
     for path in sorted((ROOT / "src").rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -101,6 +137,14 @@ def test_the_app_imports_nothing_that_only_the_dev_group_installs():
                 names = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 names = [node.module]
+            elif (  # `importlib.import_module("httpx")`·`__import__("httpx")` — 문자열 상수만 읽는다
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", getattr(node.func, "id", None)) in {"import_module", "__import__"}
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                names = [node.args[0].value]
             else:
                 continue
             found += [f"{path.relative_to(ROOT)}:{node.lineno} {n}" for n in names if n.split(".")[0] in dev_only]
