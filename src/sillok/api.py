@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.routing import Route
+from starlette.routing import Match, Route
 
 from . import __version__, service
 from .config import Config
@@ -285,29 +285,26 @@ class JsonBody:
     않고 앱이 직접 본다 — D69 가 되풀이 인자에서 한 것과 같은 판단이다.
 
     **게이트 안쪽이다** — 낯선 Host·토큰 없는 요청은 게이트가 먼저 답한다. 대상은 **등록된** `/v1` POST 라우트이고
-    라우터에서 읽는다 — 경로 접두만 보면 없는 경로가 404 가 아니라 422 가 된다. `/mcp` 는 SDK 가 본다.
+    라우터의 판정(`matches`)을 그대로 쓴다 — 경로 접두만 보면 없는 경로가 404 가 아니라 422 가 되고, 경로 문자열을
+    모아 비교하면 `{name}` 이 든 라우트와 root_path 아래의 요청을 놓친다 (2026-09-27 리뷰 실측). `/mcp` 는 SDK 가 본다.
     BodyLimit 과 같은 이유로 순수 ASGI 이고 봉투를 직접 보낸다.
     """
 
     def __init__(self, app, routes) -> None:
         self.app = app
         self._routes = routes
-        self._paths: frozenset[str] | None = None
 
-    def _json_posts(self) -> frozenset[str]:
-        if self._paths is None:
-            self._paths = frozenset(
-                r.path
-                for r in self._routes()
-                if isinstance(r, APIRoute) and "POST" in r.methods and r.path.startswith("/v1/")
-            )
-        return self._paths
+    def _targeted(self, scope) -> bool:
+        return any(
+            isinstance(r, APIRoute) and r.path.startswith("/v1/") and r.matches(scope)[0] is Match.FULL
+            for r in self._routes()
+        )
 
     async def __call__(self, scope, receive, send) -> None:
         if (
             scope["type"] == "http"
             and scope["method"] == "POST"
-            and scope["path"] in self._json_posts()
+            and self._targeted(scope)
             and not _declares_json(scope["headers"])
         ):
             await error(ErrorCode.VALIDATION, CONTENT_TYPE_MESSAGE)(scope, receive, send)

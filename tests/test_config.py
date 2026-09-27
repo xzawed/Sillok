@@ -89,6 +89,38 @@ def test_env_example_holds_exactly_the_six_names():
     }
 
 
+COMPOSE = Path(__file__).resolve().parents[1] / "docker-compose.yml"
+
+
+def _api_block() -> list[str]:
+    """compose 의 `api:` 서비스 블록. YAML 파서는 의존성이 아니므로 들여쓰기로 자른다."""
+    lines = COMPOSE.read_text(encoding="utf-8").splitlines()
+    start = lines.index("  api:")
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i] and not lines[i].startswith("    ")
+         and not lines[i].lstrip().startswith("#")),
+        len(lines),
+    )
+    return lines[start + 1 : end]
+
+
+@pytest.mark.skipif(not COMPOSE.exists(), reason="test 컨테이너에는 docker-compose.yml 이 없다 — 호스트에서 돈다")
+def test_api_takes_exactly_the_six_names_and_no_env_file():
+    """D16. 표 밖의 변수(`PGHOSTADDR`·`OPENAI_BASE_URL` …)를 api 에서 막는 것은 `environment:` 목록이다.
+    `env_file` 을 붙이면 `.env` 의 모든 이름이 들어와도 검사는 초록이었다 (2026-09-27 리뷰)."""
+    block = _api_block()
+    assert not any(line.strip().startswith("env_file") for line in block)
+    start = block.index("    environment:")
+    names = set()
+    for line in block[start + 1 :]:
+        if line.strip().startswith("#") or not line.strip():
+            continue
+        if not line.startswith("      "):
+            break
+        names.add(line.strip().split(":", 1)[0])
+    assert names == {k for k in _env_example() if not k.startswith("POSTGRES_")}
+
+
 def test_env_example_defaults_match_config():
     """사본의 기본값이 구현과 갈라지면 안 된다. 갈라지면 **사본이 틀린 것**이다 (D16)."""
     env = _env_example()

@@ -547,24 +547,33 @@ def test_a_run_error_is_never_empty(exc):
 
 def test_the_embedding_client_has_explicit_bounds(monkeypatch):
     """SDK 기본값(읽기 600초·재시도 2)이면 search_docs 요청 하나가 작업 스레드를 30분 넘게 잡았다 (감사 F013).
-    값은 구현이다 (D31) — 여기서는 **기본값에 맡기지 않는다**는 것을 잠근다. 네트워크는 쓰지 않는다."""
+    값은 구현이다 (D31) — 여기서는 **기본값에 맡기지 않는다**는 것을 잠근다. 네트워크는 쓰지 않는다.
+
+    **진짜 클라이언트를 만든다** — 생성자를 가짜로 바꾸면 인자의 타입이 런타임 이미지에 있는지를 못 본다.
+    첫 판은 `httpx.Timeout` 을 넘겼고 가짜 생성자 검사는 통과했지만, httpx 는 dev 의존성이라 이미지에서는
+    키가 있는 모든 임베딩이 ModuleNotFoundError 였다 (2026-09-27 리뷰). 그래서 httpx 를 막고 돈다.
+    """
+    import sys
     import types
 
     import openai
 
-    seen: dict = {}
+    monkeypatch.setitem(sys.modules, "httpx", None)
+    built = []
 
-    class Recorder:
+    class Spy(openai.OpenAI):
         def __init__(self, **kwargs):
-            seen.update(kwargs)
+            super().__init__(**kwargs)
+            built.append(self)
             self.embeddings = types.SimpleNamespace(
                 create=lambda model, input: types.SimpleNamespace(
                     data=[types.SimpleNamespace(embedding=[0.0] * 3) for _ in input]
                 )
             )
 
-    monkeypatch.setattr(openai, "OpenAI", Recorder)
+    monkeypatch.setattr(openai, "OpenAI", Spy)
     assert service._embed(["가"], "not-a-real-key") == [[0.0, 0.0, 0.0]]
-    assert seen["max_retries"] == service.EMBED_MAX_RETRIES == 1
-    assert seen["timeout"].read == service.EMBED_TIMEOUT_SECONDS == 10.0
-    assert seen["timeout"].connect == service.EMBED_CONNECT_SECONDS == 3.0
+    (client,) = built
+    assert client.max_retries == service.EMBED_MAX_RETRIES == 0
+    assert client.timeout.read == service.EMBED_TIMEOUT_SECONDS == 10.0
+    assert client.timeout.connect == service.EMBED_CONNECT_SECONDS == 3.0

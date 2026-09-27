@@ -862,7 +862,7 @@ JSON_POSTS = ["/v1/events", "/v1/search/docs", "/v1/search/events", "/v1/docs/pr
 RAW_BODY = b'{"project": "t_api"}'
 
 
-def _post(path: str, headers: dict, content: bytes = RAW_BODY, **overrides):
+def _post(path: str, headers: dict | list, content: bytes = RAW_BODY, **overrides):
     """`content=` 로 보낸다 — `json=` 이면 httpx 가 Content-Type 을 붙여 검사할 것이 사라진다."""
     with TestClient(
         api.create_app(_config(**overrides)), base_url="http://127.0.0.1:8080", raise_server_exceptions=False
@@ -893,6 +893,45 @@ def test_v1_posts_refuse_a_body_that_is_not_declared_json(path, content_type, mo
     assert touched == []
 
 
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [("content-type", "application/json"), ("content-type", "application/json")],
+        [("content-type", "application/json"), ("content-type", "text/plain")],
+        [("content-type", "text/plain"), ("content-type", "application/json")],
+        [("content-type", "application/json, text/plain")],
+    ],
+    ids=["json-twice", "json-then-text", "text-then-json", "joined"],
+)
+def test_a_content_type_that_is_not_exactly_one_json_is_refused(headers):
+    """Content-Type 은 꼭 하나다 — 여럿 중 첫 값이나 끝 값을 고르면 어느 쪽을 믿을지가 구현마다 갈린다."""
+    r = _post("/v1/events", headers)
+    assert r.json() == CT_REJECTED
+
+
+def test_a_route_with_a_path_parameter_is_checked_too():
+    """대상은 라우터가 고른다 — 경로 문자열을 모아 비교하면 `{name}` 이 든 라우트를 놓친다 (2026-09-27 리뷰 실측)."""
+    app = api.create_app(_config())
+
+    @app.post("/v1/t_probe/{name}")
+    def probe(name: str) -> dict:
+        return {"reached": name}
+
+    with TestClient(app, base_url="http://127.0.0.1:8080", raise_server_exceptions=False) as client:
+        r = client.post("/v1/t_probe/x", content=b"x", headers={"content-type": "text/plain"})
+    assert r.json() == CT_REJECTED
+
+
+def test_the_check_holds_under_a_root_path():
+    """프록시가 접두를 붙여 서빙하면 `path` 에 root_path 가 들어 있다. 라우터처럼 그것을 벗기고 봐야 한다."""
+    with TestClient(
+        api.create_app(_config()), base_url="http://127.0.0.1:8080", root_path="/sillok",
+        raise_server_exceptions=False,
+    ) as client:
+        r = client.post("/sillok/v1/events", content=RAW_BODY, headers={"content-type": "text/plain"})
+    assert r.json() == CT_REJECTED
+
+
 @pytest.mark.parametrize("content_type", ["application/json", "application/json; charset=utf-8", "Application/JSON"])
 def test_a_json_body_reaches_the_route(content_type):
     """매개변수와 대소문자는 된다 — 미디어 타입만 본다. 라우트까지 가서 Service 의 필드 검증에 걸린다."""
@@ -921,9 +960,21 @@ def test_an_unknown_path_is_still_404_without_a_content_type():
     assert r.json()["error"]["code"] == "NOT_FOUND"
 
 
-def test_mcp_is_not_checked_by_the_v1_rule():
-    """`/mcp` 의 본문은 SDK 의 전송 계층이 본다 (D43)."""
+@pytest.mark.parametrize("path", ["/v1/status", "/v1/files", "/v1/events/1"])
+def test_a_post_to_a_get_route_is_still_the_routers_answer(path):
+    """대상은 경로와 메서드가 **둘 다** 맞는 라우트다 (`Match.FULL`). 경로만 맞는 GET 라우트까지 넣으면
+    메서드 거절이 본문 타입 거절로 바뀐다 — 고칠 것을 잘못 알려 준다."""
+    r = _post(path, {})
+    assert r.json() == {"ok": False, "error": {"code": "VALIDATION", "message": "Method Not Allowed"}}
+
+
+@pytest.mark.parametrize("content_type", [None, "text/plain"])
+def test_mcp_is_not_checked_by_the_v1_rule(content_type):
+    """`/mcp` 의 본문은 SDK 의 전송 계층이 본다 (D43). **본다는 것도 잠근다** — 문서가 거기에 기대므로
+    SDK 가 타입 없는 본문을 받기 시작하면 여기서 알아야 한다. 거절은 SDK 의 것이라 봉투가 아니다."""
     import json
 
-    r = _post("/mcp", {"accept": MCP_ACCEPT}, content=json.dumps(MCP_BODY).encode())
+    headers = {"accept": MCP_ACCEPT} | ({} if content_type is None else {"content-type": content_type})
+    r = _post("/mcp", headers, content=json.dumps(MCP_BODY).encode())
+    assert r.status_code == 400
     assert CT_REJECTED["error"]["message"] not in r.text

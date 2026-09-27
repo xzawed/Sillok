@@ -20,7 +20,7 @@ sillok = "sillok.cli:main"
 [dependency-groups]
 dev = [
   "pytest>=8.3",
-  # TestClient 가 요구한다. 앱 자체는 httpx 를 쓰지 않는다.
+  # TestClient 가 요구한다. 앱 자체는 httpx 를 쓰지 않는다 — 런타임 이미지에 없다 (tests/test_dependencies.py 가 잠근다).
   "httpx>=0.28",
 ]
 

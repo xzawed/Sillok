@@ -81,3 +81,27 @@ def test_everything_installed_is_locked_at_the_same_version():
         "의존성이 잠금 파일과 갈라졌다 — 이 환경은 낡았다 (D28). "
         "컨테이너면 `docker compose build test`, 호스트면 `uv sync`: " + ", ".join(drift)
     )
+
+
+def test_the_app_imports_nothing_that_only_the_dev_group_installs():
+    """런타임 이미지는 `--no-dev` 로 굽는다. dev 그룹에만 있는 것을 `src/` 가 import 하면 호스트 검사는 초록이고
+    이미지에서만 죽는다 — `_embed` 가 `httpx.Timeout` 을 쓴 첫 판이 그랬다 (2026-09-27 리뷰, 키가 있는 모든 임베딩).
+    패키지 이름을 모듈 이름으로 읽는다(`-` → `_`). dev 그룹의 둘은 그 규칙대로다 — 규칙 밖의 것을 더하면 여기를 고친다.
+    """
+    import ast
+    import re
+
+    groups = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["dependency-groups"]
+    dev_only = {re.match(r"[A-Za-z0-9_.-]+", spec).group(0).lower().replace("-", "_") for spec in groups["dev"]}
+    assert dev_only >= {"pytest", "httpx"}, dev_only  # 대조군 — 읽기가 비면 아래는 언제나 통과한다
+    found = []
+    for path in sorted((ROOT / "src").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names = [node.module]
+            else:
+                continue
+            found += [f"{path.relative_to(ROOT)}:{node.lineno} {n}" for n in names if n.split(".")[0] in dev_only]
+    assert not found, found

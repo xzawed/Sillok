@@ -50,7 +50,7 @@ MCP는 stdio와 Streamable HTTP를 같은 앱에서 제공한다.
 
 | 코드 | HTTP | v1에서 언제 |
 |---|---|---|
-| `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락. 토큰 없는 로컬 모드에서 루프백이 아닌 `Host`·`Origin` — 문구는 고정 `host not allowed` · `origin not allowed` (D67) |
+| `VALIDATION` | 422 | 요청 모델 실패, `save_event` 필수 필드 누락. 토큰 없는 로컬 모드에서 루프백이 아닌 `Host`·`Origin` — 문구는 고정 `host not allowed` · `origin not allowed` (D67). `/v1` POST 의 본문이 JSON 으로 선언되지 않을 때 — 고정 `content type must be application/json` (D67) |
 | `UNAUTHORIZED` | 401 | D7 게이트 — `SILLOK_BEARER_TOKEN`이 설정됐는데 헤더가 없거나 다를 때 |
 | `NOT_FOUND` | 404 | **하나를 지목한 조회**에 답이 없을 때. 집합 질의는 404가 아니라 빈 결과다 (D35) |
 | `CONFLICT` | 409 | 발신자가 **둘**이다. ① 같은 project 의 ingest 가 이미 돌고 있다 (D32) — `message`는 고정 문구 `ingest already running for this project`. ② `save_doc` 의 `base_hash` 가 현재 내용과 다르다 (D38). **①의 고정 문구를 ②에 쓰지 않는다** |
