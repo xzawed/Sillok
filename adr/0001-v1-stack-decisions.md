@@ -77,6 +77,16 @@ module: null
 | `SILLOK_BEARER_TOKEN` | 빈 값 | 빈 값이면 D7의 로컬 무인증. 값이 있으면 `Authorization: Bearer` 요구 |
 | `OPENAI_API_KEY` | 빈 값 | 빈 값이면 D2대로 `embedding` NULL, `tsv`만. 레포에 넣지 않는다 |
 
+**위 표 밖의 환경변수도 의존성을 통해 동작을 바꾼다** (2026-09-27 감사 F012). 예를 들어 libpq 는 `PG*`(`PGHOSTADDR` 는
+`DATABASE_URL` 의 host 를 이기고 `PGOPTIONS` 는 세션 설정을 바꾼다), OpenAI SDK 는 `OPENAI_BASE_URL`·`OPENAI_ORG_ID`,
+HTTP 층은 `HTTP(S)_PROXY`·`SSL_CERT_FILE` 을 읽는다 — 목록은 전부가 아니다. 앞의 둘은 키를 다른 host 로 보낼 수 있다.
+**`api` 컨테이너가 그것을 막는 것은 compose 의 `environment:` 목록이다** — 호스트의 환경을 물려받지 않는다.
+그래서 `api` 에 `env_file` 을 붙이지 않는다 (`tests/test_config.py` 가 잠근다).
+호스트의 `uv run sillok …`, `compose exec -e …`, 목록을 넓힌 오버라이드는 이 변수들을 다시 들인다.
+Docker 클라이언트 설정(`~/.docker/config.json` 의 `proxies`)도 `environment:` 와 무관하게 `HTTP_PROXY`·`NO_PROXY` 를
+`api` 에 넣는다 (2026-09-27 실측).
+코드에서 막지 않는다 — 프록시·CA 가 필요한 망을 깬다.
+
 Compose의 `db`는 앱 변수가 아니라 이미지 계약인 `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`를 쓴다.
 `api`는 `DATABASE_URL`을 `@db:5432`로, `SILLOK_HOST`를 `0.0.0.0`으로 덮는다 — 그래야 호스트의 `127.0.0.1:8080`에 닿는다.
 
@@ -1132,6 +1142,11 @@ INSERT INTO probe (v) VALUES (%s::vector)   -- v 는 "[0.5,0.25,0,...]" 문자�
 `kb_status` 가 남은 수를 상시 보여 준다. 폭주는 위의 "첫 실패에서 멈춘다"가 막는다.
 상한이 필요해지는 첫 신호는 D9 밖 경로를 색인하게 될 때이고 그것 자체가 D9 개정이다. 그때 함께 정한다.
 배치 크기와 재시도 백오프는 계약이 아니라 구현이다. **순서는 계약이다**(위).
+→ **2026-09-27**: 그 구현의 값을 적는다 — 임베딩 클라이언트는 **연결 3초, 읽기·쓰기·풀 각 10초 무응답, 재시도 없음**이다.
+SDK 기본값(읽기 600초·재시도 2)이면 `search_docs` 요청 하나가 HTTP·MCP 가 나눠 쓰는 작업 스레드를 30분 넘게 잡고,
+ingest 는 그동안 프로젝트 락을 쥔다 (감사 F013). 재시도를 두지 않는 것은 SDK 의 재시도가 `Retry-After` 를 120초까지
+기다리기 때문이고(openai 3.6 `MAX_RETRY_AFTER_DELAY`), 백필은 어차피 첫 실패에서 멈추고 다음 run 이 잇는다 — 같은 값을 쓴다.
+**벽시계 상한은 아니다** — 바이트를 조금씩 계속 보내는 서버는 이 값으로 막지 못한다.
 
 ### 계약 문구를 고친다
 
@@ -3288,6 +3303,14 @@ SQL 이 거르는 단위는 **필터를 통과한 청크의 비NULL 임베딩**�
 D46 이 두 얼굴을 같은 Service 로 묶었으므로 D43 의 보호는 `/v1` 로 우회된다.
 단순 요청 CSRF 는 이미 막혀 있었다 — 비JSON 본문은 422 이고 CORS 헤더는 없다.
 남은 길은 리바인딩 뒤의 **같은 출처** 하나이고, 그 경계가 `Host` 다.
+
+→ **2026-09-27**: 위의 422 중 **Content-Type 이 없는 본문**은 FastAPI 0.132 의 기본값(`strict_content_type`)에만
+기대고 있었다. `pyproject` 의 하한 0.115 는 그 기본값이 없는 판을 허용하고, 그 성질을 잠근 검사도 없었다 (감사 F105).
+이제 앱이 직접 본다 — `/v1` 의 POST 는 Content-Type 헤더가 **정확히 하나**이고 그 미디어 타입이 `application/json`
+이어야 한다(`charset` 같은 매개변수는 된다). 아니면 — 없거나, 여럿이거나, 다른 타입이면 — 게이트 **다음에**
+`content type must be application/json` 으로 거절한다. 문구는 고정이다.
+대상은 라우터가 `/v1` POST 로 **맞추는** 요청이다 — 경로 매개변수가 든 라우트와 root_path 아래의 요청도 들고,
+없는 경로는 여전히 404 다. `/mcp` 는 보지 않는다 — SDK 의 전송 계층이 본다(봉투가 아닌 400).
 
 **브라우저 경계이지 네트워크 경계가 아니다.** 모든 인터페이스에 연 포트로 `Host: 127.0.0.1` 을 붙이는
 비브라우저 클라이언트는 통과한다. 외부에 열 때의 경계는 여전히 토큰이다 (D7).
